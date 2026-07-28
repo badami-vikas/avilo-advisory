@@ -1,0 +1,116 @@
+@import "tailwindcss";
+
+/*
+  Design tokens ported from the v9 prototype so the Report view keeps its established
+  look, plus the neutral chrome of the reference table screenshot.
+*/
+@theme {
+  --color-ink: #101828;
+  --color-ink-muted: #667085;
+  --color-ink-faint: #98a2b3;
+  --color-line: #e4e7ec;
+  --color-line-soft: #f2f4f7;
+  --color-surface: #ffffff;
+  --color-canvas: #fbfcfd;
+  --color-accent: #1570ef;
+  --color-accent-soft: #eff8ff;
+  --color-flag: #d92d20;
+  --color-flag-soft: #fef3f2;
+  --color-positive: #067647;
+  --color-warn: #b54708;
+
+  --font-sans: ui-sans-serif, -apple-system, "Segoe UI", Roboto, Helvetica, Arial,
+    sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  font-family: var(--font-sans);
+  color: var(--color-ink);
+  background: var(--color-canvas);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Tabular figures everywhere money appears — columns must align. */
+.num {
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+  Red is the only feedback flag (relationship-os ui-architecture.md). Missing required
+  data and formula errors use it; nothing else in the chrome does.
+*/
+.flag-missing {
+  color: var(--color-flag);
+  background: var(--color-flag-soft);
+}
+
+/* ------------------------------------------------------------------ print */
+/*
+  PDF export is the browser's own print-to-PDF, which produces vector output. The v9
+  session established that the html2canvas raster pipeline gave unacceptable quality.
+
+  Everything interactive disappears: toolbars, the upload dialog, editors, the formula
+  panel, and — as specified — the per-chart graph/table toggles.
+*/
+@media print {
+  @page {
+    size: letter portrait;
+    margin: 12mm 10mm;
+  }
+
+  body {
+    background: #fff;
+  }
+
+  /*
+    Hide chrome by intent, not by element type.
+
+    An earlier version hid every `button`, which also removed the profitability and
+    days-cash cards from the PDF — they are buttons so that double-click can open the
+    editor. Interactive chrome is marked `.no-print` instead; content that happens to
+    be focusable still prints.
+  */
+  .no-print,
+  .chart-toggle,
+  nav,
+  [role="dialog"] {
+    display: none !important;
+  }
+
+  /* A card that is a button must not look like one on paper. */
+  button {
+    background: transparent !important;
+    cursor: default;
+  }
+
+  .print-only {
+    display: block !important;
+  }
+
+  .block-card {
+    break-inside: avoid;
+    page-break-inside: avoid;
+    box-shadow: none !important;
+    border: 1px solid var(--color-line);
+  }
+
+  .print-break-before {
+    break-before: page;
+  }
+
+  a {
+    text-decoration: none;
+    color: inherit;
+  }
+}
+
+.print-only {
+  display: none;
+}
