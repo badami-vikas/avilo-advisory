@@ -76,16 +76,40 @@ export function findColumnMap(grid: Grid, scanRows = 30): ColumnMap | null {
  */
 const STRUCTURAL_ROW = /^(income|revenue|expenses?|operating expenses?|cost of goods sold|cost of sales|other income|other expenses?|gross profit|net income|net operating income|net other income)$/i;
 
+/** Section headers that switch the parser's context as it walks down the sheet. */
+const SECTION_HEADERS: { pattern: RegExp; section: PLSection }[] = [
+  { pattern: /^(income|revenue|operating income)$/i, section: "income" },
+  { pattern: /^(cost of goods sold|cost of sales|cogs)$/i, section: "cogs" },
+  { pattern: /^(expenses|operating expenses|overhead)$/i, section: "expense" },
+  { pattern: /^other income$/i, section: "other" },
+  { pattern: /^other expenses?$/i, section: "other" },
+];
+
+export type PLSection = "income" | "cogs" | "expense" | "other" | null;
+
+/** A detail line under a section, e.g. one expense account. */
+export interface PLDetailLine {
+  label: string;
+  section: Exclude<PLSection, null>;
+  /** Amount per period. */
+  amounts: { period: Period; value: number }[];
+}
+
 export interface ParsePLOptions {
   resolveLabel: LabelResolver;
   /** Restrict extraction to these periods. Omit to take every period in the file. */
   onlyPeriods?: Period[];
 }
 
+export interface PLParseResult extends ParseResult {
+  /** Detail lines by section — what the Top Expenses panel renders. */
+  detailLines: PLDetailLine[];
+}
+
 export function parseProfitAndLoss(
   grid: Grid,
   options: ParsePLOptions,
-): ParseResult {
+): PLParseResult {
   const warnings: string[] = [];
   const columnMap = findColumnMap(grid);
 
@@ -95,6 +119,7 @@ export function parseProfitAndLoss(
       periods: [],
       facts: [],
       unmatched: [],
+      detailLines: [],
       ignoredColumns: [],
       warnings: [
         "No period columns found. The header row could not be identified — check that the export includes month columns.",
@@ -117,7 +142,12 @@ export function parseProfitAndLoss(
   const headerRowCells = grid[columnMap.headerRow] ?? [];
   const facts: ExtractedFact[] = [];
   const unmatchedByLabel = new Map<string, UnmatchedRow>();
+  const detailLines: PLDetailLine[] = [];
   const seen = new Set<string>();
+
+  // Tracks which section of the statement the walker is currently inside, so a detail
+  // line can be attributed to Income, COGS or Expenses without matching its own label.
+  let section: PLSection = null;
 
   for (let r = columnMap.headerRow + 1; r < grid.length; r += 1) {
     const row = grid[r];
@@ -128,6 +158,11 @@ export function parseProfitAndLoss(
 
     const normalized = normalizeLabel(label);
     if (normalized === "") continue;
+
+    const sectionHeader = SECTION_HEADERS.find((s) => s.pattern.test(normalized));
+    if (sectionHeader) section = sectionHeader.section;
+    // A "Total for X" row closes its section.
+    else if (/^total for /.test(normalized) || /^total /.test(normalized)) section = null;
 
     const accountId = options.resolveLabel(normalized, "profit_and_loss");
 
@@ -145,6 +180,17 @@ export function parseProfitAndLoss(
     }
 
     if (values.length === 0) continue;
+
+    // Detail lines are captured regardless of whether the row also maps to a canonical
+    // account: "Depreciation & Amortization" is both a mapped account and an expense
+    // line the Top Expenses panel needs to know about in order to exclude it.
+    if (section !== null && !sectionHeader) {
+      detailLines.push({
+        label,
+        section,
+        amounts: values.map(({ period, value }) => ({ period, value })),
+      });
+    }
 
     if (accountId) {
       for (const entry of values) {
@@ -188,6 +234,7 @@ export function parseProfitAndLoss(
     periods,
     facts,
     unmatched: [...unmatchedByLabel.values()],
+    detailLines,
     ignoredColumns: columnMap.ignored,
     warnings,
   };

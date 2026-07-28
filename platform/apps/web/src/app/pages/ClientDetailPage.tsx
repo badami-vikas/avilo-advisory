@@ -8,7 +8,13 @@ import { Block, Button, EmptyState, Spinner } from "../components/ui.js";
 import { ReportView } from "../components/ReportView.js";
 import { RawDataView } from "../components/RawDataView.js";
 import { UploadDialog } from "../components/UploadDialog.js";
-import type { ClientRecord, FormulaRow, PeriodReport, SeriesPoint } from "../types.js";
+import type {
+  ClientRecord,
+  DetailByKind,
+  FormulaRow,
+  PeriodReport,
+  SeriesPoint,
+} from "../types.js";
 
 const CHART_IDS = ["pl.revenue", "net_operating_income", "noi_margin_pct"];
 
@@ -21,6 +27,10 @@ export function ClientDetailPage() {
   const [period, setPeriod] = useState<string | null>(null);
   const [report, setReport] = useState<PeriodReport | null>(null);
   const [series, setSeries] = useState<SeriesPoint[]>([]);
+  const [detail, setDetail] = useState<DetailByKind>({});
+  const [printRange, setPrintRange] = useState<{ start: string; end: string } | null>(
+    null,
+  );
   const [formulas, setFormulas] = useState<FormulaRow[]>([]);
   const [mode, setMode] = useState<"report" | "raw">("report");
   const [uploading, setUploading] = useState(false);
@@ -44,25 +54,27 @@ export function ClientDetailPage() {
     if (!period) {
       setReport(null);
       setSeries([]);
+      setDetail({});
       return;
     }
-    const [periodReport, allPeriods] = await Promise.all([
+    const [periodReport, allPeriods, detailRows] = await Promise.all([
       api.report.period.query({ clientId, period }),
       api.report.periods.query({ clientId }),
+      api.report.detail.query({ clientId, period }),
     ]);
     setReport(periodReport);
+    setDetail(detailRows);
+
+    // The chart covers the export range when one is chosen, otherwise everything.
     const sorted = [...allPeriods].sort();
     if (sorted.length > 0) {
+      const start = printRange?.start ?? sorted[0]!;
+      const end = printRange?.end ?? sorted[sorted.length - 1]!;
       setSeries(
-        await api.report.series.query({
-          clientId,
-          start: sorted[0]!,
-          end: sorted[sorted.length - 1]!,
-          ids: CHART_IDS,
-        }),
+        await api.report.series.query({ clientId, start, end, ids: CHART_IDS }),
       );
     }
-  }, [clientId, period]);
+  }, [clientId, period, printRange]);
 
   useEffect(() => {
     void loadShell();
@@ -80,6 +92,22 @@ export function ClientDetailPage() {
       setSearchParams(searchParams, { replace: true });
     }
   }, [report, searchParams, setSearchParams]);
+
+  /**
+   * Print only once the chosen range has actually been applied to the charts.
+   *
+   * Printing immediately would export whatever range happened to be on screen. The
+   * timer restarts whenever `series` changes, so it fires after the data settles rather
+   * than after a fixed guess.
+   */
+  useEffect(() => {
+    if (!printRange) return;
+    const timer = setTimeout(() => {
+      window.print();
+      setPrintRange(null);
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [printRange, series]);
 
   const refresh = useCallback(async () => {
     await Promise.all([loadShell(), loadReport()]);
@@ -237,6 +265,12 @@ export function ClientDetailPage() {
           clientName={client.name}
           report={report}
           series={series}
+          detail={detail}
+          rangeLabel={
+            printRange
+              ? `${formatPeriod(printRange.start)} – ${formatPeriod(printRange.end)}`
+              : null
+          }
           onSetMetricValue={(id, raw) => setOverride("metric", id, raw)}
         />
       ) : (
@@ -267,6 +301,12 @@ export function ClientDetailPage() {
         <ExportDialog
           clientId={clientId}
           onClose={() => setExporting(false)}
+          onPrint={(range) => {
+            // Apply the range to the charts first, then print, then restore — so the
+            // exported PDF shows exactly the period the user asked for.
+            setExporting(false);
+            setPrintRange(range);
+          }}
         />
       ) : null}
     </div>
@@ -284,9 +324,11 @@ export function ClientDetailPage() {
 function ExportDialog({
   clientId,
   onClose,
+  onPrint,
 }: {
   clientId: string;
   onClose: () => void;
+  onPrint: (range: { start: string; end: string }) => void;
 }) {
   const [range, setRange] = useState<{ label: string; start: string; end: string } | null>(
     null,
@@ -366,11 +408,8 @@ function ExportDialog({
           <Button onClick={onClose}>Cancel</Button>
           <Button
             variant="primary"
-            onClick={() => {
-              onClose();
-              // Let the dialog unmount before the print stylesheet applies.
-              setTimeout(() => window.print(), 80);
-            }}
+            disabled={!start || !end || start > end}
+            onClick={() => onPrint({ start, end })}
           >
             <Download size={14} />
             Print to PDF

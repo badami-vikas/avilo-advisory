@@ -163,6 +163,35 @@ const reportRouter = router({
       buildSeries(input.clientId, input.start, input.end, input.ids),
     ),
 
+  /**
+   * Entity-level detail for one period: customers owing money, vendors owed, expense
+   * lines, top customers, referral partners.
+   */
+  detail: procedure
+    .input(z.object({ clientId: z.string(), period: periodSchema }))
+    .query(({ input }) => {
+      const db = getDb();
+      const rows = db
+        .select()
+        .from(schema.detailRows)
+        .where(
+          and(
+            eq(schema.detailRows.clientId, input.clientId),
+            eq(schema.detailRows.period, input.period),
+          ),
+        )
+        .all();
+
+      const byKind: Record<string, typeof rows> = {};
+      for (const row of rows) {
+        (byKind[row.kind] ??= []).push(row);
+      }
+      for (const list of Object.values(byKind)) {
+        list.sort((a, b) => Math.abs(b.value) - Math.abs(a.value));
+      }
+      return byKind;
+    }),
+
   /** Default export range: current financial year to date, per the client's FY start. */
   defaultExportRange: procedure
     .input(z.object({ clientId: z.string() }))

@@ -145,6 +145,52 @@ export const facts = sqliteTable(
   ],
 );
 
+/* ------------------------------------------------------------ detail rows */
+
+/**
+ * Entity-level detail: one row per customer, vendor, job or referral partner.
+ *
+ * The fact store answers "what was overhead in October". It cannot answer "which five
+ * customers owe the most", because that is a list, not a scalar. Rather than bend the
+ * fact store into holding named rows — which would make every account query filter on a
+ * label — detail lives here and is joined only by the sections that need it.
+ */
+export const detailRows = sqliteTable(
+  "detail_rows",
+  {
+    id: text("id").primaryKey(),
+    clientId: text("client_id")
+      .notNull()
+      .references(() => clients.id, { onDelete: "cascade" }),
+    period: text("period").notNull(),
+    /** ar_customer | ap_vendor | customer_sales | referral_partner | expense_line */
+    kind: text("kind").notNull(),
+    /** Customer, vendor, partner or expense-line name. */
+    label: text("label").notNull(),
+    value: real("value").notNull(),
+    /** Ageing bucket for ar_customer / ap_vendor: current | 1_30 | 31_60 | 61_90 | 91_plus */
+    bucket: text("bucket"),
+    /** Secondary measure, e.g. job count for a customer. */
+    count: real("count"),
+    sourceFileId: text("source_file_id").references(() => sourceFiles.id, {
+      onDelete: "set null",
+    }),
+    createdAt: text("created_at").notNull().default(now),
+  },
+  (t) => [
+    index("detail_rows_lookup_idx").on(t.clientId, t.period, t.kind),
+    uniqueIndex("detail_rows_unique").on(
+      t.clientId,
+      t.period,
+      t.kind,
+      t.label,
+      t.bucket,
+    ),
+  ],
+);
+
+export type DetailRow = typeof detailRows.$inferSelect;
+
 /* ----------------------------------------------------------- label mappings */
 
 /**

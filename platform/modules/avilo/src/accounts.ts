@@ -121,6 +121,106 @@ export const CANONICAL_ACCOUNTS: AccountDef[] = [
     sortOrder: 160,
   },
 
+  // --- A/R ageing buckets
+  {
+    id: "ar.current",
+    label: "A/R current",
+    statement: "ar_aging",
+    role: "total",
+    unit: "currency",
+    sortOrder: 310,
+  },
+  {
+    id: "ar.1_30",
+    label: "A/R 1–30 days",
+    statement: "ar_aging",
+    role: "total",
+    unit: "currency",
+    sortOrder: 320,
+  },
+  {
+    id: "ar.31_60",
+    label: "A/R 31–60 days",
+    statement: "ar_aging",
+    role: "total",
+    unit: "currency",
+    sortOrder: 330,
+  },
+  {
+    id: "ar.61_90",
+    label: "A/R 61–90 days",
+    statement: "ar_aging",
+    role: "total",
+    unit: "currency",
+    sortOrder: 340,
+  },
+  {
+    id: "ar.91_plus",
+    label: "A/R 91+ days",
+    statement: "ar_aging",
+    role: "total",
+    unit: "currency",
+    sortOrder: 350,
+  },
+  {
+    id: "ar.total",
+    label: "Total accounts receivable (ageing)",
+    statement: "ar_aging",
+    role: "total",
+    unit: "currency",
+    sortOrder: 360,
+  },
+
+  // --- A/P ageing buckets
+  {
+    id: "ap.current",
+    label: "A/P current",
+    statement: "ap_aging",
+    role: "total",
+    unit: "currency",
+    sortOrder: 410,
+  },
+  {
+    id: "ap.1_30",
+    label: "A/P 1–30 days",
+    statement: "ap_aging",
+    role: "total",
+    unit: "currency",
+    sortOrder: 420,
+  },
+  {
+    id: "ap.31_60",
+    label: "A/P 31–60 days",
+    statement: "ap_aging",
+    role: "total",
+    unit: "currency",
+    sortOrder: 430,
+  },
+  {
+    id: "ap.61_90",
+    label: "A/P 61–90 days",
+    statement: "ap_aging",
+    role: "total",
+    unit: "currency",
+    sortOrder: 440,
+  },
+  {
+    id: "ap.91_plus",
+    label: "A/P 91+ days",
+    statement: "ap_aging",
+    role: "total",
+    unit: "currency",
+    sortOrder: 450,
+  },
+  {
+    id: "ap.total",
+    label: "Total accounts payable (ageing)",
+    statement: "ap_aging",
+    role: "total",
+    unit: "currency",
+    sortOrder: 460,
+  },
+
   // --- Operational
   {
     id: "ops.job_count",
@@ -128,9 +228,50 @@ export const CANONICAL_ACCOUNTS: AccountDef[] = [
     statement: "sales_by_customer",
     role: "total",
     unit: "count",
-    sortOrder: 210,
+    description:
+      "Inferred as the number of distinct customers billed in the period unless the export carries an explicit job count.",
+    sortOrder: 510,
+  },
+  {
+    id: "ops.customer_count",
+    label: "Customers billed",
+    statement: "sales_by_customer",
+    role: "total",
+    unit: "count",
+    sortOrder: 520,
+  },
+  {
+    id: "ops.referral_total",
+    label: "Referred revenue (last 90 days)",
+    statement: "referral",
+    role: "total",
+    unit: "currency",
+    sortOrder: 610,
   },
 ];
+
+/** The ageing buckets, in the order QuickBooks prints them. */
+export const AGING_BUCKETS = [
+  { id: "current", label: "Current", patterns: [/^current$/i, /^not (yet )?due$/i] },
+  { id: "1_30", label: "1–30 days", patterns: [/^1\s*[-–]\s*30$/, /^1\s*[-–]\s*30 days$/i] },
+  { id: "31_60", label: "31–60 days", patterns: [/^31\s*[-–]\s*60$/, /^31\s*[-–]\s*60 days$/i] },
+  { id: "61_90", label: "61–90 days", patterns: [/^61\s*[-–]\s*90$/, /^61\s*[-–]\s*90 days$/i] },
+  {
+    id: "91_plus",
+    label: "91+ days",
+    patterns: [/^91/, /over 90/i, /91 and over/i, /^>\s*90$/],
+  },
+] as const;
+
+export type AgingBucketId = (typeof AGING_BUCKETS)[number]["id"];
+
+export function matchAgingBucket(header: string): AgingBucketId | null {
+  const text = header.trim();
+  for (const bucket of AGING_BUCKETS) {
+    if (bucket.patterns.some((p) => p.test(text))) return bucket.id;
+  }
+  return null;
+}
 
 export const ACCOUNTS_BY_ID = new Map(CANONICAL_ACCOUNTS.map((a) => [a.id, a]));
 

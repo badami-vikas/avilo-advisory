@@ -5,8 +5,14 @@ import { Block } from "./ui.js";
 import { Tip } from "./Tooltip.js";
 import { InlineEditor } from "./DataTable.js";
 import { ChartBlock, type ChartPoint } from "./ChartBlock.js";
+import {
+  AgingBlock,
+  ReferralBlock,
+  TopCustomersBlock,
+  TopExpensesBlock,
+} from "./DetailSections.js";
 import { byUnit, money } from "../../lib/format.js";
-import type { PeriodReport, SeriesPoint } from "../types.js";
+import type { DetailByKind, PeriodReport, SeriesPoint } from "../types.js";
 
 /**
  * The Report view: the rendered dashboard, composed of separated visual blocks.
@@ -18,11 +24,16 @@ export function ReportView({
   clientName,
   report,
   series,
+  detail,
+  rangeLabel,
   onSetMetricValue,
 }: {
   clientName: string;
   report: PeriodReport;
   series: SeriesPoint[];
+  detail: DetailByKind;
+  /** Set only while exporting: the period range the PDF covers. */
+  rangeLabel?: string | null;
   onSetMetricValue: (metricId: string, raw: string) => Promise<void>;
 }) {
   const [editing, setEditing] = useState<string | null>(null);
@@ -92,6 +103,11 @@ export function ReportView({
         <p className="text-[12px] text-ink-muted">
           Monthly business snapshot · {report.periodLabel} · Avilo Advisory
         </p>
+        {rangeLabel ? (
+          <p className="text-[11.5px] text-ink-faint">
+            Trend data covers {rangeLabel}
+          </p>
+        ) : null}
       </div>
 
       {report.missingRequired.length > 0 ? (
@@ -221,6 +237,115 @@ export function ReportView({
           <MetricCard id="days_cash_on_hand" />
         </div>
       </Block>
+
+      {/* -------------------------------------------------- Phase 2 sections */}
+      <TopExpensesBlock rows={detail["pl_expense"] ?? []} />
+
+      <AgingBlock
+        title="Who owes you money"
+        subtitle="Outstanding customer balances by ageing bucket"
+        rows={detail["ar_customer"] ?? []}
+        reportName="A/R Ageing Summary"
+        entityNoun="Customer"
+      />
+
+      <AgingBlock
+        title="What you owe"
+        subtitle="Outstanding vendor balances by ageing bucket"
+        rows={detail["ap_vendor"] ?? []}
+        reportName="A/P Ageing Summary"
+        entityNoun="Vendor"
+      />
+
+      <div className="print-break-before">
+        <TopCustomersBlock rows={detail["customer_sales"] ?? []} />
+      </div>
+
+      {/*
+        Job performance is derived from the Sales by Customer export, which covers the
+        last twelve months — not the reporting month. Labelling these "this month" would
+        put a twelve-month job count next to a one-month revenue figure and invite the
+        reader to divide one by the other.
+      */}
+      <Block
+        title="Job performance"
+        subtitle="From the Sales by Customer export — last 12 months"
+      >
+        <div className="grid grid-cols-1 gap-px bg-line-soft sm:grid-cols-4">
+          {(() => {
+            const jobs = account("ops.job_count")?.value ?? null;
+            const customers = account("ops.customer_count")?.value ?? null;
+            const salesRows = detail["customer_sales"] ?? [];
+            const salesTotal =
+              salesRows.length > 0
+                ? salesRows.reduce((sum, row) => sum + row.value, 0)
+                : null;
+
+            const cards: {
+              label: string;
+              value: string;
+              tip: string;
+              missing: boolean;
+            }[] = [
+              {
+                label: "Jobs (12 mo)",
+                value: jobs === null ? "—" : byUnit(jobs, "count"),
+                tip:
+                  jobs === null
+                    ? "The Sales by Customer export carried no job or transaction count column, so this was not inferred. Enter it in Raw data if you track it elsewhere."
+                    : "Summed from the export's own transaction count column",
+                missing: jobs === null,
+              },
+              {
+                label: "Customers billed (12 mo)",
+                value: customers === null ? "—" : byUnit(customers, "count"),
+                tip: "Distinct customers appearing in the Sales by Customer export",
+                missing: customers === null,
+              },
+              {
+                label: "Avg revenue / customer",
+                value:
+                  salesTotal !== null && customers !== null && customers > 0
+                    ? money(salesTotal / customers)
+                    : "—",
+                tip: "Twelve-month revenue divided by customers billed over the same twelve months",
+                missing: salesTotal === null || customers === null,
+              },
+              {
+                label: "Avg revenue / job",
+                value:
+                  salesTotal !== null && jobs !== null && jobs > 0
+                    ? money(salesTotal / jobs)
+                    : "—",
+                tip:
+                  jobs === null
+                    ? "Needs a job count, which this export did not provide"
+                    : "Twelve-month revenue divided by jobs over the same twelve months",
+                missing: salesTotal === null || jobs === null,
+              },
+            ];
+
+            return cards.map((card) => (
+              <div key={card.label} className="bg-surface px-5 py-4">
+                <p className="text-[11px] font-medium uppercase tracking-[0.06em] text-ink-faint">
+                  {card.label}
+                </p>
+                <Tip content={card.tip}>
+                  <p
+                    className={`num mt-1 text-[21px] font-semibold tracking-tight ${
+                      card.missing ? "text-ink-faint" : "text-ink"
+                    }`}
+                  >
+                    {card.value}
+                  </p>
+                </Tip>
+              </div>
+            ));
+          })()}
+        </div>
+      </Block>
+
+      <ReferralBlock rows={detail["referral_partner"] ?? []} />
     </div>
   );
 }

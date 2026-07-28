@@ -6,3 +6,5 @@ export type FormulaRow = Awaited<ReturnType<typeof api.formulas.list.query>>[num
 export type ClientRecord = Awaited<ReturnType<typeof api.clients.get.query>>;
 export type AccountCell = PeriodReport["accounts"][number];
 export type MetricCell = PeriodReport["metrics"][number];
+export type DetailByKind = Awaited<ReturnType<typeof api.report.detail.query>>;
+export type DetailRow = DetailByKind[string][number];

@@ -5,6 +5,10 @@ import { and, eq } from "drizzle-orm";
 
 import {
   classifyGrid,
+  findAsOfPeriod,
+  parseAging,
+  parseBalanceSheet,
+  parseEntityReport,
   parseProfitAndLoss,
   primarySheet,
   readCsv,
@@ -13,6 +17,7 @@ import {
   type Classification,
   type Grid,
   type ParseResult,
+  type Period,
   type ReportType,
 } from "@avilo/module";
 import { getDb, newId, nowIso, schema } from "../db.js";
@@ -139,9 +144,10 @@ export function stageFile(
   }
 
   const classification = classifyGrid({ filename, grid });
-  const preview = classification.reportType
+  const parsed = classification.reportType
     ? previewParse(clientId, classification.reportType, grid)
     : null;
+  const preview = parsed?.result ?? null;
 
   const record = {
     id: sourceFileId,
@@ -168,22 +174,150 @@ export function stageFile(
   return { sourceFileId, filename, classification, preview };
 }
 
+/** Detail rows a parse produced, ready for the detail_rows table. */
+export interface ParsedDetail {
+  kind: string;
+  label: string;
+  value: number;
+  bucket: string | null;
+  count: number | null;
+  period: string;
+}
+
+export interface ParsedFile {
+  result: ParseResult;
+  details: ParsedDetail[];
+}
+
+/**
+ * Snapshot reports (balance sheet, ageing, referral) have no month columns, so their
+ * period comes from the report header. When that is missing we fall back to the latest
+ * period the client already has data for, and say so — writing a snapshot against the
+ * wrong month is worse than refusing.
+ */
+function snapshotPeriod(clientId: string, grid: Grid): Period | null {
+  const explicit = findAsOfPeriod(grid);
+  if (explicit) return explicit;
+
+  const db = getDb();
+  const rows = db
+    .selectDistinct({ period: schema.facts.period })
+    .from(schema.facts)
+    .where(eq(schema.facts.clientId, clientId))
+    .all();
+  return (rows.map((r) => r.period).sort().reverse()[0] ?? null) as Period | null;
+}
+
 export function previewParse(
   clientId: string,
   reportType: ReportType,
   grid: Grid,
-): ParseResult | null {
+): ParsedFile | null {
   const resolveLabel = buildResolver(clientId);
+
   if (reportType === "profit_and_loss") {
-    return parseProfitAndLoss(grid, { resolveLabel });
+    const result = parseProfitAndLoss(grid, { resolveLabel });
+    const details: ParsedDetail[] = [];
+    for (const line of result.detailLines) {
+      for (const amount of line.amounts) {
+        details.push({
+          kind: `pl_${line.section}`,
+          label: line.label,
+          value: amount.value,
+          bucket: null,
+          count: null,
+          period: amount.period,
+        });
+      }
+    }
+    return { result, details };
   }
-  // Phase 2 wires the remaining five parsers. Returning null keeps the review screen
-  // honest about what this build can and cannot ingest.
+
+  if (reportType === "balance_sheet") {
+    const fallback = snapshotPeriod(clientId, grid) ?? undefined;
+    return {
+      result: parseBalanceSheet(grid, { resolveLabel, fallbackPeriod: fallback }),
+      details: [],
+    };
+  }
+
+  if (reportType === "ar_aging" || reportType === "ap_aging") {
+    const period = snapshotPeriod(clientId, grid);
+    if (!period) {
+      return {
+        result: {
+          reportType,
+          periods: [],
+          facts: [],
+          unmatched: [],
+          ignoredColumns: [],
+          warnings: [
+            "This ageing report carries no date, and this client has no other data to date it against. Import a Profit & Loss or Balance Sheet first.",
+          ],
+        },
+        details: [],
+      };
+    }
+    const parsed = parseAging(grid, { period, reportType });
+    return {
+      result: parsed,
+      details: parsed.entities.map((entity) => ({
+        kind: reportType === "ar_aging" ? "ar_customer" : "ap_vendor",
+        label: entity.label,
+        value: entity.total,
+        bucket: entity.bucket,
+        count: null,
+        period,
+      })),
+    };
+  }
+
+  if (reportType === "sales_by_customer_l12m" || reportType === "referral_l90d") {
+    const period = snapshotPeriod(clientId, grid);
+    if (!period) {
+      return {
+        result: {
+          reportType,
+          periods: [],
+          facts: [],
+          unmatched: [],
+          ignoredColumns: [],
+          warnings: [
+            "This report carries no date, and this client has no other data to date it against. Import a Profit & Loss first.",
+          ],
+        },
+        details: [],
+      };
+    }
+    const parsed = parseEntityReport(grid, {
+      period,
+      reportType,
+      totalAccountId:
+        reportType === "referral_l90d" ? "ops.referral_total" : undefined,
+    });
+    return {
+      result: parsed,
+      details: parsed.entities.map((entity) => ({
+        kind:
+          reportType === "referral_l90d" ? "referral_partner" : "customer_sales",
+        label: entity.label,
+        value: entity.value,
+        bucket: null,
+        count: entity.count,
+        period,
+      })),
+    };
+  }
+
+  // A combined group report needs splitting into its constituent reports, which is
+  // deliberately out of scope: it is the one path where per-report exports are strictly
+  // better, and the dialog says so.
   return null;
 }
 
 export interface CommitResult {
   factsWritten: number;
+  detailsWritten: number;
   periods: string[];
   supersededOverrides: number;
   notices: string[];
@@ -217,13 +351,17 @@ export function commitFile(
   // Re-read from the stored copy so a commit is reproducible from disk.
   const bytes = new Uint8Array(readFileSync(file.storedPath));
   const grid = toGrid(file.filename, bytes);
-  const parsed = previewParse(clientId, reportType, grid);
+  const parsedFile = previewParse(clientId, reportType, grid);
 
-  if (!parsed) {
+  if (!parsedFile) {
     throw new Error(
-      `No parser is wired up for ${reportType} in this build. Phase 2 adds the remaining report types.`,
+      reportType === "combined_group_report"
+        ? "A combined group report cannot be split automatically. Export each report separately from QuickBooks — the per-report exports parse exactly, which a merged document cannot."
+        : `No parser is wired up for ${reportType}.`,
     );
   }
+
+  const parsed = parsedFile.result;
 
   const activeOverrides = db
     .select()
@@ -255,6 +393,7 @@ export function commitFile(
   );
 
   let factsWritten = 0;
+  let detailsWritten = 0;
   let supersededOverrides = 0;
 
   db.transaction((tx) => {
@@ -286,6 +425,51 @@ export function commitFile(
         })
         .run();
       factsWritten += 1;
+    }
+
+    // Detail rows are replaced wholesale for the periods this file covers: a re-import
+    // of an ageing report must not leave last month's customers behind as ghosts.
+    const touchedPeriods = new Set(parsedFile.details.map((d) => d.period));
+    const detailKinds = new Set(parsedFile.details.map((d) => d.kind));
+    for (const detailPeriod of touchedPeriods) {
+      for (const kind of detailKinds) {
+        tx.delete(schema.detailRows)
+          .where(
+            and(
+              eq(schema.detailRows.clientId, clientId),
+              eq(schema.detailRows.period, detailPeriod),
+              eq(schema.detailRows.kind, kind),
+            ),
+          )
+          .run();
+      }
+    }
+
+    for (const detail of parsedFile.details) {
+      tx.insert(schema.detailRows)
+        .values({
+          id: newId("d"),
+          clientId,
+          period: detail.period,
+          kind: detail.kind,
+          label: detail.label,
+          value: detail.value,
+          bucket: detail.bucket,
+          count: detail.count,
+          sourceFileId,
+        })
+        .onConflictDoUpdate({
+          target: [
+            schema.detailRows.clientId,
+            schema.detailRows.period,
+            schema.detailRows.kind,
+            schema.detailRows.label,
+            schema.detailRows.bucket,
+          ],
+          set: { value: detail.value, count: detail.count, sourceFileId },
+        })
+        .run();
+      detailsWritten += 1;
     }
 
     for (const action of resolution.actions) {
@@ -330,6 +514,7 @@ export function commitFile(
 
   return {
     factsWritten,
+    detailsWritten,
     periods: parsed.periods,
     supersededOverrides,
     notices: resolution.notices,

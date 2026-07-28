@@ -152,12 +152,27 @@ export function parsePeriodHeader(header: unknown): Period | null {
 
   if (PERIOD_RE.test(text)) return text;
 
+  // A date RANGE is not a period. "November 2023 - October 2024" must not resolve:
+  // a loose pattern took the month from one end and the year from the other, silently
+  // inventing a thirteenth month of data. Two month names means a range, so refuse.
+  const monthMentions = text.match(/[a-z]{3,9}/g)?.filter((word) => word in MONTH_NAMES);
+  if (monthMentions && monthMentions.length > 1) return null;
+
+  // Likewise a bare numeric range: "01/2024 - 12/2024".
+  if (/\d\s*(?:[-–]|\bto\b)\s*\d{1,2}[\/-]\d{4}/.test(text)) return null;
+
   // "oct 2024" | "october 2024" | "oct 1 - 31, 2024" | "oct-24" | "oct '24"
-  const named = text.match(/\b([a-z]{3,9})\b[^0-9a-z]*(?:\d{1,2}[^0-9]*(?:-|–|to)?[^0-9]*\d{0,2}[^0-9]*)?'?(\d{2,4})\b/);
+  //
+  // Anchored at the start, because a period header is the whole cell. The optional
+  // day component uses a negative lookahead so it cannot bite the leading digits off a
+  // four-digit year ("2023" → day 20, year 23).
+  const named = text.match(
+    /^[^a-z0-9]*([a-z]{3,9})\b[^0-9a-z]*(?:(\d{1,2})(?!\d)(?:\s*[-–]\s*\d{1,2})?\s*,?\s*)?'?(\d{2,4})\b/,
+  );
   if (named) {
     const month = MONTH_NAMES[named[1] as string];
-    const rawYear = named[2] as string;
-    if (month) {
+    const rawYear = named[3] as string;
+    if (month && rawYear) {
       const year = rawYear.length === 2 ? 2000 + Number(rawYear) : Number(rawYear);
       if (year >= 1900 && year <= 2200) return makePeriod(year, month);
     }

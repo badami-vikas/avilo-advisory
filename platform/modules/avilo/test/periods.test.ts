@@ -104,6 +104,31 @@ describe("parsePeriodHeader — QuickBooks column headers", () => {
     expect(parsePeriodHeader("Variance")).toBeNull();
   });
 
+  // A date RANGE is not a period. A loose pattern took the month from one end and the
+  // year from the other, so "November 2023 - October 2024" resolved to 2024-11 and the
+  // importer invented a thirteenth month holding a stray fact.
+  it("refuses a date range rather than inventing a period from its two ends", () => {
+    expect(parsePeriodHeader("November 2023 - October 2024")).toBeNull();
+    expect(parsePeriodHeader("Nov 2023 - Oct 2024")).toBeNull();
+    expect(parsePeriodHeader("January 2024 to December 2024")).toBeNull();
+    expect(parsePeriodHeader("01/2024 - 12/2024")).toBeNull();
+  });
+
+  it("does not bite the leading digits off a four-digit year", () => {
+    // "Nov 2023" must not be read as day 20 of year 23.
+    expect(parsePeriodHeader("Nov 2023")).toBe("2023-11");
+    expect(parsePeriodHeader("December 2023")).toBe("2023-12");
+  });
+
+  it("still parses a single dated header with a day component", () => {
+    expect(parsePeriodHeader("October 31, 2024")).toBe("2024-10");
+    expect(parsePeriodHeader("Oct 1 - 31, 2024")).toBe("2024-10");
+  });
+
+  it("refuses a period name embedded mid-sentence", () => {
+    expect(parsePeriodHeader("Prepared for review in Oct 2024")).toBeNull();
+  });
+
   it("refuses non-period text and non-strings", () => {
     expect(parsePeriodHeader("")).toBeNull();
     expect(parsePeriodHeader("Account")).toBeNull();
