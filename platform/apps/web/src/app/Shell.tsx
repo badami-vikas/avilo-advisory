@@ -1,5 +1,7 @@
 import { Link, Outlet, useLocation } from "react-router";
 
+import { TooltipProvider } from "./components/Tooltip.js";
+
 /**
  * Application shell.
  *
@@ -12,6 +14,7 @@ export function Shell() {
   const isDetail = location.pathname.startsWith("/client/");
 
   return (
+    <TooltipProvider>
     <div className="min-h-full">
       <header className="no-print sticky top-0 z-30 border-b border-line bg-surface/95 backdrop-blur">
         <div className="mx-auto flex h-14 max-w-[1600px] items-center gap-3 px-6">
@@ -41,5 +44,6 @@ export function Shell() {
         <Outlet />
       </main>
     </div>
+    </TooltipProvider>
   );
 }

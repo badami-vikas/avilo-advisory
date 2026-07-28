@@ -16,6 +16,8 @@ export interface AccountCell {
   accountId: string;
   label: string;
   unit: string;
+  /** Shown as the field's tooltip. */
+  description: string | null;
   value: number | null;
   source: "fact" | "override" | "missing";
   divergesFrom?: number;
@@ -137,6 +139,7 @@ export function buildPeriodReport(clientId: string, period: Period): PeriodRepor
       accountId: def.id,
       label: def.label,
       unit: def.unit,
+      description: def.description,
       value: resolved.value,
       source: resolved.source,
       ...(resolved.divergesFrom !== undefined

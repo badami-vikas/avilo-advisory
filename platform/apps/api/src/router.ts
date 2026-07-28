@@ -96,7 +96,9 @@ const clientsRouter = router({
           id,
           name: input.name,
           legalName: input.legalName ?? null,
-          stage: input.stage ?? "Active",
+          // A new client has not been onboarded yet — that is the honest starting
+          // stage, and the advisor moves it to Active deliberately.
+          stage: input.stage ?? "Onboarding",
           industry: input.industry ?? null,
           owner: input.owner ?? null,
           fiscalYearStartMonth: input.fiscalYearStartMonth ?? 1,
@@ -538,7 +540,64 @@ const importRouter = router({
     }),
 });
 
+/* -------------------------------------------------------------------- lists */
+
+/**
+ * Saved lists.
+ *
+ * A "list" is a persisted ViewConfig over the same rows — the Baserow precedent the
+ * platform already adopts: filters and sorts are a stored overlay, not a separate table
+ * or a separate component. "All" is the implicit list with no overlay.
+ */
+const viewsRouter = router({
+  list: procedure
+    .input(z.object({ tableId: z.string() }))
+    .query(({ input }) => {
+      const db = getDb();
+      return db
+        .select()
+        .from(schema.savedViews)
+        .where(eq(schema.savedViews.tableId, input.tableId))
+        .all();
+    }),
+
+  save: procedure
+    .input(
+      z.object({
+        id: z.string().optional(),
+        tableId: z.string(),
+        name: z.string().min(1),
+        config: z.string(),
+      }),
+    )
+    .mutation(({ input }) => {
+      const db = getDb();
+      const id = input.id ?? newId("view");
+      db.insert(schema.savedViews)
+        .values({
+          id,
+          tableId: input.tableId,
+          name: input.name,
+          config: input.config,
+          isDefault: false,
+        })
+        .onConflictDoUpdate({
+          target: schema.savedViews.id,
+          set: { name: input.name, config: input.config },
+        })
+        .run();
+      return { id };
+    }),
+
+  remove: procedure.input(z.object({ id: z.string() })).mutation(({ input }) => {
+    const db = getDb();
+    db.delete(schema.savedViews).where(eq(schema.savedViews.id, input.id)).run();
+    return { ok: true };
+  }),
+});
+
 export const appRouter = router({
+  views: viewsRouter,
   clients: clientsRouter,
   report: reportRouter,
   accounts: accountsRouter,

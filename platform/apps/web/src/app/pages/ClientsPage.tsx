@@ -1,20 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router";
-import {
-  AlertTriangle,
-  Activity,
-  ArrowUpDown,
-  Download,
-  Layers,
-  ListFilter,
-  MoreVertical,
-  Plus,
-  Search,
-  Settings2,
-  Table2,
-  TrendingUp,
-  Upload,
-} from "lucide-react";
+import { Activity, AlertTriangle, Download, Layers, TrendingUp, Upload } from "lucide-react";
 import { applyView, defaultViewConfig, type ColumnSpec, type ViewConfig } from "@avilo/tables";
 import { formatPeriod } from "@avilo/module";
 
@@ -22,51 +8,35 @@ import { api } from "../../lib/trpc.js";
 import { money, percent } from "../../lib/format.js";
 import { Block, Button, EmptyState, Spinner, StatTile } from "../components/ui.js";
 import { DataTable, type ColumnRender } from "../components/DataTable.js";
+import { TableToolbar } from "../components/TableToolbar.js";
 import { UploadDialog } from "../components/UploadDialog.js";
 
 type ClientRow = Awaited<ReturnType<typeof api.clients.list.query>>[number];
 
+const TABLE_ID = "clients.table";
+
+const STAGES = ["Onboarding", "Active", "Review", "Dormant"];
+
 /** Columns are data, per the @bridge/tables contract — not hardcoded UI branches. */
 const COLUMNS: ColumnSpec[] = [
-  { id: "name", label: "Client", kind: "text", editable: true, width: 240 },
-  { id: "stage", label: "Stage", kind: "select", editable: true, options: ["Active", "Onboarding", "Review", "Dormant"], width: 130 },
-  { id: "health", label: "R/Y/G", kind: "text", width: 80 },
-  { id: "latestPeriod", label: "Latest period", kind: "text", width: 130 },
+  { id: "name", label: "Client", kind: "text", editable: true, width: 230 },
+  { id: "stage", label: "Stage", kind: "select", editable: true, options: STAGES, width: 130 },
+  { id: "latestPeriod", label: "Latest period", kind: "text", width: 140 },
   { id: "revenue", label: "Revenue", kind: "number", format: "currency", width: 120 },
   { id: "netOperatingIncome", label: "Net Op. Income", kind: "number", format: "currency", width: 140 },
   { id: "grossMarginPct", label: "Gross margin", kind: "number", format: "percent", width: 130 },
   { id: "noiMarginPct", label: "NOI margin", kind: "number", format: "percent", width: 120 },
   { id: "daysCashOnHand", label: "Days cash", kind: "number", width: 110 },
   { id: "owner", label: "Owner", kind: "text", editable: true, width: 140 },
-  { id: "data", label: "Data", kind: "text", width: 150 },
+  { id: "data", label: "Data", kind: "text", width: 140 },
 ];
-
-/**
- * Health is domain data the advisor reads off the numbers, not system feedback — so it
- * legitimately uses green and amber. System feedback (missing data, formula errors)
- * stays red-only, per the platform's red-flag rule.
- */
-function health(row: ClientRow): "green" | "amber" | "red" | "none" {
-  if (row.latestPeriod === null) return "none";
-  if (row.noiMarginPct === null) return "red";
-  if (row.noiMarginPct >= 10) return "green";
-  if (row.noiMarginPct >= 0) return "amber";
-  return "red";
-}
-
-const HEALTH_COLOR: Record<string, string> = {
-  green: "bg-[#17b26a]",
-  amber: "bg-[#f79009]",
-  red: "bg-flag",
-  none: "bg-line",
-};
 
 export function ClientsPage() {
   const navigate = useNavigate();
   const [rows, setRows] = useState<ClientRow[] | null>(null);
   const [search, setSearch] = useState("");
   const [view, setView] = useState<ViewConfig>(() => ({
-    ...defaultViewConfig("clients.table"),
+    ...defaultViewConfig(TABLE_ID),
     sorts: [{ id: "name", dir: "asc" }],
   }));
   const [uploadFor, setUploadFor] = useState<ClientRow | null>(null);
@@ -88,12 +58,21 @@ export function ClientsPage() {
     void reload();
   }, [reload]);
 
+  /**
+   * A new client is inserted immediately with a placeholder name and the row goes
+   * straight into inline edit — no prompt, no modal. The advisor types over it.
+   */
   const addClient = useCallback(async () => {
-    const name = window.prompt("Client name");
-    if (!name?.trim()) return;
-    await api.clients.create.mutate({ name: name.trim() });
+    const existing = rows ?? [];
+    let name = "New client";
+    let suffix = 2;
+    while (existing.some((row) => row.name === name)) {
+      name = `New client ${suffix}`;
+      suffix += 1;
+    }
+    await api.clients.create.mutate({ name });
     await reload();
-  }, [reload]);
+  }, [reload, rows]);
 
   const patch = useCallback(
     async (row: ClientRow, field: string, value: string) => {
@@ -113,50 +92,60 @@ export function ClientsPage() {
     });
   }, []);
 
+  /**
+   * Metric columns are computed from imported facts, so there is no single value to
+   * edit here — a figure belongs to a period. Double-clicking one opens that client's
+   * element page, where the value is editable against the period it belongs to.
+   */
+  const openDetail = useCallback(
+    (row: ClientRow) => navigate(`/client/${row.id}`),
+    [navigate],
+  );
+
+  const metricTip = useCallback(
+    (row: ClientRow, what: string) =>
+      !row.latestPeriod
+        ? "No data imported yet. Use Upload to add a QuickBooks export."
+        : `${what} for ${formatPeriod(row.latestPeriod)}, computed from imported data. Double-click to open the element page and edit it there.`,
+    [],
+  );
+
   const renderers = useMemo<Record<string, ColumnRender<ClientRow>>>(
     () => ({
       name: {
         value: (row) => row.name,
         editValue: (row) => row.name,
         onEdit: (row, next) => patch(row, "name", next),
-        render: (row) => (
-          <span className="font-medium text-ink">{row.name}</span>
-        ),
+        tip: () => "Double-click to rename",
+        render: (row) => <span className="font-medium text-ink">{row.name}</span>,
       },
       stage: {
         value: (row) => row.stage,
         editValue: (row) => row.stage,
+        options: STAGES,
         onEdit: (row, next) => patch(row, "stage", next),
+        tip: () => "Double-click to change stage",
         render: (row) => (
           <span className="inline-flex items-center rounded-md border border-line bg-line-soft px-2 py-[3px] text-[11px] font-medium text-ink-muted">
             {row.stage}
           </span>
         ),
       },
-      health: {
-        align: "center",
-        value: (row) => health(row),
-        render: (row) => (
-          <span
-            className={`inline-block h-2.5 w-2.5 rounded-full ${HEALTH_COLOR[health(row)]}`}
-            title={
-              row.latestPeriod === null
-                ? "No data imported yet"
-                : `NOI margin ${percent(row.noiMarginPct)}`
-            }
-          />
-        ),
-      },
       latestPeriod: {
         value: (row) => row.latestPeriod ?? "",
+        tip: (row) =>
+          row.periodCount > 1
+            ? `${row.periodCount} periods imported. Figures shown are for the most recent.`
+            : row.latestPeriod
+              ? "The only period imported so far"
+              : "Nothing imported yet",
+        onDoubleClick: openDetail,
         render: (row) =>
           row.latestPeriod ? (
             <span className="text-ink-muted">
               {formatPeriod(row.latestPeriod)}
               {row.periodCount > 1 ? (
-                <span className="ml-1.5 text-ink-faint">
-                  +{row.periodCount - 1}
-                </span>
+                <span className="ml-1.5 text-ink-faint">+{row.periodCount - 1}</span>
               ) : null}
             </span>
           ) : (
@@ -165,48 +154,70 @@ export function ClientsPage() {
       },
       revenue: {
         align: "right",
+        numeric: true,
         value: (row) => row.revenue,
+        formatAggregate: money,
+        tip: (row) => metricTip(row, "Total revenue"),
+        onDoubleClick: openDetail,
         render: (row) => (
           <span className="num font-medium text-ink">{money(row.revenue)}</span>
         ),
       },
       netOperatingIncome: {
         align: "right",
+        numeric: true,
         value: (row) => row.netOperatingIncome,
+        formatAggregate: money,
+        tip: (row) => metricTip(row, "Net Operating Income"),
+        onDoubleClick: openDetail,
         render: (row) => (
           <span className="num text-ink">{money(row.netOperatingIncome)}</span>
         ),
       },
       grossMarginPct: {
         align: "right",
+        numeric: true,
         value: (row) => row.grossMarginPct,
+        formatAggregate: (v) => percent(v),
+        tip: (row) => metricTip(row, "Gross margin"),
+        onDoubleClick: openDetail,
         render: (row) => (
           <span className="num text-ink-muted">{percent(row.grossMarginPct)}</span>
         ),
       },
       noiMarginPct: {
         align: "right",
+        numeric: true,
         value: (row) => row.noiMarginPct,
+        formatAggregate: (v) => percent(v),
+        tip: (row) => metricTip(row, "Net Operating Income margin"),
+        onDoubleClick: openDetail,
         render: (row) => (
           <span className="num text-ink-muted">{percent(row.noiMarginPct)}</span>
         ),
       },
       daysCashOnHand: {
         align: "right",
+        numeric: true,
         value: (row) => row.daysCashOnHand,
+        formatAggregate: (v) => String(Math.round(v)),
+        tip: (row) =>
+          row.daysCashOnHand === null
+            ? "Needs a Balance Sheet import — cash in bank accounts is missing"
+            : metricTip(row, "Days cash on hand"),
+        onDoubleClick: openDetail,
         render: (row) =>
           row.daysCashOnHand === null ? (
             <span className="text-ink-faint">—</span>
           ) : (
-            <span className="num text-ink-muted">
-              {Math.round(row.daysCashOnHand)}
-            </span>
+            <span className="num text-ink-muted">{Math.round(row.daysCashOnHand)}</span>
           ),
       },
       owner: {
         value: (row) => row.owner ?? "",
         editValue: (row) => row.owner ?? "",
         onEdit: (row, next) => patch(row, "owner", next),
+        tip: () => "Double-click to assign an owner",
         render: (row) =>
           row.owner ? (
             <span className="text-ink-muted">{row.owner}</span>
@@ -215,14 +226,24 @@ export function ClientsPage() {
           ),
       },
       data: {
-        value: (row) => row.missingCount ?? 99,
+        value: (row) =>
+          !row.latestPeriod
+            ? "Not started"
+            : row.complete
+              ? "Complete"
+              : `${row.missingCount} missing`,
+        tip: (row) =>
+          !row.latestPeriod
+            ? "Upload a QuickBooks export to begin"
+            : row.complete
+              ? "Every input the active formulas need is present"
+              : "Inputs required by an active formula have no value for this period",
+        onDoubleClick: openDetail,
         render: (row) => {
-          if (row.latestPeriod === null)
+          if (!row.latestPeriod)
             return <span className="text-[12px] text-ink-faint">Not started</span>;
           if (row.complete)
-            return (
-              <span className="text-[12px] text-ink-muted">Complete</span>
-            );
+            return <span className="text-[12px] text-ink-muted">Complete</span>;
           return (
             <span className="inline-flex items-center gap-1.5 rounded-md bg-flag-soft px-2 py-[3px] text-[11.5px] font-medium text-flag">
               <AlertTriangle size={11} />
@@ -232,12 +253,12 @@ export function ClientsPage() {
         },
       },
     }),
-    [patch],
+    [metricTip, openDetail, patch],
   );
 
   const visible = useMemo(() => {
     if (!rows) return [];
-    const filtered = search.trim()
+    const searched = search.trim()
       ? rows.filter((row) =>
           [row.name, row.stage, row.owner ?? ""]
             .join(" ")
@@ -245,81 +266,54 @@ export function ClientsPage() {
             .includes(search.trim().toLowerCase()),
         )
       : rows;
-    // Sorting flows through the shared view engine, not a bespoke comparator.
-    return applyView(
-      filtered.map((row) => ({ ...row, health: health(row), data: row.missingCount })),
-      view,
-    ) as unknown as ClientRow[];
+
+    // Filtering and sorting both flow through the shared view engine. The projection
+    // gives the engine the same values the cells display, so a filter on "Data" matches
+    // what the user can see rather than an internal id.
+    const projected = searched.map((row) => ({
+      ...row,
+      data:
+        !row.latestPeriod
+          ? "Not started"
+          : row.complete
+            ? "Complete"
+            : `${row.missingCount} missing`,
+      latestPeriod: row.latestPeriod ?? "",
+    }));
+
+    return applyView(projected, view) as unknown as ClientRow[];
   }, [rows, search, view]);
 
+  // Tiles summarise what is on screen. Computing them from the unfiltered set while
+  // "Showing" counts the filtered set put two contradictory numbers side by side.
   const totals = useMemo(() => {
-    const list = rows ?? [];
+    const list = visible;
     const revenue = list.reduce((sum, r) => sum + (r.revenue ?? 0), 0);
     const flags = list.reduce((sum, r) => sum + (r.missingCount ?? 0), 0);
-    const withData = list.filter((r) => r.latestPeriod !== null);
+    const withData = list.filter((r) => Boolean(r.latestPeriod));
     const avgMargin =
       withData.length === 0
         ? null
-        : withData.reduce((sum, r) => sum + (r.noiMarginPct ?? 0), 0) /
-          withData.length;
-    return { count: list.length, revenue, flags, avgMargin };
-  }, [rows]);
+        : withData.reduce((sum, r) => sum + (r.noiMarginPct ?? 0), 0) / withData.length;
+    return { revenue, flags, avgMargin };
+  }, [visible]);
 
   return (
     <div className="space-y-4">
-      {/* ---------------------------------------------------------- toolbar */}
-      <div className="flex flex-wrap items-center gap-2">
-        <button className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-line bg-surface px-3 text-[13px] font-medium text-ink hover:bg-line-soft">
-          <Layers size={14} className="text-ink-muted" />
-          All
-        </button>
-        <button className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-line bg-surface px-3 text-[13px] font-medium text-ink hover:bg-line-soft">
-          <Table2 size={14} className="text-ink-muted" />
-          Table View
-        </button>
+      <TableToolbar
+        tableId={TABLE_ID}
+        columns={COLUMNS}
+        view={view}
+        onViewChange={setView}
+        search={search}
+        onSearchChange={setSearch}
+        searchPlaceholder="Search clients…"
+        onAdd={addClient}
+        addLabel="Add Client"
+      />
 
-        <div className="relative min-w-[220px] flex-1 sm:max-w-md">
-          <Search
-            size={14}
-            className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-faint"
-          />
-          <input
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search clients…"
-            className="h-9 w-full rounded-lg border border-line bg-surface pl-9 pr-3 text-[13px] text-ink outline-none placeholder:text-ink-faint focus:border-accent focus:ring-2 focus:ring-accent/15"
-          />
-        </div>
-
-        <div className="ml-auto flex items-center gap-2">
-          <Button>
-            <ListFilter size={14} className="text-ink-muted" />
-            Filter
-          </Button>
-          <Button onClick={() => toggleSort("name")}>
-            <ArrowUpDown size={14} className="text-ink-muted" />
-            Sort
-          </Button>
-          <Button aria-label="View options">
-            <Settings2 size={14} className="text-ink-muted" />
-          </Button>
-          <Button variant="primary" onClick={addClient}>
-            <Plus size={15} />
-            Add Client
-          </Button>
-          <Button variant="ghost" aria-label="More">
-            <MoreVertical size={16} />
-          </Button>
-        </div>
-      </div>
-
-      {/* ------------------------------------------------------- stat tiles */}
       <div className="flex flex-wrap gap-2.5">
-        <StatTile
-          icon={<Layers size={15} />}
-          label="Showing"
-          value={String(visible.length)}
-        />
+        <StatTile icon={<Layers size={15} />} label="Showing" value={String(visible.length)} />
         <StatTile
           icon={<TrendingUp size={15} />}
           label="Total revenue"
@@ -338,7 +332,6 @@ export function ClientsPage() {
         />
       </div>
 
-      {/* ------------------------------------------------------------ table */}
       {error ? (
         <div className="rounded-xl border border-flag/25 bg-flag-soft px-4 py-3 text-[12.5px] text-flag">
           {error}
@@ -356,28 +349,33 @@ export function ClientsPage() {
             view={view}
             rowKey={(row) => row.id}
             onSort={toggleSort}
-            onRowClick={(row) => navigate(`/client/${row.id}`)}
+            onRowClick={openDetail}
             onAddRow={addClient}
             addRowLabel="New client"
             emptyState={
               <EmptyState
-                title="No clients yet"
-                body="Add a client, then drag their QuickBooks exports in. Nothing is pre-filled — every figure you see will come from a file you uploaded."
+                title={
+                  view.rowFilters.length > 0 || search
+                    ? "No clients match"
+                    : "No clients yet"
+                }
+                body={
+                  view.rowFilters.length > 0 || search
+                    ? "Adjust or clear the filters to see more."
+                    : "Add a client, then drag their QuickBooks exports in. Nothing is pre-filled — every figure you see will come from a file you uploaded."
+                }
                 action={
-                  <Button variant="primary" onClick={addClient}>
-                    <Plus size={15} />
-                    Add your first client
-                  </Button>
+                  view.rowFilters.length === 0 && !search ? (
+                    <Button variant="primary" onClick={addClient}>
+                      Add your first client
+                    </Button>
+                  ) : null
                 }
               />
             }
             rowActions={(row) => (
               <>
-                <Button
-                  size="sm"
-                  onClick={() => setUploadFor(row)}
-                  title="Upload source files"
-                >
+                <Button size="sm" onClick={() => setUploadFor(row)} title="Upload source files">
                   <Upload size={13} />
                   Upload
                 </Button>
@@ -385,7 +383,7 @@ export function ClientsPage() {
                   size="sm"
                   onClick={() => navigate(`/client/${row.id}?export=1`)}
                   title="Download a PDF report"
-                  disabled={row.latestPeriod === null}
+                  disabled={!row.latestPeriod}
                 >
                   <Download size={13} />
                   Download

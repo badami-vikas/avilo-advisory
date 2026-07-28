@@ -1,37 +1,62 @@
-import { AlertTriangle, FileSpreadsheet, RotateCcw } from "lucide-react";
+import { useState } from "react";
+import { AlertTriangle, FileSpreadsheet, Globe, RotateCcw } from "lucide-react";
 
 import { Block } from "./ui.js";
+import { Tip } from "./Tooltip.js";
+import { InlineEditor } from "./DataTable.js";
 import { byUnit, moneyFull } from "../../lib/format.js";
 import type { FormulaRow, PeriodReport } from "../types.js";
 
 /**
- * The Raw Data view: two stacked blocks, Edit Data on top and Check Formulas below.
+ * The Raw Data view: Edit data on top, Check formulas below.
  *
- * In the prototype these were two separate panels whose contents could disagree — the
- * formula panel described metrics in prose while the arithmetic lived elsewhere. Here
- * both read the same registry, so the description and the computation cannot diverge.
+ * Everything is edited in place. The two-column split in the formulas table is what
+ * makes the modal unnecessary: the FORMULA cell is the global, versioned definition,
+ * and the VALUE cell is the local override for this client and period. The blast radius
+ * is expressed by which cell you double-click, not by a dialog asking you to choose.
  */
 export function RawDataView({
   report,
   formulas,
-  onEditAccount,
-  onEditMetric,
+  onSetAccountValue,
+  onSetMetricValue,
+  onSetFormula,
   onClearOverride,
 }: {
   report: PeriodReport;
   formulas: FormulaRow[];
-  onEditAccount: (accountId: string) => void;
-  onEditMetric: (metricId: string) => void;
+  onSetAccountValue: (accountId: string, raw: string) => Promise<void>;
+  onSetMetricValue: (metricId: string, raw: string) => Promise<void>;
+  onSetFormula: (formulaId: string, expression: string) => Promise<void>;
   onClearOverride: (accountId: string) => void;
 }) {
+  const [editing, setEditing] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
   const required = new Set(report.missingRequired);
+
+  const commit = async (key: string, run: () => Promise<void>) => {
+    setEditing(null);
+    setError(null);
+    try {
+      await run();
+    } catch (cause) {
+      setError(`${key}: ${(cause as Error).message}`);
+    }
+  };
 
   return (
     <div className="space-y-4">
-      {/* ------------------------------------------------------- Edit Data */}
+      {error ? (
+        <div className="rounded-xl border border-flag/25 bg-flag-soft px-4 py-3 text-[12.5px] text-flag">
+          {error}
+        </div>
+      ) : null}
+
+      {/* ------------------------------------------------------- Edit data */}
       <Block
         title="Edit data"
-        subtitle={`${report.periodLabel} · double-click any value to override it. Overrides are permanent and never change a formula.`}
+        subtitle={`${report.periodLabel} · double-click a value to override it`}
       >
         <div className="overflow-x-auto">
           <table className="w-full border-collapse text-[13px]">
@@ -53,6 +78,9 @@ export function RawDataView({
               {report.accounts.map((account) => {
                 const missing = account.value === null;
                 const isRequired = required.has(account.accountId);
+                const key = `account:${account.accountId}`;
+                const isEditing = editing === key;
+
                 return (
                   <tr
                     key={account.accountId}
@@ -60,60 +88,83 @@ export function RawDataView({
                       isRequired ? "bg-flag-soft/50" : "hover:bg-canvas"
                     }`}
                   >
-                    <td className="px-4 py-2.5">
-                      <span
-                        className={`font-medium ${isRequired ? "text-flag" : "text-ink"}`}
+                    <td className="whitespace-nowrap px-4 py-2.5">
+                      <Tip
+                        content={
+                          isRequired
+                            ? "An active formula needs this account and it has no value for this period. Upload the report that supplies it, or double-click the value to enter it manually."
+                            : account.description ||
+                              `Canonical account ${account.accountId}`
+                        }
                       >
-                        {account.label}
-                      </span>
-                      <span className="ml-2 font-mono text-[11px] text-ink-faint">
-                        {account.accountId}
-                      </span>
-                      {isRequired ? (
-                        <span className="mt-0.5 flex items-center gap-1 text-[11px] text-flag">
-                          <AlertTriangle size={11} />
-                          Required by an active formula — no value for this period
+                        <span
+                          className={`font-medium ${isRequired ? "text-flag" : "text-ink"}`}
+                        >
+                          {account.label}
+                          {isRequired ? (
+                            <AlertTriangle size={11} className="ml-1.5 inline align-[-1px]" />
+                          ) : null}
                         </span>
-                      ) : null}
+                      </Tip>
                     </td>
 
                     <td
                       className="cursor-pointer px-4 py-2.5 text-right"
-                      onDoubleClick={() => onEditAccount(account.accountId)}
-                      title="Double-click to override"
+                      onDoubleClick={() => setEditing(key)}
                     >
-                      {/*
-                        Red is reserved for a real problem. An account with no value is
-                        only a problem when an active formula needs it; otherwise it is
-                        simply a report this client has not uploaded, and shows neutral.
-                      */}
-                      <span
-                        className={`num font-medium ${
-                          !missing
-                            ? "text-ink"
-                            : isRequired
-                              ? "text-flag"
-                              : "text-ink-faint"
-                        }`}
-                      >
-                        {missing
-                          ? isRequired
-                            ? "Missing"
-                            : "—"
-                          : byUnit(account.value, account.unit)}
-                      </span>
-                      {account.divergesFrom !== undefined ? (
-                        <span className="mt-0.5 block text-[11px] text-warn">
-                          source says {moneyFull(account.divergesFrom)}
-                        </span>
-                      ) : null}
+                      {isEditing ? (
+                        <InlineEditor
+                          initial={
+                            account.value === null
+                              ? ""
+                              : String(Number(account.value.toFixed(2)))
+                          }
+                          align="right"
+                          onCancel={() => setEditing(null)}
+                          onCommit={(next) =>
+                            void commit(account.label, () =>
+                              onSetAccountValue(account.accountId, next),
+                            )
+                          }
+                        />
+                      ) : (
+                        <Tip
+                          content={
+                            account.divergesFrom !== undefined
+                              ? `Your manual value. The imported file says ${moneyFull(account.divergesFrom)}.`
+                              : "Double-click to override this value. Overrides are permanent and never change a formula."
+                          }
+                        >
+                          {/*
+                            Red is reserved for a real problem: an absent value only
+                            matters when an active formula needs it.
+                          */}
+                          <span
+                            className={`num font-medium ${
+                              !missing
+                                ? "text-ink"
+                                : isRequired
+                                  ? "text-flag"
+                                  : "text-ink-faint"
+                            }`}
+                          >
+                            {missing
+                              ? isRequired
+                                ? "Missing"
+                                : "—"
+                              : byUnit(account.value, account.unit)}
+                          </span>
+                        </Tip>
+                      )}
                     </td>
 
-                    <td className="px-4 py-2.5">
+                    <td className="whitespace-nowrap px-4 py-2.5">
                       {account.source === "override" ? (
-                        <span className="inline-flex items-center rounded-md border border-accent/25 bg-accent-soft px-2 py-[3px] text-[11px] font-medium text-accent">
-                          Manual override
-                        </span>
+                        <Tip content="Entered by hand. It survives restarts and is replaced only by a re-import supplying a new value for this field.">
+                          <span className="inline-flex items-center rounded-md border border-accent/25 bg-accent-soft px-2 py-[3px] text-[11px] font-medium text-accent">
+                            Manual override
+                          </span>
+                        </Tip>
                       ) : account.source === "fact" ? (
                         <span className="text-[12px] text-ink-muted">Imported</span>
                       ) : (
@@ -121,15 +172,16 @@ export function RawDataView({
                       )}
                     </td>
 
-                    <td className="px-4 py-2.5">
+                    <td className="whitespace-nowrap px-4 py-2.5">
                       {account.sourceFilename ? (
-                        <span
-                          className="inline-flex items-center gap-1.5 text-[11.5px] text-ink-muted"
-                          title={`Row "${account.sourceRowLabel}", column "${account.sourceColumnLabel}"`}
+                        <Tip
+                          content={`Row "${account.sourceRowLabel}", column "${account.sourceColumnLabel}"`}
                         >
-                          <FileSpreadsheet size={12} className="text-ink-faint" />
-                          {account.sourceFilename}
-                        </span>
+                          <span className="inline-flex items-center gap-1.5 text-[11.5px] text-ink-muted">
+                            <FileSpreadsheet size={12} className="text-ink-faint" />
+                            {account.sourceFilename}
+                          </span>
+                        </Tip>
                       ) : (
                         <span className="text-[12px] text-ink-faint">—</span>
                       )}
@@ -137,14 +189,15 @@ export function RawDataView({
 
                     <td className="px-4 py-2.5 text-right">
                       {account.source === "override" ? (
-                        <button
-                          onClick={() => onClearOverride(account.accountId)}
-                          className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11.5px] text-ink-muted hover:bg-line-soft hover:text-ink"
-                          title="Remove this override and fall back to the imported value"
-                        >
-                          <RotateCcw size={11} />
-                          Clear
-                        </button>
+                        <Tip content="Remove the override and fall back to the imported value">
+                          <button
+                            onClick={() => onClearOverride(account.accountId)}
+                            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11.5px] text-ink-muted hover:bg-line-soft hover:text-ink"
+                          >
+                            <RotateCcw size={11} />
+                            Clear
+                          </button>
+                        </Tip>
                       ) : null}
                     </td>
                   </tr>
@@ -155,87 +208,151 @@ export function RawDataView({
         </div>
       </Block>
 
-      {/* --------------------------------------------------- Check Formulas */}
+      {/* --------------------------------------------------- Check formulas */}
       <Block
         title="Check formulas"
-        subtitle="Every metric's definition, its inputs, and how it evaluated for this period. Editing a formula here changes it for every client."
+        subtitle="Double-click a formula to change it everywhere, or a value to override it here"
       >
-        <div className="divide-y divide-line-soft">
-          {formulas.map((formula) => {
-            const metric = report.metrics.find((m) => m.id === formula.id);
-            const benchmark = formula.benchmark
-              ? (JSON.parse(formula.benchmark) as {
-                  min?: number;
-                  max?: number;
-                  note?: string;
-                })
-              : null;
-            const value = metric?.value ?? null;
-            const breached =
-              benchmark && value !== null && metric?.status === "ok"
-                ? (benchmark.min !== undefined && value < benchmark.min) ||
-                  (benchmark.max !== undefined && value > benchmark.max)
-                : false;
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse text-[13px]">
+            <thead>
+              <tr className="border-b border-line bg-line-soft/60">
+                <th className="px-4 py-2.5 text-left text-[10px] font-semibold uppercase tracking-[0.07em] text-ink-faint">
+                  Element
+                </th>
+                <th className="px-4 py-2.5 text-left text-[10px] font-semibold uppercase tracking-[0.07em] text-ink-faint">
+                  Formula
+                </th>
+                <th className="px-4 py-2.5 text-right text-[10px] font-semibold uppercase tracking-[0.07em] text-ink-faint">
+                  Value
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {formulas.map((formula) => {
+                const metric = report.metrics.find((m) => m.id === formula.id);
+                const benchmark = formula.benchmark
+                  ? (JSON.parse(formula.benchmark) as {
+                      min?: number;
+                      max?: number;
+                      note?: string;
+                    })
+                  : null;
+                const value = metric?.value ?? null;
+                const ok = metric?.status === "ok";
+                const breached =
+                  benchmark && value !== null && ok
+                    ? (benchmark.min !== undefined && value < benchmark.min) ||
+                      (benchmark.max !== undefined && value > benchmark.max)
+                    : false;
 
-            return (
-              <div
-                key={formula.id}
-                className="cursor-pointer px-5 py-3.5 transition-colors hover:bg-canvas"
-                onDoubleClick={() => onEditMetric(formula.id)}
-                title="Double-click to edit the formula or override the value"
-              >
-                <div className="flex flex-wrap items-baseline justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="text-[13px] font-medium text-ink">
-                      {formula.label}
-                      <span className="ml-2 text-[11px] font-normal text-ink-faint">
-                        v{formula.version}
-                      </span>
-                    </p>
-                    <p className="mt-1 font-mono text-[12px] text-ink-muted">
-                      {formula.expression}
-                    </p>
-                  </div>
-                  <p
-                    className={`num text-[17px] font-semibold tracking-tight ${
-                      metric?.status !== "ok" ? "text-flag" : breached ? "text-flag" : "text-ink"
-                    }`}
+                const formulaKey = `formula:${formula.id}`;
+                const valueKey = `metric:${formula.id}`;
+
+                return (
+                  <tr
+                    key={formula.id}
+                    className="border-b border-line-soft last:border-b-0 hover:bg-canvas"
                   >
-                    {metric?.status === "ok"
-                      ? byUnit(value, formula.unit)
-                      : "Unavailable"}
-                  </p>
-                </div>
+                    {/* --- element name */}
+                    <td className="whitespace-nowrap px-4 py-2.5">
+                      <Tip content={formula.description}>
+                        <span className="font-medium text-ink">
+                          {formula.label}
+                          <span className="ml-1.5 text-[11px] font-normal text-ink-faint">
+                            v{formula.version}
+                          </span>
+                        </span>
+                      </Tip>
+                    </td>
 
-                <p className="mt-1.5 text-[11.5px] leading-relaxed text-ink-muted">
-                  {formula.description}
-                </p>
+                    {/* --- formula (global, versioned) */}
+                    <td
+                      className="cursor-pointer px-4 py-2.5"
+                      onDoubleClick={() => setEditing(formulaKey)}
+                    >
+                      {editing === formulaKey ? (
+                        <InlineEditor
+                          initial={formula.expression}
+                          onCancel={() => setEditing(null)}
+                          onCommit={(next) =>
+                            void commit(formula.label, () =>
+                              onSetFormula(formula.id, next),
+                            )
+                          }
+                        />
+                      ) : (
+                        <Tip
+                          content={
+                            <span>
+                              <Globe size={11} className="mr-1 inline align-[-1px]" />
+                              Double-click to edit. A formula change applies to every
+                              client and every period, is versioned, and is refused if it
+                              would create a cycle.
+                              {metric && metric.dependsOn.length > 0 ? (
+                                <> Depends on {metric.dependsOn.join(", ")}.</>
+                              ) : null}
+                            </span>
+                          }
+                        >
+                          <span className="font-mono text-[12px] text-ink-muted">
+                            {formula.expression}
+                          </span>
+                        </Tip>
+                      )}
+                    </td>
 
-                {metric?.status === "missing_inputs" ? (
-                  <p className="mt-1.5 flex items-center gap-1.5 text-[11.5px] font-medium text-flag">
-                    <AlertTriangle size={12} />
-                    Needs {metric.missing.join(", ")} — not present for this period
-                  </p>
-                ) : metric?.status === "error" ? (
-                  <p className="mt-1.5 flex items-center gap-1.5 text-[11.5px] font-medium text-flag">
-                    <AlertTriangle size={12} />
-                    {metric.error}
-                  </p>
-                ) : breached && benchmark?.note ? (
-                  <p className="mt-1.5 flex items-center gap-1.5 text-[11.5px] font-medium text-flag">
-                    <AlertTriangle size={12} />
-                    {benchmark.note}
-                  </p>
-                ) : null}
-
-                {metric && metric.dependsOn.length > 0 ? (
-                  <p className="mt-1.5 text-[11px] text-ink-faint">
-                    Depends on {metric.dependsOn.join(", ")}
-                  </p>
-                ) : null}
-              </div>
-            );
-          })}
+                    {/* --- value (local override) */}
+                    <td
+                      className="cursor-pointer whitespace-nowrap px-4 py-2.5 text-right"
+                      onDoubleClick={() => setEditing(valueKey)}
+                    >
+                      {editing === valueKey ? (
+                        <InlineEditor
+                          initial={value === null ? "" : String(Number(value.toFixed(4)))}
+                          align="right"
+                          onCancel={() => setEditing(null)}
+                          onCommit={(next) =>
+                            void commit(formula.label, () =>
+                              onSetMetricValue(formula.id, next),
+                            )
+                          }
+                        />
+                      ) : (
+                        <Tip
+                          content={
+                            metric?.status === "missing_inputs" ? (
+                              <>Needs {metric.missing.join(", ")} — not present for this period</>
+                            ) : metric?.status === "error" ? (
+                              metric.error
+                            ) : breached && benchmark?.note ? (
+                              benchmark.note
+                            ) : (
+                              "Double-click to override this value for this client and period only. The formula is unchanged."
+                            )
+                          }
+                        >
+                          <span
+                            className={`num text-[14px] font-semibold ${
+                              !ok || breached ? "text-flag" : "text-ink"
+                            }`}
+                          >
+                            {ok ? byUnit(value, formula.unit) : "Unavailable"}
+                            {(!ok || breached) ? (
+                              <AlertTriangle
+                                size={11}
+                                className="ml-1.5 inline align-[-1px]"
+                              />
+                            ) : null}
+                          </span>
+                        </Tip>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       </Block>
     </div>

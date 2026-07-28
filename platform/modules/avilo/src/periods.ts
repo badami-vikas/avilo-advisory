@@ -103,7 +103,13 @@ export function fiscalYearToDate(p: Period, fyStartMonth = 1): FiscalYear {
   return { ...fy, end: p };
 }
 
-export function formatPeriod(p: Period): string {
+/**
+ * Display formatter. Tolerant by design: a formatter that throws takes a whole page
+ * down over one empty cell. Logic paths that genuinely require a valid period use
+ * `assertPeriod`, which still throws.
+ */
+export function formatPeriod(p: Period | null | undefined): string {
+  if (!isPeriod(p)) return "—";
   const months = [
     "Jan", "Feb", "Mar", "Apr", "May", "Jun",
     "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",

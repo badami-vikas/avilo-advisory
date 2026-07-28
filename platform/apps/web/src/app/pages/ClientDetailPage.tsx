@@ -8,7 +8,6 @@ import { Block, Button, EmptyState, Spinner } from "../components/ui.js";
 import { ReportView } from "../components/ReportView.js";
 import { RawDataView } from "../components/RawDataView.js";
 import { UploadDialog } from "../components/UploadDialog.js";
-import { EditValueDialog, type EditTarget } from "../components/EditValueDialog.js";
 import type { ClientRecord, FormulaRow, PeriodReport, SeriesPoint } from "../types.js";
 
 const CHART_IDS = ["pl.revenue", "net_operating_income", "noi_margin_pct"];
@@ -25,7 +24,6 @@ export function ClientDetailPage() {
   const [formulas, setFormulas] = useState<FormulaRow[]>([]);
   const [mode, setMode] = useState<"report" | "raw">("report");
   const [uploading, setUploading] = useState(false);
-  const [editing, setEditing] = useState<EditTarget | null>(null);
   const [exporting, setExporting] = useState(false);
 
   /* ------------------------------------------------------------ loading */
@@ -89,37 +87,49 @@ export function ClientDetailPage() {
 
   /* ------------------------------------------------------------- editing */
 
-  const openAccountEditor = useCallback(
-    (accountId: string) => {
-      const account = report?.accounts.find((a) => a.accountId === accountId);
-      if (!account) return;
-      setEditing({
-        kind: "account",
-        id: accountId,
-        label: account.label,
-        unit: account.unit,
-        currentValue: account.value,
+  /** Parse a hand-typed figure, tolerating "$1,234.56" and "(1,234)". */
+  const parseTyped = (raw: string): number => {
+    let text = raw.trim();
+    if (text === "") throw new Error("Enter a number, or press Escape to cancel.");
+    let negative = false;
+    if (/^\(.*\)$/.test(text)) {
+      negative = true;
+      text = text.slice(1, -1);
+    }
+    const numeric = Number(text.replace(/[$,\s%]/g, ""));
+    if (!Number.isFinite(numeric)) throw new Error(`"${raw}" is not a number.`);
+    return negative ? -numeric : numeric;
+  };
+
+  /** A value override: this client, this period, permanent, formula untouched. */
+  const setOverride = useCallback(
+    async (targetKind: "account" | "metric", targetId: string, raw: string) => {
+      if (!period) return;
+      const current =
+        targetKind === "account"
+          ? (report?.accounts.find((a) => a.accountId === targetId)?.value ?? null)
+          : (report?.metrics.find((m) => m.id === targetId)?.value ?? null);
+
+      await api.overrides.set.mutate({
+        clientId,
+        period,
+        targetKind,
+        targetId,
+        value: parseTyped(raw),
+        previousValue: current,
       });
+      await refresh();
     },
-    [report],
+    [clientId, period, refresh, report],
   );
 
-  const openMetricEditor = useCallback(
-    (metricId: string) => {
-      const formula = formulas.find((f) => f.id === metricId);
-      const metric = report?.metrics.find((m) => m.id === metricId);
-      if (!formula) return;
-      setEditing({
-        kind: "metric",
-        id: metricId,
-        label: formula.label,
-        unit: formula.unit,
-        currentValue: metric?.value ?? null,
-        expression: formula.expression,
-        formulaVersion: formula.version,
-      });
+  /** A formula edit: global, versioned, retroactive, refused if invalid. */
+  const setFormula = useCallback(
+    async (formulaId: string, expression: string) => {
+      await api.formulas.update.mutate({ id: formulaId, expression: expression.trim() });
+      await refresh();
     },
-    [formulas, report],
+    [refresh],
   );
 
   const clearOverride = useCallback(
@@ -227,14 +237,15 @@ export function ClientDetailPage() {
           clientName={client.name}
           report={report}
           series={series}
-          onEditMetric={openMetricEditor}
+          onSetMetricValue={(id, raw) => setOverride("metric", id, raw)}
         />
       ) : (
         <RawDataView
           report={report}
           formulas={formulas}
-          onEditAccount={openAccountEditor}
-          onEditMetric={openMetricEditor}
+          onSetAccountValue={(id, raw) => setOverride("account", id, raw)}
+          onSetMetricValue={(id, raw) => setOverride("metric", id, raw)}
+          onSetFormula={setFormula}
           onClearOverride={clearOverride}
         />
       )}
@@ -247,19 +258,6 @@ export function ClientDetailPage() {
           onClose={() => setUploading(false)}
           onImported={() => {
             setUploading(false);
-            void refresh();
-          }}
-        />
-      ) : null}
-
-      {editing && period ? (
-        <EditValueDialog
-          clientId={clientId}
-          period={period}
-          target={editing}
-          onClose={() => setEditing(null)}
-          onSaved={() => {
-            setEditing(null);
             void refresh();
           }}
         />

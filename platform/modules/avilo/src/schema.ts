@@ -36,7 +36,7 @@ export const clients = sqliteTable(
     legalName: text("legal_name"),
     /** 1 = January. US calendar FY is the product default. */
     fiscalYearStartMonth: integer("fiscal_year_start_month").notNull().default(1),
-    stage: text("stage").notNull().default("Active"),
+    stage: text("stage").notNull().default("Onboarding"),
     industry: text("industry"),
     owner: text("owner"),
     notes: text("notes"),
