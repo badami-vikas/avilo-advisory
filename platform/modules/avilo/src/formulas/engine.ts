@@ -13,7 +13,8 @@
 
 import { create, all, type MathNode } from "mathjs";
 
-const math = create(all, {});
+// mathjs types `all` as possibly-undefined; it is always populated at runtime.
+const math = create(all as Parameters<typeof create>[0], {});
 
 /**
  * Function allowlist for user-authored expressions.
