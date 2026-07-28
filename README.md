@@ -4,9 +4,8 @@ Offline, local-first monthly business snapshot for a small-business advisory pra
 Structured to be lifted into [relationship-os](https://github.com/manishsbhoopalam8498/relationship-os)
 as `platform/modules/avilo`.
 
-**Phase 1 (this build): a working vertical slice.** Client table → element page → P&L
-import → formula engine with overrides. Phase 2 adds the remaining five importers, the
-rest of the dashboard sections, and the ranged PDF export.
+All six QuickBooks report types import, all dashboard sections render, and PDF export
+honours a chosen period range.
 
 ## Run it
 
@@ -98,20 +97,50 @@ refused rather than merely hidden.
 **PDF export is the browser's print-to-PDF**, which is vector. The v9 session established
 that the html2canvas raster pipeline produced unacceptably soft text.
 
-## Known gaps in Phase 1
+## What's in the table
 
-- Only the P&L importer is wired up. Uploading a Balance Sheet stages and classifies it
-  but has no parser yet, so Days cash on hand stays flagged — which is the derived
-  checklist working, not a bug.
-- PDF ingestion is deferred; Excel/CSV only. The upload dialog says so rather than
-  silently doing nothing.
+Editing is inline everywhere — double-click a cell, type, Enter. There is no modal.
+
+Filters, sorts and column visibility are a **stored overlay** over the same rows, so a
+saved "list" in the **All** dropdown and the table itself are one mechanism, not two.
+Column footers carry a selectable aggregate: average for numeric columns, distinct count
+for text, with sum/min/max/median/range available. Empty cells are excluded from
+statistics rather than counted as zero.
+
+## Known gaps
+
+- **PDF ingestion is deferred; Excel/CSV only.** The upload dialog says so rather than
+  silently doing nothing. Structural parsing of a spreadsheet is exact; reading a PDF is
+  interpretation, and that is what failed repeatedly in the v9 build.
+- **A combined group export is refused with an explanation**, rather than half-parsed.
+  Per-report exports parse exactly; a merged document cannot.
 - The table renders the `@bridge/tables` contract as DOM. relationship-os draws the same
-  contract with `@glideapps/glide-data-grid`. Swapping the renderer is contained,
-  because no caller knows how a cell is painted.
-- Column right-click context menus, saved views and filters are stubbed in the toolbar.
-- The web bundle is ~1.2 MB (371 KB gzipped), dominated by mathjs. It is served from
-  localhost, so this is a load-time cost of about nothing; worth trimming with a
-  narrower mathjs import if it ever ships over a network.
+  contract with `@glideapps/glide-data-grid`. Swapping the renderer is contained, because
+  no caller knows how a cell is painted.
+- Column right-click context menus are not built yet; sorting is available from the
+  header and from the overflow menu.
+- The web bundle is ~1.3 MB (405 KB gzipped), dominated by mathjs. It is served from
+  localhost, so this costs approximately nothing; worth trimming with a narrower mathjs
+  import if it ever ships over a network.
+
+## Defects designed out, with the test that holds them down
+
+Every entry below was a real failure in the v7→v9 build or was found while verifying this
+one. Each has a named regression test.
+
+| Defect | Where it is prevented |
+| --- | --- |
+| `"Total for Income"` not matching a regex expecting `"Total Income"` | `label_mappings` rows, not regexes |
+| `row.length - 1` selecting the trailing `Total` column | headers parsed into periods; `Total` refused |
+| Prior-year read by hard-coded column index | every period in the file is extracted |
+| A date **range** read as a period — `"November 2023 - October 2024"` → `2024-11` | ranges refused; day component cannot eat a year's leading digits |
+| `"As of October 31, 2024"` treated as a dated column header | preamble excluded; a value column must contain numbers |
+| A detail line claiming an account before its section total | matches ranked; totals supersede detail lines |
+| A later balance-sheet row silently overwriting an earlier value | equal-rank collisions keep the first and warn |
+| A guessed job count | taken from an explicit column or reported absent |
+| A 12-month job count labelled "this month" | job performance states its basis |
+| `formatPeriod` throwing and blanking a page | display formatters degrade; `assertPeriod` still throws |
+| Every `button` hidden in print, deleting metric cards from the PDF | chrome hidden by intent (`.no-print`), not by element type |
 
 ## Tests
 

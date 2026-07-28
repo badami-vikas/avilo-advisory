@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useParams, useSearchParams } from "react-router";
+import { useNavigate, useParams, useSearchParams } from "react-router";
 import { Download, FileText, Table2, Upload, X } from "lucide-react";
 import { formatPeriod } from "@avilo/module";
 
@@ -20,6 +20,7 @@ const CHART_IDS = ["pl.revenue", "net_operating_income", "noi_margin_pct"];
 
 export function ClientDetailPage() {
   const { clientId = "" } = useParams();
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
 
   const [client, setClient] = useState<ClientRecord | null>(null);
@@ -35,19 +36,28 @@ export function ClientDetailPage() {
   const [mode, setMode] = useState<"report" | "raw">("report");
   const [uploading, setUploading] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   /* ------------------------------------------------------------ loading */
 
   const loadShell = useCallback(async () => {
-    const [record, available, formulaRows] = await Promise.all([
-      api.clients.get.query({ id: clientId }),
-      api.report.periods.query({ clientId }),
-      api.formulas.list.query(),
-    ]);
-    setClient(record);
-    setPeriods(available);
-    setFormulas(formulaRows);
-    setPeriod((current) => current ?? available[0] ?? null);
+    try {
+      const [record, available, formulaRows] = await Promise.all([
+        api.clients.get.query({ id: clientId }),
+        api.report.periods.query({ clientId }),
+        api.formulas.list.query(),
+      ]);
+      setClient(record);
+      setPeriods(available);
+      setFormulas(formulaRows);
+      setPeriod((current) => current ?? available[0] ?? null);
+      setLoadError(null);
+    } catch (cause) {
+      // A deleted or mistyped client id must say so. Leaving the spinner up forever
+      // is the one outcome that tells the user nothing.
+      setLoadError((cause as Error).message);
+      setPeriods([]);
+    }
   }, [clientId]);
 
   const loadReport = useCallback(async () => {
@@ -176,6 +186,22 @@ export function ClientDetailPage() {
   const title = client?.name ?? "…";
 
   /* -------------------------------------------------------------- render */
+
+  if (loadError) {
+    return (
+      <Block>
+        <EmptyState
+          title="This client could not be loaded"
+          body={`${loadError} It may have been deleted, or the link may be out of date.`}
+          action={
+            <Button variant="primary" onClick={() => navigate("/")}>
+              Back to clients
+            </Button>
+          }
+        />
+      </Block>
+    );
+  }
 
   if (!client || periods === null) return <Spinner label="Loading client…" />;
 
