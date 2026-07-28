@@ -1,0 +1,29 @@
+{
+  "name": "@avilo/module",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Avilo Advisory module domain layer: schema, canonical accounts, period algebra, formula registry + engine, deterministic file classification, QuickBooks importers, derived checklist. No I/O, no framework — liftable into relationship-os platform/modules/avilo.",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./schema": "./src/schema.ts"
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@avilo/tables": "workspace:*",
+    "drizzle-orm": "^0.45.2",
+    "mathjs": "^15.2.0",
+    "xlsx": "^0.18.5",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.5"
+  }
+}

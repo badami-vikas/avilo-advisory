@@ -1,0 +1,26 @@
+{
+  "name": "avilo-advisory",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Avilo Advisory — offline, local-first monthly business snapshot module. Structured for lift into relationship-os as platform/modules/avilo.",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "dev:api": "pnpm --filter @avilo/api dev",
+    "dev:web": "pnpm --filter @avilo/web dev",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "db:migrate": "pnpm --filter @avilo/api migrate",
+    "seed:demo": "pnpm --filter @avilo/api seed:demo"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.5"
+  },
+  "packageManager": "pnpm@11.10.0"
+}

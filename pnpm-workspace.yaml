@@ -1,0 +1,10 @@
+packages:
+  - "platform/apps/*"
+  - "platform/modules/*"
+  - "platform/packages/*"
+
+# Build scripts are opt-in under pnpm 11. esbuild backs vite/vitest; better-sqlite3
+# compiles the embedded SQLite engine.
+allowBuilds:
+  esbuild: true
+  better-sqlite3: true

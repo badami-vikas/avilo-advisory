@@ -1,0 +1,2046 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Avilo Advisory — Monthly Business Snapshot v9</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#f8f8f6;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#2c2c2a;min-height:100vh;padding:2rem 1rem}
+.wrap{max-width:820px;margin:0 auto;background:#fff;border-radius:16px;padding:2rem;border:0.5px solid rgba(0,0,0,0.1)}
+
+/* Header */
+.hdr{display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:1rem;border-bottom:0.5px solid rgba(0,0,0,0.1);margin-bottom:1.5rem}
+.hdr h1{font-size:18px;font-weight:500;color:#0F6E56}
+.hdr p{font-size:12px;color:#888780;margin-top:2px}
+.hdr-right .cn{font-size:15px;font-weight:500;color:#2c2c2a;text-align:right}
+.hdr-right .pd{font-size:12px;color:#888780;margin-top:2px;text-align:right}
+
+/* Typography */
+.sec{font-size:11px;font-weight:500;letter-spacing:.06em;text-transform:uppercase;color:#888780;margin:0 0 10px}
+.divider{border:none;border-top:0.5px solid rgba(0,0,0,0.1);margin:1.25rem 0}
+.up{color:#0F6E56}.down{color:#993C1D}.neutral{color:#888780}
+
+/* Buttons */
+.btn-row{display:flex;gap:8px;margin-bottom:1.5rem;flex-wrap:wrap;align-items:center}
+.btn{display:inline-flex;align-items:center;gap:6px;font-size:13px;padding:7px 14px;border-radius:8px;border:0.5px solid rgba(0,0,0,0.2);background:transparent;color:#2c2c2a;cursor:pointer}
+.btn:hover{background:#f1efe8}
+.btn-primary{background:#1D9E75;color:#fff;border-color:#1D9E75}
+.btn-primary:hover{background:#0F6E56;border-color:#0F6E56}
+.btn-primary:disabled{background:#9FE1CB;border-color:#9FE1CB;cursor:not-allowed;color:#fff}
+
+/* Note / Key Insights */
+.note-box{border-left:3px solid #5DCAA5;background:#f1efe8;border-radius:0 8px 8px 0;padding:10px 14px;font-size:13px;color:#888780;margin-bottom:1.5rem}
+.note-box strong{color:#2c2c2a;display:block;margin-bottom:3px;font-size:13px;font-weight:500}
+
+/* Metric cards */
+.mgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-bottom:1.5rem}
+.mgrid-4{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:1.5rem}
+.mgrid-2{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:1rem}
+.mc{background:#f1efe8;border-radius:8px;padding:12px 14px}
+.mc-l{font-size:12px;color:#888780;margin-bottom:4px}
+.mc-v{font-size:22px;font-weight:500;color:#2c2c2a}
+.mc-s{font-size:12px;margin-top:3px}
+.mc-change{font-size:11px;margin-top:3px;line-height:1.5}
+
+/* Spotlight / top-3 */
+.spotlight{background:#f1efe8;border-radius:12px;padding:1rem 1.25rem;margin-bottom:1.5rem}
+.sp-row{display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:0.5px solid rgba(0,0,0,0.08);font-size:14px}
+.sp-row:last-child{border-bottom:none}
+.sp-l{color:#888780}.sp-v{font-weight:500;color:#2c2c2a;text-align:right}
+.sp-s{font-size:12px;font-weight:400;margin-left:6px}
+
+/* Tables */
+.tbl{width:100%;border-collapse:collapse;font-size:13px;margin-bottom:1rem;table-layout:fixed}
+.tbl th{text-align:left;font-weight:500;font-size:11px;color:#888780;padding:6px 8px;border-bottom:0.5px solid rgba(0,0,0,0.1)}
+.tbl th:not(:first-child){text-align:right}
+.tbl td{padding:8px;border-bottom:0.5px solid rgba(0,0,0,0.07);color:#2c2c2a;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tbl td:not(:first-child){text-align:right}
+.tbl tr:last-child td{border-bottom:none}
+.tbl-placeholder{font-size:12px;color:#888780;font-style:italic;padding:8px 0}
+
+/* Expense panel */
+.exp-panel{background:#f1efe8;border-radius:12px;padding:1.25rem;margin-bottom:1.5rem}
+.exp-inner{display:grid;grid-template-columns:repeat(5,1fr);gap:12px}
+.exp-col{display:flex;flex-direction:column;min-width:0}
+.exp-name{font-size:11px;color:#888780;margin-bottom:8px;white-space:normal;line-height:1.3;min-height:28px}
+.exp-bar-wrap{height:80px;display:flex;align-items:flex-end;margin-bottom:8px}
+.exp-bar{width:100%;border-radius:3px 3px 0 0;background:#1D9E75}
+.exp-amt{font-size:13px;font-weight:500;color:#2c2c2a;margin-bottom:3px}
+.exp-pct{font-size:11px;color:#888780}.exp-mom{font-size:11px;margin-top:2px}
+
+/* Charts */
+.chart-wrap{position:relative;width:100%;height:300px;margin-bottom:1.5rem}
+.chart-wrap-sm{position:relative;width:100%;height:220px;margin-bottom:1rem}
+.legend{display:flex;gap:16px;margin-bottom:8px;font-size:12px;color:#888780}
+.legend span{display:flex;align-items:center;gap:5px}
+.lsq{width:10px;height:10px;border-radius:2px}
+.lline{width:16px;height:2px;background:#2C2C2A}
+
+/* Days indicator color */
+.days-green{color:#0F6E56;font-weight:500}
+.days-amber{color:#9A6B00;font-weight:500}
+.days-orange{color:#D85A30;font-weight:500}
+.days-red{color:#993C1D;font-weight:500}
+
+/* Import panel */
+.import-panel{background:#f1efe8;border-radius:12px;padding:1.25rem;margin-bottom:1.5rem;display:none}
+.progress-steps{display:flex;gap:0;margin-bottom:1.25rem;background:#fff;border-radius:8px;overflow:hidden;border:0.5px solid rgba(0,0,0,0.1)}
+.ps{flex:1;padding:8px 6px;text-align:center;font-size:11px;color:#888780;border-right:0.5px solid rgba(0,0,0,0.08)}
+.ps:last-child{border-right:none}
+.ps.active{background:#1D9E75;color:#fff;font-weight:500}
+.ps.done{background:#E1F5EE;color:#0F6E56}
+.import-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:.5rem}
+.drop-zone{border:1.5px dashed rgba(0,0,0,0.2);border-radius:8px;padding:1rem;text-align:center;cursor:pointer;position:relative}
+.drop-zone:hover,.drop-zone.dragover{border-color:#1D9E75}
+.drop-zone.has-file{border-style:solid;border-color:#1D9E75;background:#E1F5EE}
+.dz-icon{font-size:18px;margin-bottom:4px}
+.dz-label{font-size:12px;font-weight:500;color:#2c2c2a;margin-bottom:1px}
+.dz-sub{font-size:11px;color:#888780}
+.dz-fname{font-size:10px;color:#0F6E56;font-weight:500;margin-top:3px;word-break:break-all;line-height:1.2}
+.dz-tag{font-size:10px;font-weight:500;color:#888780;margin-bottom:4px}
+.api-key-row{display:flex;flex-direction:column;gap:4px;margin-bottom:12px}
+.api-key-row label{font-size:11px;color:#888780;font-weight:500;text-transform:uppercase;letter-spacing:.05em}
+.api-key-row input{font-size:13px;padding:7px 10px;border-radius:8px;border:0.5px solid rgba(0,0,0,0.15);background:#fff;color:#2c2c2a;width:100%;font-family:monospace}
+.api-key-note{font-size:11px;color:#888780;margin-top:3px}
+.status-bar{border-radius:8px;padding:10px 14px;font-size:13px;margin-bottom:1rem;display:none}
+.status-bar.show{display:block}
+.status-loading{background:#f1efe8;color:#888780}
+.status-success{background:#E1F5EE;color:#085041}
+.status-error{background:#FAECE7;color:#712B13}
+
+/* Review screen */
+.review-screen{background:#f1efe8;border-radius:12px;padding:1.25rem;margin-bottom:1.5rem;display:none}
+.review-screen.show{display:block}
+.mapping-title{font-size:13px;font-weight:500;color:#2c2c2a;margin-bottom:10px}
+.mapping-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px}
+.mf{display:flex;flex-direction:column;gap:3px}
+.mf label{font-size:11px;color:#888780;text-transform:uppercase;letter-spacing:.04em}
+.mf input{font-size:13px;padding:6px 10px;border-radius:8px;border:0.5px solid rgba(0,0,0,0.15);background:#fff;color:#2c2c2a;width:100%}
+
+/* Service line mapping screen */
+.sl-screen{background:#f1efe8;border-radius:12px;padding:1.25rem;margin-bottom:1.5rem;display:none}
+.sl-screen.show{display:block}
+.sl-row{display:grid;grid-template-columns:24px 1fr 1fr auto;gap:8px;align-items:start;margin-bottom:8px;padding:8px;background:#fff;border-radius:6px}
+.sl-row.disabled{opacity:.5}
+.sl-toggle{width:16px;height:16px;cursor:pointer;accent-color:#1D9E75}
+.sl-name{font-size:13px;color:#2c2c2a;font-weight:500}
+.sl-rev{font-size:12px;color:#888780}
+.sl-select{font-size:12px;padding:5px 8px;border-radius:6px;border:0.5px solid rgba(0,0,0,0.15);background:#fff;color:#2c2c2a;width:100%}
+.sl-margin{font-size:12px;font-weight:500;text-align:right;min-width:50px}
+
+/* Editor panel */
+.editor{background:#f1efe8;border-radius:12px;padding:1.25rem;margin-bottom:1.5rem;display:none}
+.editor.open{display:block}
+.eg{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.ef{display:flex;flex-direction:column;gap:4px}
+.ef label{font-size:11px;color:#888780;font-weight:500;text-transform:uppercase;letter-spacing:.05em}
+.ef input,.ef textarea{font-size:13px;padding:7px 10px;border-radius:8px;border:0.5px solid rgba(0,0,0,0.15);background:#fff;color:#2c2c2a;width:100%}
+.ef textarea{resize:vertical;min-height:60px}
+.esec{font-size:12px;font-weight:500;color:#0F6E56;margin:1rem 0 6px;padding-bottom:4px;border-bottom:0.5px solid rgba(0,0,0,0.1)}
+.etbl{width:100%;border-collapse:collapse;margin-bottom:8px}
+.etbl td{padding:3px 4px;vertical-align:middle}
+.etbl input{font-size:12px;padding:5px 8px;border-radius:6px;border:0.5px solid rgba(0,0,0,0.15);background:#fff;color:#2c2c2a;width:100%}
+.add-btn{font-size:12px;padding:4px 10px;border-radius:6px;border:0.5px solid rgba(0,0,0,0.15);background:transparent;color:#2c2c2a;cursor:pointer;margin-bottom:8px}
+.apply-btn{margin-top:1rem;padding:8px 20px;border-radius:8px;border:none;background:#1D9E75;color:#fff;font-size:13px;font-weight:500;cursor:pointer}
+.apply-btn:hover{background:#0F6E56}
+
+/* Formula panel */
+.formula-panel{background:#1a1a18;border-radius:12px;padding:1.5rem;margin-bottom:1.5rem;display:none;color:#e8e6df}
+.formula-panel.open{display:block}
+.fp-title{font-size:13px;font-weight:500;color:#5DCAA5;margin-bottom:1rem;display:flex;align-items:center;gap:8px}
+.fp-section{margin-bottom:1.25rem}
+.fp-section-label{font-size:10px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#5DCAA5;margin-bottom:8px;opacity:.8}
+.fp-row{display:grid;grid-template-columns:180px 1fr auto;gap:8px;align-items:start;margin-bottom:6px;font-size:12px}
+.fp-label{color:#9FE1CB;font-weight:500;padding-top:7px}
+.fp-formula{background:#2c2c2a;border:0.5px solid rgba(255,255,255,0.08);border-radius:6px;padding:6px 10px;color:#e8e6df;font-family:monospace;font-size:11.5px;width:100%;line-height:1.5;display:block}
+.fp-result{background:#2c2c2a;border-radius:6px;padding:6px 10px;font-size:12px;font-weight:500;color:#9FE1CB;white-space:nowrap;min-width:80px;text-align:right}
+.fp-note{font-size:11px;color:#888780;margin-top:2px;grid-column:2/4}
+.fp-divider{border:none;border-top:0.5px solid rgba(255,255,255,0.06);margin:1rem 0}
+.fp-warning{background:rgba(217,90,48,0.15);border:0.5px solid rgba(217,90,48,0.3);border-radius:6px;padding:8px 12px;font-size:12px;color:#e8a090;margin-bottom:6px}
+
+/* A/R aging table */
+.aging-table{width:100%;border-collapse:collapse;font-size:12px;margin-bottom:1rem}
+.aging-table th{text-align:left;font-weight:500;font-size:10px;color:#888780;padding:5px 8px;border-bottom:0.5px solid rgba(0,0,0,0.1);text-transform:uppercase;letter-spacing:.04em}
+.aging-table th:not(:first-child){text-align:right}
+.aging-table td{padding:7px 8px;border-bottom:0.5px solid rgba(0,0,0,0.07)}
+.aging-table td:not(:first-child){text-align:right}
+.aging-table tr:last-child td{border-bottom:none;font-weight:500}
+
+/* Service line table */
+.sl-tbl-margin-green{color:#0F6E56;font-weight:500}
+.sl-tbl-margin-neutral{color:#888780}
+.sl-tbl-margin-red{color:#993C1D;font-weight:500}
+
+@media(max-width:600px){
+  .exp-inner{grid-template-columns:repeat(3,1fr)}
+  .mgrid-4{grid-template-columns:repeat(2,1fr)}
+  .import-grid{grid-template-columns:1fr}
+  .sl-row{grid-template-columns:24px 1fr;grid-template-rows:auto auto}
+}
+@media print{
+  #toolbar,#import-panel,#editor,#formula-panel,#review-screen,#sl-screen{display:none!important}
+  body{background:#fff;padding:0}
+  .wrap{border:none;border-radius:0;padding:1.5rem;max-width:100%}
+  .chart-wrap{height:240px;width:100%;max-width:100%;box-sizing:border-box}
+  .chart-wrap-sm{height:160px;width:100%;max-width:100%;box-sizing:border-box;margin-bottom:0.75rem}
+  .mc,.spotlight,.exp-panel,.aging-table,.tbl{page-break-inside:avoid}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- HEADER -->
+  <div class="hdr">
+    <div><h1>Avilo Advisory</h1><p>Monthly business snapshot</p></div>
+    <div class="hdr-right">
+      <div class="cn" id="disp-client">Phoenix Restoration Co.</div>
+      <div class="pd" id="disp-period">October 2024</div>
+    </div>
+  </div>
+
+  <!-- TOOLBAR -->
+  <div class="btn-row" id="toolbar">
+    <button class="btn btn-primary" onclick="toggleImport()">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 2v8M4 7l4 4 4-4M2 12h12" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      Import from QBO
+    </button>
+    <button class="btn" onclick="toggleEditor()">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M11 2l3 3-9 9H2v-3l9-9z" stroke="currentColor" stroke-width="1.2" fill="none" stroke-linejoin="round"/></svg>
+      Edit data
+    </button>
+    <button class="btn" onclick="toggleFormulas()" style="font-family:monospace;font-size:12px">ƒ Check formulas</button>
+    <button class="btn btn-primary" id="pdf-btn" onclick="exportPDF()">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M4 2h6l4 4v8a1 1 0 01-1 1H4a1 1 0 01-1-1V3a1 1 0 011-1z" stroke="currentColor" stroke-width="1.2" fill="none"/><path d="M9 2v4h4M6 10h4M6 12.5h2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+      Save as PDF
+    </button>
+    <button class="btn" id="json-btn" onclick="saveJSON()">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M13 4l-3-3H4a1 1 0 00-1 1v12a1 1 0 001 1h9a1 1 0 001-1V4z" stroke="currentColor" stroke-width="1.2" fill="none"/><path d="M9 1v4h4M6 9h4M6 11.5h2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+      Save as JSON
+    </button>
+    <button class="btn" onclick="document.getElementById('load-json-input').click()">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 14V6M4 9l4-4 4 4M2 14h12" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      Load saved report
+    </button>
+    <input type="file" id="load-json-input" accept=".json" style="display:none" onchange="loadJSON(event)">
+  </div>
+
+  <!-- FORMULA PANEL (hidden from PDF) -->
+  <div class="formula-panel" id="formula-panel">
+    <div class="fp-title">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M3 4h10M3 8h6M3 12h8" stroke="#5DCAA5" stroke-width="1.3" stroke-linecap="round"/></svg>
+      Formula checker — for your eyes only, hidden from PDF exports
+    </div>
+    <div id="formula-content"></div>
+  </div>
+
+  <!-- IMPORT PANEL (hidden from PDF) -->
+  <div class="import-panel" id="import-panel">
+    <div class="progress-steps" id="import-progress">
+      <div class="ps active" id="ps-1">1 Upload reports</div>
+      <div class="ps" id="ps-2">2 Review numbers</div>
+      <div class="ps" id="ps-3">3 Map service lines</div>
+      <div class="ps" id="ps-4">4 Done</div>
+    </div>
+    <div class="api-key-row">
+      <label>Your Anthropic API key</label>
+      <input type="password" id="api-key" placeholder="sk-ant-...">
+      <div class="api-key-note">Your key stays in this browser tab only — never sent anywhere except directly to Anthropic's API.</div>
+    </div>
+    <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+      <div class="ef" style="flex:1;min-width:160px"><label>Client name</label><input id="imp-client" placeholder="e.g. Dave's Landscaping"></div>
+      <div class="ef" style="flex:1;min-width:140px">
+        <label>Report period</label>
+        <div style="position:relative">
+          <select id="imp-period-select" style="font-size:13px;padding:7px 10px;border-radius:8px;border:0.5px solid rgba(0,0,0,0.15);background:#fff;color:#2c2c2a;width:100%;display:none" onchange="$('imp-period').value=this.value">
+            <option value="">— select period —</option>
+          </select>
+          <input id="imp-period" placeholder="Upload P&L first to auto-detect" style="width:100%">
+        </div>
+        <div id="imp-period-note" style="font-size:11px;color:#888780;margin-top:3px;display:none">Detected from P&L column headers</div>
+      </div>
+    </div>
+    <!-- Combined upload option -->
+    <div style="margin-bottom:10px">
+      <div class="dz-tag" style="font-size:12px;font-weight:500;color:#0F6E56;margin-bottom:6px">
+        ⚡ Combined QBO group report
+        <span style="font-weight:400;color:#888780;font-size:11px;margin-left:4px">— upload one PDF containing all reports</span>
+      </div>
+      <div class="drop-zone" id="dz-combined" onclick="document.getElementById('fi-combined').click()" ondragover="dzOver(event,'dz-combined')" ondragleave="dzLeave('dz-combined')" ondrop="dzDrop(event,'combined')" style="border-color:#1D9E75;background:#f8fdf9">
+        <div class="dz-icon">📦</div>
+        <div class="dz-label">Drop combined PDF here</div>
+        <div class="dz-sub">All 6 reports in one file — individual zones below will be ignored</div>
+        <div class="dz-fname" id="fn-combined"></div>
+      </div>
+      <input type="file" id="fi-combined" accept=".pdf" style="display:none" onchange="fileSelected(event,'combined')">
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+      <hr style="flex:1;border:none;border-top:0.5px solid rgba(0,0,0,0.1)">
+      <span style="font-size:11px;color:#888780">or upload individually</span>
+      <hr style="flex:1;border:none;border-top:0.5px solid rgba(0,0,0,0.1)">
+    </div>
+    <div class="import-grid" id="individual-zones">
+      <div>
+        <div class="dz-tag">P&amp;L by Month — L13M <span style="color:#993C1D">*</span></div>
+        <div class="drop-zone" id="dz-pl" onclick="document.getElementById('fi-pl').click()" ondragover="dzOver(event,'dz-pl')" ondragleave="dzLeave('dz-pl')" ondrop="dzDrop(event,'pl')">
+          <div class="dz-icon">📄</div><div class="dz-label">Drop PDF or Excel here</div><div class="dz-sub">or click to browse</div><div class="dz-fname" id="fn-pl"></div>
+        </div>
+        <input type="file" id="fi-pl" accept=".pdf,.xlsx,.xls,.csv" style="display:none" onchange="fileSelected(event,'pl')">
+      </div>
+      <div>
+        <div class="dz-tag">Balance Sheet <span style="color:#993C1D">*</span></div>
+        <div class="drop-zone" id="dz-bs" onclick="document.getElementById('fi-bs').click()" ondragover="dzOver(event,'dz-bs')" ondragleave="dzLeave('dz-bs')" ondrop="dzDrop(event,'bs')">
+          <div class="dz-icon">📄</div><div class="dz-label">Drop PDF or Excel here</div><div class="dz-sub">or click to browse</div><div class="dz-fname" id="fn-bs"></div>
+        </div>
+        <input type="file" id="fi-bs" accept=".pdf,.xlsx,.xls,.csv" style="display:none" onchange="fileSelected(event,'bs')">
+      </div>
+      <div>
+        <div class="dz-tag">A/R Aging <span style="color:#888780">(optional)</span></div>
+        <div class="drop-zone" id="dz-ar" onclick="document.getElementById('fi-ar').click()" ondragover="dzOver(event,'dz-ar')" ondragleave="dzLeave('dz-ar')" ondrop="dzDrop(event,'ar')">
+          <div class="dz-icon">📄</div><div class="dz-label">Drop PDF or Excel here</div><div class="dz-sub">or click to browse</div><div class="dz-fname" id="fn-ar"></div>
+        </div>
+        <input type="file" id="fi-ar" accept=".pdf,.xlsx,.xls,.csv" style="display:none" onchange="fileSelected(event,'ar')">
+      </div>
+      <div>
+        <div class="dz-tag">A/P Aging <span style="color:#888780">(optional)</span></div>
+        <div class="drop-zone" id="dz-ap" onclick="document.getElementById('fi-ap').click()" ondragover="dzOver(event,'dz-ap')" ondragleave="dzLeave('dz-ap')" ondrop="dzDrop(event,'ap')">
+          <div class="dz-icon">📄</div><div class="dz-label">Drop PDF or Excel here</div><div class="dz-sub">or click to browse</div><div class="dz-fname" id="fn-ap"></div>
+        </div>
+        <input type="file" id="fi-ap" accept=".pdf,.xlsx,.xls,.csv" style="display:none" onchange="fileSelected(event,'ap')">
+      </div>
+      <div>
+        <div class="dz-tag">L90D Referral Report <span style="color:#888780">(optional)</span></div>
+        <div class="drop-zone" id="dz-ref" onclick="document.getElementById('fi-ref').click()" ondragover="dzOver(event,'dz-ref')" ondragleave="dzLeave('dz-ref')" ondrop="dzDrop(event,'ref')">
+          <div class="dz-icon">📄</div><div class="dz-label">Drop PDF or Excel here</div><div class="dz-sub">or click to browse</div><div class="dz-fname" id="fn-ref"></div>
+        </div>
+        <input type="file" id="fi-ref" accept=".pdf,.xlsx,.xls,.csv" style="display:none" onchange="fileSelected(event,'ref')">
+      </div>
+      <div>
+        <div class="dz-tag">L12M Sales by Customer <span style="color:#888780">(optional)</span></div>
+        <div class="drop-zone" id="dz-sales" onclick="document.getElementById('fi-sales').click()" ondragover="dzOver(event,'dz-sales')" ondragleave="dzLeave('dz-sales')" ondrop="dzDrop(event,'sales')">
+          <div class="dz-icon">📄</div><div class="dz-label">Drop PDF or Excel here</div><div class="dz-sub">or click to browse</div><div class="dz-fname" id="fn-sales"></div>
+        </div>
+        <input type="file" id="fi-sales" accept=".pdf,.xlsx,.xls,.csv" style="display:none" onchange="fileSelected(event,'sales')">
+      </div>
+    </div><!-- end #individual-zones -->
+    <div style="font-size:11px;color:#888780;margin-bottom:12px"><span style="color:#993C1D">*</span> Required when uploading individually</div>
+    <div class="status-bar" id="status-bar"></div>
+    <button class="btn btn-primary" id="run-import-btn" onclick="runImport()" disabled>
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      Read &amp; extract data
+    </button>
+  </div>
+
+  <!-- REVIEW SCREEN (Screen 1) -->
+  <div class="review-screen" id="review-screen">
+    <div class="mapping-title">Step 2 of 4 — Review extracted values. Edit anything that looks off before continuing.</div>
+    <div class="mapping-grid" id="review-fields"></div>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-primary" onclick="goToServiceLineMapping()">Next: Map service lines →</button>
+      <button class="btn" onclick="cancelMapping()">Cancel</button>
+    </div>
+  </div>
+
+  <!-- SERVICE LINE MAPPING SCREEN (Screen 2) -->
+  <div class="sl-screen" id="sl-screen">
+    <div class="mapping-title">Step 3 of 4 — Map service lines. Toggle which revenue lines to show and select the matching COGS line for each.</div>
+    <div id="sl-rows"></div>
+    <div style="display:flex;gap:8px;margin-top:8px">
+      <button class="btn btn-primary" onclick="confirmServiceLines()">Confirm &amp; render report →</button>
+      <button class="btn" onclick="backToReview()">← Back</button>
+    </div>
+  </div>
+
+  <!-- EDITOR PANEL (hidden from PDF) -->
+  <div class="editor" id="editor">
+    <div class="esec">Client info</div>
+    <div class="eg">
+      <div class="ef"><label>Client name</label><input id="e-client"></div>
+      <div class="ef"><label>Report period</label><input id="e-period"></div>
+    </div>
+    <div class="esec">Key Insights</div>
+    <div class="ef"><textarea id="e-note" style="min-height:80px"></textarea></div>
+    <div class="esec">Profitability</div>
+    <div class="eg">
+      <div class="ef"><label>Revenue this month ($)</label><input id="e-rev" type="number"></div>
+      <div class="ef"><label>Revenue last month ($)</label><input id="e-revP" type="number"></div>
+      <div class="ef"><label>Revenue same month PY ($)</label><input id="e-revPY" type="number"></div>
+      <div class="ef"><label>COGS this month ($)</label><input id="e-cogs" type="number"></div>
+      <div class="ef"><label>COGS last month ($)</label><input id="e-cogsP" type="number"></div>
+      <div class="ef"><label>COGS same month PY ($)</label><input id="e-cogsPY" type="number"></div>
+      <div class="ef"><label>Overhead this month ($)</label><input id="e-ovhd" type="number"></div>
+      <div class="ef"><label>Overhead last month ($)</label><input id="e-ovhdP" type="number"></div>
+      <div class="ef"><label>Overhead same month PY ($)</label><input id="e-ovhdPY" type="number"></div>
+    </div>
+    <div class="esec">Cash position</div>
+    <div class="eg">
+      <div class="ef"><label>Cash on hand ($)</label><input id="e-cash" type="number"></div>
+      <div class="ef"><label>Cash last month ($)</label><input id="e-cashP" type="number"></div>
+      <div class="ef"><label>Total A/R — balance sheet ($)</label><input id="e-ar-bs" type="number"></div>
+      <div class="ef"><label>Total A/P — balance sheet ($)</label><input id="e-ap-bs" type="number"></div>
+    </div>
+    <div class="esec">Top 5 expenses</div>
+    <div id="exp-editor-rows"></div>
+    <button class="add-btn" onclick="addExpRow()">+ Add expense row</button>
+    <div class="esec">A/R aging table</div>
+    <div id="ar-aging-editor"></div>
+    <div class="esec">A/P aging (who you owe)</div>
+    <div id="ap-aging-editor"></div>
+    <button class="add-btn" onclick="addAPRow()">+ Add A/P row</button>
+    <div class="esec">Service lines (Where your money came from)</div>
+    <div id="sl-editor-rows"></div>
+    <button class="add-btn" onclick="addSLRow()">+ Add service line</button>
+    <div class="esec">Top 5 jobs this month</div>
+    <div id="topjobs-editor-rows"></div>
+    <button class="add-btn" onclick="addTopJobRow()">+ Add job</button>
+    <div class="esec">Job counts — last 12 months</div>
+    <div id="jobcounts-editor-rows"></div>
+    <div class="esec">Avg revenue per job</div>
+    <div class="eg">
+      <div class="ef"><label>Avg rev/job this month ($)</label><input id="e-arj-month" type="number"></div>
+      <div class="ef"><label>Avg rev/job L12M ($)</label><input id="e-arj-l12" type="number"></div>
+    </div>
+    <div class="esec">Top referral partners (L90D)</div>
+    <div id="referral-editor-rows"></div>
+    <button class="add-btn" onclick="addReferralRow()">+ Add referral partner</button>
+    <button class="apply-btn" onclick="applyEditor()">Apply changes</button>
+  </div>
+
+  <!-- REPORT BODY -->
+  <div id="report-body"></div>
+
+</div><!-- end .wrap -->
+
+<script>
+const $=id=>document.getElementById(id);
+let revenueChart=null,jobCountChart=null;
+let files={pl:null,bs:null,ar:null,ap:null,ref:null,sales:null,combined:null};
+let pendingExtracted=null;
+let importStep=1;
+
+// ─── DEFAULT SAMPLE DATA ──────────────────────────────────────────────────
+let data={
+  client:"Phoenix Restoration Co.",
+  period:"October 2024",
+  rev:94200, revP:88600, revPY:79400,
+  cogs:28260, cogsP:26580, cogsPY:23820,
+  ovhd:31800, ovhdP:30200, ovhdPY:28600,
+  noi:34140, noiP:31820, noiPY:26980,
+  cash:38200, cashP:31400,
+  arBS:282600, apBS:13200,
+  note:"October was a strong month — revenue of $94.2k came in 6.3% ahead of September, driven by a large water damage job at Heritage Properties and two new mold remediation contracts. Net margin held at 36.2%, in line with our target range. Watch item: A/R is running long at 90+ days on several accounts — recommend a collections push before year-end. Labor as a % of revenue ticked up slightly MoM; worth reviewing subcontractor rates heading into the slower winter months.",
+  trend:[
+    {m:"Nov '23",rev:16200,noi:5400},{m:"Dec '23",rev:22400,noi:7600},
+    {m:"Jan '24",rev:28600,noi:9800},{m:"Feb '24",rev:34200,noi:11800},
+    {m:"Mar '24",rev:42000,noi:14700},{m:"Apr '24",rev:54800,noi:19200},
+    {m:"May '24",rev:68400,noi:24400},{m:"Jun '24",rev:88200,noi:31400},
+    {m:"Jul '24",rev:104600,noi:37200},{m:"Aug '24",rev:118000,noi:42000},
+    {m:"Sep '24",rev:88600,noi:31820},{m:"Oct '24",rev:94200,noi:34140}
+  ],
+  expenses:[
+    {name:"Labor & subcontractors",amt:18400,prev:17200},
+    {name:"Equipment & supplies",amt:5800,prev:5600},
+    {name:"Vehicle & fuel",amt:3600,prev:3400},
+    {name:"Insurance",amt:2400,prev:2400},
+    {name:"Admin & software",amt:1600,prev:1600}
+  ],
+  arAging:[
+    {bucket:"0–30 days",amt:22600},{bucket:"31–60 days",amt:88400},
+    {bucket:"61–90 days",amt:124200},{bucket:"90+ days",amt:47400}
+  ],
+  ar:[
+    {name:"Heritage Properties LLC",amt:47400,bucket:"90+ days"},
+    {name:"Clearwater HOA",amt:88600,bucket:"61–90 days"},
+    {name:"Sunrise Commercial",amt:62400,bucket:"61–90 days"},
+    {name:"Miller Residence",amt:28200,bucket:"31–60 days"},
+    {name:"Lakewood Management",amt:9200,bucket:"31–60 days"}
+  ],
+  ap:[
+    {name:"ServiceMaster Supply",amt:4800,due:"Nov 10"},
+    {name:"Equipment lease — Sunbelt",amt:4200,due:"Nov 1"},
+    {name:"Subcontractor — drywall",amt:2800,due:"Nov 15"},
+    {name:"Truck lease — Enterprise",amt:900,due:"Nov 5"},
+    {name:"Commercial Insurance — Travelers",amt:500,due:"Nov 20"}
+  ],
+  serviceLines:[
+    {name:"Water damage restoration",rev:42000,cogs:12600},
+    {name:"Fire & smoke remediation",rev:28400,cogs:8520},
+    {name:"Mold remediation",rev:16200,cogs:4860},
+    {name:"Reconstruction",rev:7600,cogs:2280}
+  ],
+  topJobs:[
+    {client:"Heritage Properties LLC",rev:18400},
+    {client:"Sunrise Commercial",rev:14200},
+    {client:"Clearwater HOA — Unit 14B",rev:11600},
+    {client:"Miller Residence — water damage",rev:8800},
+    {client:"Lakewood Mgmt — mold",rev:6200}
+  ],
+  jobCounts:[
+    {m:"Nov '23",count:6},{m:"Dec '23",count:7},
+    {m:"Jan '24",count:8},{m:"Feb '24",count:10},
+    {m:"Mar '24",count:12},{m:"Apr '24",count:16},
+    {m:"May '24",count:22},{m:"Jun '24",count:30},
+    {m:"Jul '24",count:34},{m:"Aug '24",count:36},
+    {m:"Sep '24",count:28},{m:"Oct '24",count:30}
+  ],
+  arjMonth:3140, arjL12:2820,
+  referrals:[
+    {name:"Allstate — Janet Torres",fees:8400},
+    {name:"State Farm — Dave Kim",fees:6200},
+    {name:"Summit Property Mgmt",fees:4800},
+    {name:"Travelers — Lisa Novak",fees:3600},
+    {name:"Homeward Property Mgmt",fees:2200}
+  ]
+};
+
+// ─── FORMATTERS ───────────────────────────────────────────────────────────
+const fmt=n=>"$"+Math.round(n).toLocaleString();
+const fmtF=n=>(isNaN(n)||!isFinite(n))?'—':'$'+Math.round(n).toLocaleString();
+const pct=n=>(n*100).toFixed(1)+"%";
+const pctF=n=>(isNaN(n)||!isFinite(n))?'—':(n*100).toFixed(1)+"%";
+const daysF=n=>(isNaN(n)||!isFinite(n))?'—':n.toFixed(1)+" days";
+
+function chgRow(label,curr,prev,invert=false){
+  if(!prev)return`<div class="mc-change neutral">${label}: —</div>`;
+  const d=curr-prev,p=((curr-prev)/prev*100);
+  const good=invert?(d<=0):(d>=0);
+  const cls=good?'up':'down';
+  const arrow=d>=0?'▲':'▼';
+  return`<div class="mc-change ${cls}">${label}: ${arrow} ${fmt(Math.abs(d))} (${Math.abs(p).toFixed(1)}%)</div>`;
+}
+
+// ─── CALCULATIONS ─────────────────────────────────────────────────────────
+function calc(d){
+  const gp=d.rev-d.cogs, gpP=d.revP-d.cogsP, gpPY=d.revPY-d.cogsPY;
+  const noi=d.noi||d.rev-d.cogs-d.ovhd;
+  const noiP=d.noiP||d.revP-d.cogsP-d.ovhdP;
+  const noiPY=d.noiPY||d.revPY-d.cogsPY-d.ovhdPY;
+  const noiMargin=d.rev?noi/d.rev:0;
+  const noiMarginP=d.revP?noiP/d.revP:0;
+  const gm=d.rev?gp/d.rev:0;
+  const totalARaging=d.arAging?d.arAging.reduce((s,r)=>s+r.amt,0):(d.ar||[]).reduce((s,r)=>s+r.amt,0);
+  const totalAR=d.arBS||totalARaging;
+  const totalAP=(d.ap||[]).reduce((s,r)=>s+r.amt,0)||d.apBS||0;
+  const dso=d.rev?(totalARaging/(d.rev/30)):0;
+  const dpo=d.cogs?(totalAP/(d.cogs/30)):0;
+  const dcoh=(d.ovhd+d.cogs)?d.cash/((d.cogs+d.ovhd)/365):0;
+  return{gp,gpP,gpPY,noi,noiP,noiPY,noiMargin,noiMarginP,gm,
+    totalARaging,totalAR,totalAP,dso,dpo,dcoh};
+}
+
+function daysColor(days){
+  if(days<=30)return'days-green';
+  if(days<=60)return'days-amber';
+  if(days<=90)return'days-orange';
+  return'days-red';
+}
+function slMarginClass(m){
+  if(m>=0.65)return'sl-tbl-margin-green';
+  if(m>=0.50)return'sl-tbl-margin-neutral';
+  return'sl-tbl-margin-red';
+}
+
+// ─── CHART BUILDERS ───────────────────────────────────────────────────────
+const customLabelsPlugin={
+  id:'customLabels',
+  afterDraw(chart){
+    if(!data.trend||!data.trend.length)return;
+    const{ctx}=chart;
+    const bm=chart.getDatasetMeta(0),lm=chart.getDatasetMeta(1);
+    ctx.save();ctx.textAlign='center';
+    bm.data.forEach((bar,i)=>{
+      const v=data.trend[i]?.rev||0;
+      // Place label above positive bars, below negative bars
+      ctx.font='bold 9px sans-serif';ctx.fillStyle='rgba(0,0,0,0.55)';
+      if(v>=0){ctx.textBaseline='bottom';ctx.fillText('$'+(v>=1000?(v/1000).toFixed(0)+'k':v),bar.x,bar.y-2);}
+      else{ctx.textBaseline='top';ctx.fillText('$'+(Math.abs(v)>=1000?'-'+(Math.abs(v)/1000).toFixed(0)+'k':v),bar.x,bar.y+2);}
+    });
+    lm.data.forEach((pt,i)=>{
+      const rev=data.trend[i]?.rev||0,noi=data.trend[i]?.noi||0;
+      const margin=rev!==0?(noi/rev*100).toFixed(0)+'%':'0%';
+      ctx.font='bold 9px sans-serif';ctx.fillStyle='rgba(30,30,30,0.8)';
+      ctx.textBaseline='bottom';ctx.fillText(margin,pt.x,pt.y-4);
+    });
+    ctx.restore();
+  }
+};
+
+function buildTrendChart(){
+  if(revenueChart){revenueChart.destroy();revenueChart=null;}
+  if(!data.trend||!data.trend.length)return;
+  const ctx=$('trend-chart')?.getContext('2d');if(!ctx)return;
+
+  const revVals=data.trend.map(r=>r.rev);
+  const margins=data.trend.map(r=>r.rev!==0?+(r.noi/r.rev*100).toFixed(1):0);
+  const revMin=Math.min(0,...revVals);
+  const revMax=Math.max(...revVals);
+  const marginMin=Math.min(0,...margins);
+  const marginMax=Math.max(...margins);
+  // Add 15% headroom for labels
+  const yMin=revMin<0?revMin*1.25:0;
+  const yMax=revMax*1.18;
+  const y2Min=marginMin<0?Math.floor((marginMin-15)/10)*10:-15;
+  const y2Max=Math.max(70,Math.ceil((marginMax+10)/10)*10);
+
+  revenueChart=new Chart(ctx,{
+    plugins:[customLabelsPlugin],
+    data:{
+      labels:data.trend.map(r=>r.m),
+      datasets:[
+        {type:'bar',label:'Revenue',data:revVals,
+         backgroundColor:'#9FE1CB',borderWidth:0,borderRadius:3,order:2},
+        {type:'line',label:'Net Operating Income margin %',
+         data:margins,
+         borderColor:'#2C2C2A',backgroundColor:'transparent',borderWidth:2,
+         pointRadius:3,pointBackgroundColor:'#2C2C2A',tension:0.3,order:1,yAxisID:'y2'}
+      ]
+    },
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      interaction:{mode:'index',intersect:false},
+      plugins:{legend:{display:false},
+        tooltip:{callbacks:{
+          label:ctx=>ctx.datasetIndex===0
+            ?`  Revenue: ${fmt(ctx.parsed.y)}`
+            :`  Net Operating Income margin: ${ctx.parsed.y.toFixed(1)}%`
+        }}
+      },
+      scales:{
+        x:{grid:{color:'rgba(0,0,0,0.05)'},ticks:{color:'rgba(0,0,0,0.4)',font:{size:10},maxRotation:45,autoSkip:false}},
+        y:{grid:{color:'rgba(0,0,0,0.05)'},min:yMin,max:yMax,
+           ticks:{color:'rgba(0,0,0,0.4)',font:{size:11},callback:v=>v>=1000||v<=-1000?'$'+(v/1000).toFixed(0)+'k':fmt(v)},position:'left'},
+        y2:{grid:{display:false},min:y2Min,max:y2Max,
+            ticks:{color:'rgba(0,0,0,0.3)',font:{size:10},callback:v=>v+'%',stepSize:10},position:'right'}
+      },
+      layout:{padding:{top:26,bottom:28,left:4,right:4}}
+    }
+  });
+}
+
+function buildJobCountChart(){
+  if(jobCountChart){jobCountChart.destroy();jobCountChart=null;}
+  if(!data.jobCounts||!data.jobCounts.length)return;
+  const ctx=$('jobcount-chart')?.getContext('2d');if(!ctx)return;
+  jobCountChart=new Chart(ctx,{
+    type:'bar',
+    data:{
+      labels:data.jobCounts.map(r=>r.m),
+      datasets:[{
+        label:'Jobs',data:data.jobCounts.map(r=>r.count),
+        backgroundColor:data.jobCounts.map((_,i)=>i===data.jobCounts.length-1?'#1D9E75':'#9FE1CB'),
+        borderWidth:0,borderRadius:3
+      }]
+    },
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>`  ${ctx.parsed.y} jobs`}}},
+      scales:{
+        x:{grid:{color:'rgba(0,0,0,0.05)'},ticks:{color:'rgba(0,0,0,0.4)',font:{size:10},maxRotation:45,autoSkip:false}},
+        y:{grid:{color:'rgba(0,0,0,0.05)'},ticks:{color:'rgba(0,0,0,0.4)',font:{size:11}},beginAtZero:true}
+      }
+    }
+  });
+}
+
+function buildExpPanel(){
+  if(!data.expenses||!data.expenses.length){
+    $('exp-panel-inner').innerHTML='<div class="tbl-placeholder">No expense data.</div>';return;
+  }
+  // Exclude D&A, sort by this-month amount desc, take top 5 with amt > 0
+  const DA_PATTERN=/depreciation|amortization/i;
+  const filtered=data.expenses
+    .filter(e=>!DA_PATTERN.test(e.name)&&e.amt>0)
+    .sort((a,b)=>b.amt-a.amt)
+    .slice(0,5);
+  if(!filtered.length){
+    $('exp-panel-inner').innerHTML='<div class="tbl-placeholder">No expense data after filtering.</div>';return;
+  }
+  const totalExp=filtered.reduce((s,e)=>s+e.amt,0);
+  const maxAmt=Math.max(...filtered.map(e=>e.amt));
+  $('exp-panel-inner').innerHTML=filtered.map(e=>{
+    const barH=Math.max(8,Math.round((e.amt/maxAmt)*76));
+    const po=totalExp?(e.amt/totalExp*100).toFixed(1):'0';
+    const mom=e.prev>0?((e.amt-e.prev)/e.prev*100):0;
+    const mc=mom>1?'down':mom<-1?'up':'neutral';
+    const ms=Math.abs(mom)<0.1?'— no change':(mom>0?'▲':'▼')+Math.abs(mom).toFixed(1)+'% MoM';
+    return`<div class="exp-col">
+      <div class="exp-name">${e.name}</div>
+      <div class="exp-bar-wrap"><div class="exp-bar" style="height:${barH}px"></div></div>
+      <div class="exp-amt">${fmt(e.amt)}</div>
+      <div class="exp-pct">${po}% of total</div>
+      <div class="exp-mom ${mc}">${ms}</div>
+    </div>`;
+  }).join('');
+}
+
+// ─── MAIN RENDER ──────────────────────────────────────────────────────────
+function render(){
+  const d=data,c=calc(d);
+  $('disp-client').textContent=d.client||'—';
+  $('disp-period').textContent=d.period||'—';
+
+  // Profitability card helpers
+  const revMoM=chgRow('MoM',d.rev,d.revP);
+  const revYoY=chgRow('YoY',d.rev,d.revPY);
+  const gpMoM=chgRow('MoM',c.gp,c.gpP);
+  const gpYoY=chgRow('YoY',c.gp,c.gpPY);
+  const ovhdMoM=chgRow('MoM',d.ovhd,d.ovhdP,true);
+  const ovhdYoY=chgRow('YoY',d.ovhd,d.ovhdPY,true);
+  const noiMoM=chgRow('MoM',c.noi,c.noiP);
+  const noiYoY=chgRow('YoY',c.noi,c.noiPY);
+
+  // Cash MoM
+  const cashDiff=d.cash-d.cashP,cashGood=cashDiff>=0;
+  const cashChgStr=d.cashP?`<span class="${cashGood?'up':'down'}">${cashDiff>=0?'▲':'▼'} ${fmt(Math.abs(cashDiff))} MoM</span>`:'';
+
+  // Days indicators
+  const dcohOk=c.dcoh>=30;
+  const dsoOk=c.dso<=90;
+  const dpoOk=c.dpo<=25;
+
+  // A/R aging table
+  const arTotal=d.arAging?d.arAging.reduce((s,r)=>s+r.amt,0):0;
+  const arAgingRows=d.arAging&&d.arAging.length?
+    d.arAging.map(r=>`<tr>
+      <td>${r.bucket}</td>
+      <td>${fmt(r.amt)}</td>
+      <td>${arTotal?(r.amt/arTotal*100).toFixed(1)+'%':'—'}</td>
+    </tr>`).join('')+`<tr style="border-top:0.5px solid rgba(0,0,0,0.1)"><td><strong>Total</strong></td><td><strong>${fmt(arTotal)}</strong></td><td><strong>100%</strong></td></tr>`:
+    '<tr><td colspan="3" class="tbl-placeholder">Upload A/R Aging report to populate this table.</td></tr>';
+
+  // AR rows — use bucket label instead of days number
+  const arCount=Math.min((d.ar||[]).length,5);
+  const arRows=(d.ar||[]).slice(0,5).map(r=>{
+    // bucket may come from Excel parse or from PDF extraction
+    const bucketLabel=r.bucket||'—';
+    const bucketClass=bucketLabel.includes('0–30')||bucketLabel.includes('0-30')?'days-green':
+                      bucketLabel.includes('31')?'days-amber':
+                      bucketLabel.includes('61')?'days-orange':'days-red';
+    return`<tr><td>${r.name}</td><td>${fmt(r.amt)}</td><td class="${bucketClass}">${bucketLabel}</td></tr>`;
+  }).join('');
+
+  // AP rows — top N
+  const apCount=Math.min((d.ap||[]).length,5);
+  const apRows=(d.ap||[]).slice(0,5).map(r=>
+    `<tr><td>${r.name}</td><td>${fmt(r.amt)}</td><td>${r.due||'TBD'}</td></tr>`
+  ).join('');
+
+  // Service lines
+  const slRows=(d.serviceLines||[]).length?
+    (d.serviceLines||[]).map(r=>{
+      const gp=r.rev-r.cogs,m=r.rev?gp/r.rev:0;
+      return`<tr>
+        <td>${r.name}</td>
+        <td>${fmt(r.rev)}</td>
+        <td>${fmt(gp)}</td>
+        <td class="${slMarginClass(m)}">${pct(m)}</td>
+      </tr>`;
+    }).join(''):
+    '<tr><td colspan="4" class="tbl-placeholder">Use the service line mapping flow after import, or add lines via Edit data.</td></tr>';
+
+  // Top jobs
+  const topJobCount=Math.min((d.topJobs||[]).length,5);
+  const topJobRows=(d.topJobs||[]).slice(0,5).map(r=>
+    `<tr><td>${r.client}</td><td>${fmt(r.rev)}</td></tr>`
+  ).join('');
+
+  // Job counts
+  const currJobCount=(d.jobCounts&&d.jobCounts.length)?d.jobCounts[d.jobCounts.length-1].count:null;
+  const prevJobCount=(d.jobCounts&&d.jobCounts.length>=2)?d.jobCounts[d.jobCounts.length-2].count:null;
+  const jobCountChgStr=prevJobCount&&currJobCount!==null?
+    (()=>{const d2=currJobCount-prevJobCount,g=d2>=0;return`<span class="${g?'up':'down'}">${d2>=0?'▲':'▼'} ${Math.abs(d2)} MoM</span>`;})():'';
+
+  // L12M avg rev per job
+  const arjL12Chg=d.arjL12?((d.arjMonth-d.arjL12)/d.arjL12*100).toFixed(1):null;
+
+  // Referrals
+  const refRows=(d.referrals&&d.referrals.length)?
+    (d.referrals||[]).slice(0,5).map(r=>`<tr><td>${r.name}</td><td>${fmt(r.fees)}</td></tr>`).join(''):null;
+
+  $('report-body').innerHTML=`
+    <!-- 2: Key Insights -->
+    <div class="note-box" style="margin-bottom:1.5rem">
+      <strong>Key Insights</strong>
+      <span id="note-text">${d.note||'Add your key insights here.'}</span>
+    </div>
+
+    <!-- 3: Revenue & NOI margin trend chart -->
+    <p class="sec">Revenue &amp; Net Operating Income margin — last 12 months</p>
+    <div class="legend">
+      <span><span class="lsq" style="background:#9FE1CB"></span>Revenue (left axis)</span>
+      <span><span class="lline"></span>Net Operating Income margin % (right axis)</span>
+    </div>
+    <div class="chart-wrap"><canvas id="trend-chart" role="img" aria-label="Revenue and NOI margin trend chart"></canvas></div>
+
+    <hr class="divider">
+
+    <!-- 4: Top expenses -->
+    <p class="sec">Top expenses this month</p>
+    <div class="exp-panel"><div class="exp-inner" id="exp-panel-inner"></div></div>
+
+    <hr class="divider">
+
+    <!-- 5: Top 3 spotlight -->
+    <p class="sec">At a Glance</p>
+    <div class="spotlight">
+      <div class="sp-row">
+        <span class="sp-l">Total cash in bank accounts</span>
+        <span class="sp-v">${fmt(d.cash)}<span class="sp-s">${cashChgStr}</span></span>
+      </div>
+      <div class="sp-row">
+        <span class="sp-l">Net Operating Income margin</span>
+        <span class="sp-v">${pct(c.noiMargin)}<span class="sp-s neutral">${fmt(c.noi)} on ${fmt(d.rev)} revenue</span></span>
+      </div>
+      <div class="sp-row">
+        <span class="sp-l">Outstanding A/R</span>
+        <span class="sp-v">${fmt(c.totalAR)}<span class="sp-s neutral">all unpaid invoices</span></span>
+      </div>
+    </div>
+
+    <hr class="divider">
+
+    <!-- 6: Did you make money -->
+    <p class="sec">Did you make money this month?</p>
+    <div class="mgrid-4">
+      <div class="mc">
+        <div class="mc-l">Total revenue</div>
+        <div class="mc-v">${fmt(d.rev)}</div>
+        ${revMoM}${revYoY}
+      </div>
+      <div class="mc">
+        <div class="mc-l">Gross profit</div>
+        <div class="mc-v">${fmt(c.gp)}</div>
+        ${gpMoM}${gpYoY}
+      </div>
+      <div class="mc">
+        <div class="mc-l">Overhead expenses</div>
+        <div class="mc-v">${fmt(d.ovhd)}</div>
+        ${ovhdMoM}${ovhdYoY}
+      </div>
+      <div class="mc">
+        <div class="mc-l">Net operating income</div>
+        <div class="mc-v">${fmt(c.noi)}</div>
+        ${noiMoM}${noiYoY}
+      </div>
+    </div>
+
+    <hr class="divider">
+
+    <!-- 7: Cash position -->
+    <p class="sec">Cash position</p>
+    <div class="mgrid-4" style="margin-bottom:.75rem">
+      <div class="mc">
+        <div class="mc-l">Total cash in bank accounts</div>
+        <div class="mc-v">${fmt(d.cash)}</div>
+        ${cashChgStr?`<div class="mc-change">${cashChgStr}</div>`:''}
+      </div>
+      <div class="mc">
+        <div class="mc-l">Days cash on hand</div>
+        <div class="mc-v ${dcohOk?'up':'down'}">${c.dcoh.toFixed(1)}</div>
+        <div class="mc-s ${dcohOk?'up':'down'}">${dcohOk?'≥ 30 days ✓':'< 30 days — watch this'}</div>
+      </div>
+      <div class="mc">
+        <div class="mc-l">Total A/R outstanding</div>
+        <div class="mc-v">${fmt(c.totalAR)}</div>
+        <div class="mc-s neutral">all unpaid invoices</div>
+      </div>
+      <div class="mc">
+        <div class="mc-l">Bills due (A/P)</div>
+        <div class="mc-v">${fmt(d.apBS||c.totalAP)}</div>
+        <div class="mc-s neutral">total open payables</div>
+      </div>
+    </div>
+    <table class="aging-table">
+      <thead><tr><th>Aging bucket</th><th>Amount</th><th>% of A/R</th></tr></thead>
+      <tbody>${arAgingRows}</tbody>
+    </table>
+
+    <hr class="divider">
+
+    <!-- 8: Who owes you -->
+    <p class="sec">Who owes you money — top ${arCount||5} customers</p>
+    <table class="tbl">
+      <thead><tr><th>Customer</th><th>Amount</th><th>Aging bucket</th></tr></thead>
+      <tbody>${arRows||'<tr><td colspan="3" class="tbl-placeholder">No A/R data — import A/R Aging report.</td></tr>'}</tbody>
+    </table>
+    <div class="mgrid-2" style="max-width:340px">
+      <div class="mc">
+        <div class="mc-l">Days sales outstanding (DSO)</div>
+        <div class="mc-v ${dsoOk?'up':'down'}">${c.dso.toFixed(1)}d</div>
+        <div class="mc-s ${dsoOk?'up':'down'}">${dsoOk?'≤ 90 day benchmark ✓':'> 90 day benchmark'}</div>
+      </div>
+    </div>
+
+    <hr class="divider">
+
+    <!-- 9: What you owe -->
+    <p class="sec">What you owe — top ${apCount||5} vendors</p>
+    <table class="tbl">
+      <thead><tr><th>Vendor</th><th>Amount</th><th>Due date</th></tr></thead>
+      <tbody>${apRows||'<tr><td colspan="3" class="tbl-placeholder">No A/P data.</td></tr>'}</tbody>
+    </table>
+    <div class="mgrid-2" style="max-width:340px">
+      <div class="mc">
+        <div class="mc-l">Days payable outstanding (DPO)</div>
+        <div class="mc-v ${dpoOk?'up':'down'}">${c.dpo.toFixed(1)}d</div>
+        <div class="mc-s ${dpoOk?'neutral':'down'}">${dpoOk?'≤ 25 day benchmark ✓':'> 25 day benchmark'}</div>
+      </div>
+    </div>
+
+    <hr class="divider">
+
+    <!-- 10: Where your money came from -->
+    <p class="sec">Where your money came from</p>
+    <table class="tbl">
+      <thead><tr><th>Service line</th><th>Revenue</th><th>Gross profit</th><th>Margin %</th></tr></thead>
+      <tbody>${slRows}</tbody>
+    </table>
+
+    <hr class="divider">
+
+    <!-- 11: Job performance -->
+    <p class="sec">Job performance</p>
+    <div style="margin-bottom:1rem">
+      <div class="sec" style="margin-bottom:6px;font-size:10px">Top ${topJobCount||5} jobs this month</div>
+      <table class="tbl">
+        <thead><tr><th>Client</th><th>Revenue</th></tr></thead>
+        <tbody>${topJobRows||'<tr><td colspan="2" class="tbl-placeholder">Import L12M Sales by Customer or add via Edit data.</td></tr>'}</tbody>
+      </table>
+    </div>
+    <div class="sec" style="margin-bottom:6px;font-size:10px">Total jobs — last 12 months</div>
+    <div class="chart-wrap-sm" style="margin-left:0;margin-right:0"><canvas id="jobcount-chart" role="img" aria-label="Monthly job count chart"></canvas></div>
+    <div class="mgrid-4" style="margin-bottom:1rem;grid-template-columns:repeat(3,1fr)">
+      <div class="mc">
+        <div class="mc-l">Jobs this month</div>
+        <div class="mc-v">${currJobCount!==null?currJobCount:'—'}</div>
+        ${jobCountChgStr?`<div class="mc-change">${jobCountChgStr}</div>`:''}
+      </div>
+      <div class="mc">
+        <div class="mc-l">Avg rev/job this month</div>
+        <div class="mc-v">${fmt(d.arjMonth)}</div>
+      </div>
+      <div class="mc">
+        <div class="mc-l">Avg rev/job L12M</div>
+        <div class="mc-v">${fmt(d.arjL12)}</div>
+      </div>
+    </div>
+
+    <hr class="divider">
+
+    <!-- 12: Top referral partners -->
+    <p class="sec">Top referral partners — last 90 days</p>
+    ${refRows?`
+    <table class="tbl">
+      <thead><tr><th>Partner name</th><th>Fees paid (L90D)</th></tr></thead>
+      <tbody>${refRows}</tbody>
+    </table>`:`<div class="tbl-placeholder" style="padding:8px 0">Upload L90D Referral Report PDF to populate this section.</div>`}
+  `;
+
+  // Build charts after DOM insertion
+  requestAnimationFrame(()=>{
+    buildTrendChart();
+    buildExpPanel();
+    buildJobCountChart();
+  });
+
+  // Sync editor fields
+  populateEditor();
+}
+
+// ─── EDITOR ───────────────────────────────────────────────────────────────
+function populateEditor(){
+  const d=data;
+  ['client','period','note'].forEach(k=>{const el=$('e-'+k);if(el)el.value=d[k]||'';});
+  const numFields=['rev','revP','revPY','cogs','cogsP','cogsPY','ovhd','ovhdP','ovhdPY','cash','cashP'];
+  numFields.forEach(k=>{const el=$('e-'+k);if(el)el.value=d[k]||0;});
+  if($('e-ar-bs'))$('e-ar-bs').value=d.arBS||0;
+  if($('e-ap-bs'))$('e-ap-bs').value=d.apBS||0;
+  if($('e-arj-month'))$('e-arj-month').value=d.arjMonth||0;
+  if($('e-arj-l12'))$('e-arj-l12').value=d.arjL12||0;
+
+  // Expenses
+  const expEl=$('exp-editor-rows');
+  if(expEl)expEl.innerHTML=(d.expenses||[]).map((e,i)=>`
+    <table class="etbl"><tr>
+      <td><input id="ee-name-${i}" value="${e.name}"></td>
+      <td style="width:100px"><input id="ee-amt-${i}" type="number" value="${e.amt}"></td>
+      <td style="width:100px"><input id="ee-prev-${i}" type="number" value="${e.prev}"></td>
+    </tr></table>`).join('');
+
+  // A/R aging
+  const arAgEl=$('ar-aging-editor');
+  if(arAgEl)arAgEl.innerHTML=(d.arAging||[]).map((r,i)=>`
+    <table class="etbl"><tr>
+      <td><input id="arage-bucket-${i}" value="${r.bucket}"></td>
+      <td style="width:120px"><input id="arage-amt-${i}" type="number" value="${r.amt}"></td>
+    </tr></table>`).join('');
+
+  // A/P
+  const apEl=$('ap-aging-editor');
+  if(apEl)apEl.innerHTML=(d.ap||[]).map((r,i)=>`
+    <table class="etbl"><tr>
+      <td><input id="ape-name-${i}" value="${r.name}"></td>
+      <td style="width:100px"><input id="ape-amt-${i}" type="number" value="${r.amt}"></td>
+      <td style="width:80px"><input id="ape-due-${i}" value="${r.due||''}"></td>
+    </tr></table>`).join('');
+
+  // Service lines
+  const slEl=$('sl-editor-rows');
+  if(slEl)slEl.innerHTML=(d.serviceLines||[]).map((r,i)=>`
+    <table class="etbl"><tr>
+      <td><input id="sle-name-${i}" value="${r.name}"></td>
+      <td style="width:100px"><input id="sle-rev-${i}" type="number" value="${r.rev}"></td>
+      <td style="width:100px"><input id="sle-cogs-${i}" type="number" value="${r.cogs}"></td>
+    </tr></table>`).join('');
+
+  // Top jobs
+  const tjEl=$('topjobs-editor-rows');
+  if(tjEl)tjEl.innerHTML=(d.topJobs||[]).map((r,i)=>`
+    <table class="etbl"><tr>
+      <td><input id="tje-client-${i}" value="${r.client}"></td>
+      <td style="width:100px"><input id="tje-rev-${i}" type="number" value="${r.rev}"></td>
+    </tr></table>`).join('');
+
+  // Job counts
+  const jcEl=$('jobcounts-editor-rows');
+  if(jcEl)jcEl.innerHTML=(d.jobCounts||[]).map((r,i)=>`
+    <table class="etbl"><tr>
+      <td><input id="jce-m-${i}" value="${r.m}" style="width:80px"></td>
+      <td><input id="jce-count-${i}" type="number" value="${r.count}" style="width:60px"></td>
+    </tr></table>`).join('');
+
+  // Referrals
+  const refEl=$('referral-editor-rows');
+  if(refEl)refEl.innerHTML=(d.referrals||[]).map((r,i)=>`
+    <table class="etbl"><tr>
+      <td><input id="refe-name-${i}" value="${r.name}"></td>
+      <td style="width:100px"><input id="refe-fees-${i}" type="number" value="${r.fees}"></td>
+    </tr></table>`).join('');
+}
+
+function addExpRow(){
+  const i=(data.expenses||[]).length;data.expenses=data.expenses||[];
+  data.expenses.push({name:'',amt:0,prev:0});populateEditor();
+}
+function addAPRow(){
+  data.ap=data.ap||[];data.ap.push({name:'',amt:0,due:''});populateEditor();
+}
+function addSLRow(){
+  data.serviceLines=data.serviceLines||[];
+  data.serviceLines.push({name:'',rev:0,cogs:0});populateEditor();
+}
+function addTopJobRow(){
+  data.topJobs=data.topJobs||[];data.topJobs.push({client:'',rev:0});populateEditor();
+}
+function addReferralRow(){
+  data.referrals=data.referrals||[];data.referrals.push({name:'',fees:0});populateEditor();
+}
+
+function applyEditor(){
+  data.client=$('e-client').value;
+  data.period=$('e-period').value;
+  data.note=$('e-note').value;
+  ['rev','revP','revPY','cogs','cogsP','cogsPY','ovhd','ovhdP','ovhdPY','cash','cashP'].forEach(k=>{
+    const el=$('e-'+k);if(el)data[k]=+el.value;
+  });
+  data.arBS=+($('e-ar-bs').value||0);
+  data.apBS=+($('e-ap-bs').value||0);
+  data.arjMonth=+($('e-arj-month').value||0);
+  data.arjL12=+($('e-arj-l12').value||0);
+  // Derive NOI from inputs if not set separately
+  data.noi=data.rev-data.cogs-data.ovhd;
+  data.noiP=data.revP-data.cogsP-data.ovhdP;
+  data.noiPY=data.revPY-data.cogsPY-data.ovhdPY;
+
+  // Expenses
+  const exps=[];let i=0;
+  while($(`ee-name-${i}`)){
+    exps.push({name:$(`ee-name-${i}`).value,amt:+$(`ee-amt-${i}`).value,prev:+$(`ee-prev-${i}`).value});i++;
+  }
+  data.expenses=exps;
+
+  // A/R aging
+  const arAg=[];i=0;
+  while($(`arage-bucket-${i}`)){
+    arAg.push({bucket:$(`arage-bucket-${i}`).value,amt:+$(`arage-amt-${i}`).value});i++;
+  }
+  data.arAging=arAg;
+
+  // A/P
+  const ap=[];i=0;
+  while($(`ape-name-${i}`)){
+    ap.push({name:$(`ape-name-${i}`).value,amt:+$(`ape-amt-${i}`).value,due:$(`ape-due-${i}`).value});i++;
+  }
+  data.ap=ap;
+
+  // Service lines
+  const sls=[];i=0;
+  while($(`sle-name-${i}`)){
+    sls.push({name:$(`sle-name-${i}`).value,rev:+$(`sle-rev-${i}`).value,cogs:+$(`sle-cogs-${i}`).value});i++;
+  }
+  data.serviceLines=sls;
+
+  // Top jobs
+  const tjs=[];i=0;
+  while($(`tje-client-${i}`)){
+    tjs.push({client:$(`tje-client-${i}`).value,rev:+$(`tje-rev-${i}`).value});i++;
+  }
+  data.topJobs=tjs;
+
+  // Job counts
+  const jcs=[];i=0;
+  while($(`jce-m-${i}`)){
+    jcs.push({m:$(`jce-m-${i}`).value,count:+$(`jce-count-${i}`).value});i++;
+  }
+  data.jobCounts=jcs;
+
+  // Referrals
+  const refs=[];i=0;
+  while($(`refe-name-${i}`)){
+    refs.push({name:$(`refe-name-${i}`).value,fees:+$(`refe-fees-${i}`).value});i++;
+  }
+  data.referrals=refs;
+
+  $('editor').classList.remove('open');
+  render();
+}
+
+function toggleEditor(){
+  const e=$('editor');
+  if(e.classList.contains('open')){e.classList.remove('open');}
+  else{populateEditor();e.classList.add('open');}
+}
+
+// ─── IMPORT FLOW ──────────────────────────────────────────────────────────
+function toggleImport(){
+  const p=$('import-panel');
+  p.style.display=(p.style.display==='none'||p.style.display==='')?'block':'none';
+}
+
+function setProgress(step){
+  importStep=step;
+  [1,2,3,4].forEach(s=>{
+    const el=$('ps-'+s);if(!el)return;
+    el.className='ps';
+    if(s<step)el.classList.add('done');
+    else if(s===step)el.classList.add('active');
+  });
+}
+
+function dzOver(e,id){e.preventDefault();$(id).classList.add('dragover');}
+function dzLeave(id){$(id).classList.remove('dragover');}
+function dzDrop(e,type){
+  e.preventDefault();$('dz-'+type).classList.remove('dragover');
+  const f=e.dataTransfer.files[0];
+  if(!f)return;
+  const isPDF=f.type==='application/pdf'||f.name.toLowerCase().endsWith('.pdf');
+  const isExcel=!!f.name.toLowerCase().match(/\.(xlsx|xls|csv)$/);
+  if(isPDF||isExcel)setFile(type,f);
+}
+function fileSelected(e,type){const f=e.target.files[0];if(f)setFile(type,f);}
+
+// ─── EXCEL PARSING ────────────────────────────────────────────────────────
+function isExcelFile(f){return f&&f.name.toLowerCase().match(/\.(xlsx|xls|csv)$/);}
+
+async function parseARAgingExcel(file){
+  // Returns {ar:[{name,amt,bucket}], arAging:[{bucket,amt}]}
+  return new Promise((res,rej)=>{
+    const reader=new FileReader();
+    reader.onload=e=>{
+      try{
+        const wb=XLSX.read(e.target.result,{type:'array'});
+        const ws=wb.Sheets[wb.SheetNames[0]];
+        const rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
+        // Find header row containing "Current" or aging bucket keywords
+        let hdrIdx=-1;
+        const bucketCols={};
+        for(let i=0;i<Math.min(rows.length,20);i++){
+          const row=rows[i].map(c=>String(c).toLowerCase());
+          if(row.some(c=>c.includes('current')||c.includes('1 - 30')||c.includes('0-30')||c.includes('31-60')||c.includes('61-90'))){
+            hdrIdx=i;
+            // Map column indices to buckets
+            row.forEach((c,j)=>{
+              if(c.includes('current')||c.includes('1 - 30')||c.includes('0 - 30')||c.includes('0-30'))bucketCols['0-30']=j;
+              else if(c.includes('31 - 60')||c.includes('31-60'))bucketCols['31-60']=j;
+              else if(c.includes('61 - 90')||c.includes('61-90'))bucketCols['61-90']=j;
+              else if(c.includes('91')||c.includes('90+')||c.includes('> 90')||c.includes('over 90'))bucketCols['90+']=j;
+              else if(c.includes('total'))bucketCols['total']=j;
+            });
+            break;
+          }
+        }
+        if(hdrIdx<0){rej(new Error('Could not find aging header row in Excel'));return;}
+        const ar=[],agingTotals={'0-30':0,'31-60':0,'61-90':0,'90+':0};
+        for(let i=hdrIdx+1;i<rows.length;i++){
+          const row=rows[i];
+          const name=String(row[0]||'').trim();
+          if(!name||name.toLowerCase().includes('total'))continue;
+          // Find largest bucket with a value to determine primary aging bucket label
+          let maxAmt=0,primaryBucket='0-30';
+          let rowTotal=0;
+          ['0-30','31-60','61-90','90+'].forEach(b=>{
+            const col=bucketCols[b];
+            const v=col!==undefined?parseFloat(String(row[col]||'').replace(/[$,]/g,''))||0:0;
+            agingTotals[b]+=v;
+            rowTotal+=v;
+            if(v>maxAmt){maxAmt=v;primaryBucket=b;}
+          });
+          if(rowTotal>0){
+            const bucketLabel=primaryBucket==='0-30'?'0–30 days':primaryBucket==='31-60'?'31–60 days':primaryBucket==='61-90'?'61–90 days':'90+ days';
+            ar.push({name,amt:rowTotal,bucket:bucketLabel});
+          }
+        }
+        const arAging=[
+          {bucket:'0–30 days',amt:agingTotals['0-30']},
+          {bucket:'31–60 days',amt:agingTotals['31-60']},
+          {bucket:'61–90 days',amt:agingTotals['61-90']},
+          {bucket:'90+ days',amt:agingTotals['90+']}
+        ].filter(r=>r.amt>0);
+        ar.sort((a,b)=>b.amt-a.amt);
+        res({ar:ar.slice(0,10),arAging});
+      }catch(err){rej(err);}
+    };
+    reader.onerror=rej;
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+async function parseSalesExcel(file){
+  // Returns {topJobs:[{client,rev}], jobCounts:[{m,count}], arjMonth, arjL12}
+  return new Promise((res,rej)=>{
+    const reader=new FileReader();
+    reader.onload=e=>{
+      try{
+        const wb=XLSX.read(e.target.result,{type:'array'});
+        const ws=wb.Sheets[wb.SheetNames[0]];
+        const rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
+        const customers=[];
+        for(let i=0;i<rows.length;i++){
+          const row=rows[i];
+          const name=String(row[0]||'').trim();
+          if(!name||name.toLowerCase().includes('total')||name.toLowerCase().includes('customer'))continue;
+          let amt=0;
+          for(let j=1;j<row.length;j++){
+            const v=parseFloat(String(row[j]||'').replace(/[$,]/g,''))||0;
+            if(v>0){amt=v;break;}
+          }
+          if(amt>0)customers.push({client:name,rev:amt});
+        }
+        customers.sort((a,b)=>b.rev-a.rev);
+        const topJobs=customers.slice(0,5);
+        const totalRev=customers.reduce((s,c)=>s+c.rev,0);
+        const arjMonth=customers.length?Math.round(totalRev/customers.length):0;
+        res({topJobs,jobCounts:[],arjMonth,arjL12:arjMonth});
+      }catch(err){rej(err);}
+    };
+    reader.onerror=rej;
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+async function parsePLExcel(file,period){
+  // period: the selected period string e.g. "Jun 2026" — used to find the right column
+  return new Promise((res,rej)=>{
+    const reader=new FileReader();
+    reader.onload=e=>{
+      try{
+        const wb=XLSX.read(e.target.result,{type:'array'});
+        const ws=wb.Sheets[wb.SheetNames[0]];
+        const rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
+
+        // ── Find header row with month labels ──────────────────────────────
+        let hdrRowIdx=-1,hdrRow=[];
+        for(let i=0;i<Math.min(rows.length,15);i++){
+          const row=rows[i];
+          const monthCols=row.filter((_,j)=>j>0&&String(row[j]||'').match(/jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec/i));
+          if(monthCols.length>=2){hdrRowIdx=i;hdrRow=row;break;}
+        }
+
+        // Build month label list (exclude "Total" columns)
+        const colLabels=hdrRow.map((v,j)=>({label:String(v||'').trim(),col:j}))
+          .filter(({label,col})=>col>0&&label&&!label.toLowerCase().includes('total'));
+
+        // ── Find current, prior, and prior-year column indices ─────────────
+        // Normalize period string for matching: "Jun 2026", "June 2026", "06/2026" etc.
+        const normPeriod=(s)=>String(s||'').trim().toLowerCase()
+          .replace(/(\d{1,2})\/(\d{4})/,'$1 $2') // 06/2026 → 6 2026
+          .replace(/^0/,'');                        // strip leading zero
+
+        const periodNorm=normPeriod(period);
+
+        // Try to find exact match first, then fuzzy
+        let currentColIdx=-1;
+        for(const {label,col} of colLabels){
+          if(normPeriod(label)===periodNorm){currentColIdx=col;break;}
+        }
+        // Fuzzy: match month name + year
+        if(currentColIdx<0&&period){
+          const periodParts=periodNorm.split(/\s+/);
+          for(const {label,col} of colLabels){
+            const ln=normPeriod(label);
+            if(periodParts.every(p=>ln.includes(p))){currentColIdx=col;break;}
+          }
+        }
+        // Fallback: last non-total column
+        if(currentColIdx<0&&colLabels.length)currentColIdx=colLabels[colLabels.length-1].col;
+
+        // Prior month = previous colLabel entry
+        const currentPos=colLabels.findIndex(({col})=>col===currentColIdx);
+        const priorColIdx=currentPos>0?colLabels[currentPos-1].col:-1;
+        // Prior year = same position 12 months back
+        const priorYearColIdx=currentPos>=12?colLabels[currentPos-12].col:-1;
+
+        const getCol=(row,colIdx)=>{
+          if(colIdx<0||colIdx>=row.length)return 0;
+          return parseFloat(String(row[colIdx]||'').replace(/[$,()]/g,'').replace(/^-/,'-'))||0;
+        };
+        // Absolute value helper — QBO sometimes shows expenses as negatives
+        const absVal=(row,colIdx)=>Math.abs(getCol(row,colIdx));
+
+        // ── Parse rows ─────────────────────────────────────────────────────
+        let rev=0,revP=0,revPY=0,cogs=0,cogsP=0,cogsPY=0;
+        let ovhd=0,ovhdP=0,ovhdPY=0,noi=0,noiP=0,noiPY=0;
+        const expenses=[],revenueLines=[],cogsLines=[];
+        let inCOGS=false,inOverhead=false,inIncome=false;
+        const DA_PATTERN=/depreciation|amortization/i;
+
+        for(let i=hdrRowIdx+1;i<rows.length;i++){
+          const row=rows[i];
+          const label=String(row[0]||'').trim();
+          if(!label)continue;
+          const lc=label.toLowerCase();
+
+          // ── Section headers ──
+          if(lc.match(/^income$|^revenue$|^operating income$/)){inIncome=true;inCOGS=false;inOverhead=false;continue;}
+          if(lc.match(/cost of (goods|sales|revenue)|cost of services/)){inCOGS=true;inIncome=false;inOverhead=false;continue;}
+          if(lc.match(/^(operating )?expenses?$|^overhead/)){inOverhead=true;inCOGS=false;inIncome=false;continue;}
+
+          // ── Total lines ──
+          if(lc.match(/^total (income|revenue)|^total for income|^total for revenue/)){
+            rev=absVal(row,currentColIdx);revP=absVal(row,priorColIdx);revPY=absVal(row,priorYearColIdx);
+            inIncome=false;continue;
+          }
+          if(lc.match(/^total cost of|^total for cost of/)){
+            cogs=absVal(row,currentColIdx);cogsP=absVal(row,priorColIdx);cogsPY=absVal(row,priorYearColIdx);
+            inCOGS=false;continue;
+          }
+          if(lc.match(/^gross profit/)){continue;}
+          if(lc.match(/^total (operating )?expenses?|^total for expenses?|^total for operating expenses?/)){
+            ovhd=absVal(row,currentColIdx);ovhdP=absVal(row,priorColIdx);ovhdPY=absVal(row,priorYearColIdx);
+            inOverhead=false;continue;
+          }
+          if(lc.match(/^net operating income|^net income|^net profit/)){
+            noi=getCol(row,currentColIdx);noiP=getCol(row,priorColIdx);noiPY=getCol(row,priorYearColIdx);
+            continue;
+          }
+
+          // ── Line items ──
+          const amt=absVal(row,currentColIdx);
+          const prev=absVal(row,priorColIdx);
+          if(inCOGS&&amt!==0)cogsLines.push({name:label,amt});
+          if(inOverhead&&!DA_PATTERN.test(label)&&amt!==0)expenses.push({name:label,amt,prev});
+          if(inIncome&&amt>0)revenueLines.push({name:label,amt});
+        }
+
+        // ── Build trend (all month columns up to but not including current) ──
+        const trend=[];
+        if(hdrRowIdx>=0&&currentPos>0){
+          const revRow=rows.slice(hdrRowIdx+1).find(r=>String(r[0]||'').toLowerCase().match(/^total (income|revenue)/));
+          const noiRow=rows.slice(hdrRowIdx+1).find(r=>String(r[0]||'').toLowerCase().match(/^net operating income|^net income/));
+          const trendCols=colLabels.slice(0,currentPos); // all months before current
+          trendCols.forEach(({label,col})=>{
+            const tRev=revRow?absVal(revRow,col):0;
+            const tNoi=noiRow?getCol(noiRow,col):0;
+            trend.push({m:label,rev:tRev,noi:tNoi});
+          });
+        }
+
+        res({rev,revP,revPY,cogs,cogsP,cogsPY,ovhd,ovhdP,ovhdPY,noi,noiP,noiPY,trend,expenses,revenueLines,cogsLines});
+      }catch(err){rej(err);}
+    };
+    reader.onerror=rej;
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+async function parseBSExcel(file){
+  // Returns {cash, arBS, apBS}
+  return new Promise((res,rej)=>{
+    const reader=new FileReader();
+    reader.onload=e=>{
+      try{
+        const wb=XLSX.read(e.target.result,{type:'array'});
+        const ws=wb.Sheets[wb.SheetNames[0]];
+        const rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
+        let cash=0,arBS=0,apBS=0;
+        for(let i=0;i<rows.length;i++){
+          const row=rows[i];
+          const label=String(row[0]||'').trim().toLowerCase();
+          const val=parseFloat(String(row[row.length-1]||'').replace(/[$,()-]/g,''))||0;
+          if(val<=0)continue;
+          // Cash — matches "Total Cash", "Total for Bank Accounts", "Total Bank Accounts"
+          if(label.match(/total (cash|for bank accounts|bank accounts)/)&&cash===0)cash=val;
+          // A/R — matches "Total Accounts Receivable", "Total for Accounts Receivable"
+          if(label.match(/total (for )?accounts receivable/)&&arBS===0)arBS=val;
+          // A/P — matches "Total Accounts Payable", "Total for Accounts Payable"
+          if(label.match(/total (for )?accounts payable/)&&apBS===0)apBS=val;
+        }
+        res({cash,arBS,apBS});
+      }catch(err){rej(err);}
+    };
+    reader.onerror=rej;
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+async function parseAPAgingExcel(file){
+  // Returns {ap:[{name,amt,due}]}
+  return new Promise((res,rej)=>{
+    const reader=new FileReader();
+    reader.onload=e=>{
+      try{
+        const wb=XLSX.read(e.target.result,{type:'array'});
+        const ws=wb.Sheets[wb.SheetNames[0]];
+        const rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
+        // Find header row with aging buckets
+        let hdrIdx=-1;
+        const bucketCols={};
+        for(let i=0;i<Math.min(rows.length,20);i++){
+          const row=rows[i].map(c=>String(c).toLowerCase());
+          if(row.some(c=>c.includes('current')||c.includes('1 - 30')||c.includes('0-30')||c.includes('31-60'))){
+            hdrIdx=i;
+            row.forEach((c,j)=>{
+              if(c.includes('current')||c.includes('1 - 30')||c.includes('0 - 30')||c.includes('0-30'))bucketCols['0-30']=j;
+              else if(c.includes('31 - 60')||c.includes('31-60'))bucketCols['31-60']=j;
+              else if(c.includes('61 - 90')||c.includes('61-90'))bucketCols['61-90']=j;
+              else if(c.includes('91')||c.includes('90+')||c.includes('> 90')||c.includes('over 90'))bucketCols['90+']=j;
+              else if(c.includes('total'))bucketCols['total']=j;
+            });
+            break;
+          }
+        }
+        const ap=[];
+        const startRow=hdrIdx>=0?hdrIdx+1:1;
+        for(let i=startRow;i<rows.length;i++){
+          const row=rows[i];
+          const name=String(row[0]||'').trim();
+          if(!name||name.toLowerCase().includes('total'))continue;
+          let rowTotal=0,primaryBucket='Current';
+          let maxAmt=0;
+          ['0-30','31-60','61-90','90+'].forEach(b=>{
+            const col=bucketCols[b];
+            const v=col!==undefined?parseFloat(String(row[col]||'').replace(/[$,]/g,''))||0:0;
+            rowTotal+=v;
+            if(v>maxAmt){maxAmt=v;primaryBucket=b==='0-30'?'Current':b==='31-60'?'31–60 days':b==='61-90'?'61–90 days':'90+ days';}
+          });
+          if(rowTotal===0){
+            const totalCol=bucketCols['total']||row.length-1;
+            rowTotal=parseFloat(String(row[totalCol]||'').replace(/[$,]/g,''))||0;
+          }
+          if(rowTotal>0)ap.push({name,amt:rowTotal,due:primaryBucket});
+        }
+        ap.sort((a,b)=>b.amt-a.amt);
+        res({ap:ap.slice(0,10)});
+      }catch(err){rej(err);}
+    };
+    reader.onerror=rej;
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+async function parseReferralExcel(file){
+  // Returns {referrals:[{name,fees}]}
+  return new Promise((res,rej)=>{
+    const reader=new FileReader();
+    reader.onload=e=>{
+      try{
+        const wb=XLSX.read(e.target.result,{type:'array'});
+        const ws=wb.Sheets[wb.SheetNames[0]];
+        const rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
+        // Group by vendor name (col 0 or first text col), sum amounts
+        const map=new Map();
+        for(let i=0;i<rows.length;i++){
+          const row=rows[i];
+          const name=String(row[0]||'').trim();
+          if(!name||name.toLowerCase().includes('total')||name.toLowerCase().includes('vendor')||name.toLowerCase().includes('name'))continue;
+          let amt=0;
+          for(let j=1;j<row.length;j++){
+            const v=parseFloat(String(row[j]||'').replace(/[$,()-]/g,''))||0;
+            if(v>0){amt+=v;}
+          }
+          if(amt>0)map.set(name,(map.get(name)||0)+amt);
+        }
+        const referrals=[...map.entries()].map(([name,fees])=>({name,fees:Math.round(fees)}));
+        referrals.sort((a,b)=>b.fees-a.fees);
+        res({referrals:referrals.slice(0,10)});
+      }catch(err){rej(err);}
+    };
+    reader.onerror=rej;
+    reader.readAsArrayBuffer(file);
+  });
+}
+function setFile(type,f){
+  files[type]=f;
+  $('dz-'+type).classList.add('has-file');
+  $('fn-'+type).textContent=f.name;
+  if(type==='combined'){
+    const zones=$('individual-zones');
+    if(zones)zones.style.opacity='0.4';
+    ['pl','bs','ar','ap','ref','sales'].forEach(t=>{files[t]=null;});
+  } else {
+    if(files.combined){
+      files.combined=null;
+      $('dz-combined').classList.remove('has-file');
+      $('fn-combined').textContent='';
+      const zones=$('individual-zones');
+      if(zones)zones.style.opacity='';
+    }
+  }
+  // Auto-extract period options from P&L Excel
+  if(type==='pl'&&isExcelFile(f))extractPLPeriods(f);
+  checkReady();
+}
+
+async function extractPLPeriods(file){
+  try{
+    const reader=new FileReader();
+    reader.onload=e=>{
+      try{
+        const wb=XLSX.read(e.target.result,{type:'array'});
+        const ws=wb.Sheets[wb.SheetNames[0]];
+        const rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
+        let monthLabels=[];
+        for(let i=0;i<Math.min(rows.length,10);i++){
+          const row=rows[i];
+          const candidates=row.filter((_,j)=>j>0&&String(row[j]||'').match(/jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec/i));
+          if(candidates.length>=2){
+            // Collect all non-empty header values after col 0, excluding "Total"
+            monthLabels=row
+              .filter((_,j)=>j>0)
+              .map(v=>String(v||'').trim())
+              .filter(v=>v&&!v.toLowerCase().includes('total'));
+            break;
+          }
+        }
+        if(monthLabels.length){
+          const sel=$('imp-period-select');
+          const input=$('imp-period');
+          sel.innerHTML='<option value="">— select period —</option>'+
+            monthLabels.map(m=>`<option value="${m}">${m}</option>`).join('');
+          // Pre-select last month (most recent = current period)
+          const lastMonth=monthLabels[monthLabels.length-1];
+          sel.value=lastMonth;
+          input.value=lastMonth;
+          sel.style.display='block';
+          input.style.display='none';
+          $('imp-period-note').style.display='block';
+        }
+      }catch(err){/* silently ignore — user can type manually */}
+    };
+    reader.readAsArrayBuffer(file);
+  }catch(err){}
+}
+function checkReady(){
+  const ready=files.combined||(files.pl&&files.bs);
+  $('run-import-btn').disabled=!ready;
+  // If both required slots are Excel, API key isn't needed — dim the note but don't block
+  if(ready&&files.pl&&files.bs&&isExcelFile(files.pl)&&isExcelFile(files.bs)){
+    const note=document.querySelector('.api-key-note');
+    if(note)note.textContent='API key not required when all files are Excel — extraction happens locally.';
+  }
+}
+async function fileToBase64(file){
+  return new Promise((res,rej)=>{
+    const r=new FileReader();r.onload=()=>res(r.result.split(',')[1]);r.onerror=rej;r.readAsDataURL(file);
+  });
+}
+function setStatus(msg,type='loading'){
+  const b=$('status-bar');b.className='status-bar show status-'+type;b.textContent=msg;
+}
+
+async function runImport(){
+  const apiKey=$('api-key').value.trim();
+  const client=$('imp-client').value.trim()||'Client';
+  const period=$('imp-period').value.trim()||'This month';
+  $('run-import-btn').disabled=true;
+  setProgress(2);
+
+  // ── COMBINED MODE ──────────────────────────────────────────────────────
+  if(files.combined){
+    if(!apiKey){setStatus('Please enter your Anthropic API key above','error');$('run-import-btn').disabled=false;setProgress(1);return;}
+    setStatus('Reading combined report PDF… usually takes 20–35 seconds','loading');
+    try{
+      const combinedB64=await fileToBase64(files.combined);
+      const prompt=`Expert bookkeeper. This PDF is a QBO group report containing ALL of the following reports in one file: Profit & Loss by Month (L13M), Balance Sheet, A/R Aging, A/P Aging, L90D Referral Report (transaction detail by vendor), and L12M Sales by Customer. Extract all data from whichever reports are present. Return ONLY valid JSON, no markdown, no backticks.
+
+Client: ${client}, Period: ${period}
+
+AR aging: Extract up to 10 customers: [{name,amt,bucket}] where bucket is the label of the customer's largest aging bucket (e.g. "31–60 days", "90+ days"). Also extract arAging totals: [{bucket:"0–30 days",amt},{bucket:"31–60 days",amt},{bucket:"61–90 days",amt},{bucket:"90+ days",amt}]. If not present: ar=[{name:"Total receivables",amt:<BS total AR>,bucket:"0–30 days"}], arAging=[].
+AP aging: Extract up to 10 vendors: [{name,amt,due}]. If not present: ap=[{name:"Total payables",amt:<BS total AP>,due:"TBD"}].
+Referral report: Extract up to 10 partners by vendor name and total fees: [{name,fees}] sorted by fees desc. If not present: referrals=[].
+Sales by customer: Extract top 5 customers by this-month revenue: topJobs=[{client,rev}]. Extract monthly job counts for last 12 months: jobCounts=[{m:"Mon 'YY",count}]. If not present: topJobs=[], jobCounts=[], arjMonth=0, arjL12=0.
+
+Return this exact structure (all numbers as plain numbers, no $ or commas, negatives as positive):
+{
+  "client":"${client}",
+  "period":"${period}",
+  "rev":<current month total revenue>,
+  "revP":<prior month revenue>,
+  "revPY":<same month prior year revenue or 0>,
+  "cogs":<current month total COGS>,
+  "cogsP":<prior month COGS>,
+  "cogsPY":<prior year same month COGS or 0>,
+  "ovhd":<current month overhead — all expenses EXCLUDING COGS>,
+  "ovhdP":<prior month overhead>,
+  "ovhdPY":<prior year same month overhead or 0>,
+  "noi":<Net Operating Income line from P&L — pull directly, do NOT reconstruct>,
+  "noiP":<prior month NOI>,
+  "noiPY":<prior year same month NOI or 0>,
+  "cash":<cash from balance sheet>,
+  "cashP":0,
+  "arBS":<total accounts receivable from balance sheet>,
+  "apBS":<total accounts payable from balance sheet>,
+  "trend":[last 12 months as {m:"Mon 'YY",rev:<monthly revenue>,noi:<monthly NOI>}],
+  "expenses":[top 5 expense lines as {name,amt:<this month>,prev:<prior month>}],
+  "arAging":[as instructed above],
+  "ar":[as instructed above],
+  "ap":[as instructed above],
+  "revenueLines":[all revenue line items from P&L as {name,amt}],
+  "cogsLines":[all COGS line items from P&L as {name,amt}],
+  "topJobs":[as instructed],
+  "jobCounts":[as instructed],
+  "arjMonth":<avg rev per job this month or 0>,
+  "arjL12":<avg rev per job L12M or 0>,
+  "referrals":[as instructed],
+  "note":"Imported from QBO. Add your key insights here."
+}
+
+Rules: numbers only, no $ or commas, missing values = 0. ONLY JSON.`;
+
+      const response=await fetch('https://api.anthropic.com/v1/messages',{
+        method:'POST',
+        headers:{
+          'Content-Type':'application/json',
+          'x-api-key':apiKey,
+          'anthropic-version':'2023-06-01',
+          'anthropic-dangerous-direct-browser-access':'true'
+        },
+        body:JSON.stringify({model:'claude-sonnet-4-5',max_tokens:2000,messages:[{role:'user',content:[
+          {type:'document',source:{type:'base64',media_type:'application/pdf',data:combinedB64}},
+          {type:'text',text:prompt}
+        ]}]})
+      });
+      if(!response.ok){const err=await response.json();throw new Error(err.error?.message||'API error '+response.status);}
+      const result=await response.json();
+      const raw=result.content.find(b=>b.type==='text')?.text||'';
+      const parsed=JSON.parse(raw.replace(/```json|```/g,'').trim());
+      pendingExtracted=parsed;
+      showReviewScreen(parsed);
+      setStatus('Extraction complete — review key numbers below','success');
+    }catch(err){
+      setStatus('Error: '+err.message,'error');
+      $('run-import-btn').disabled=false;
+      setProgress(1);
+    }
+    return;
+  }
+
+  // ── INDIVIDUAL MODE ────────────────────────────────────────────────────
+  const hasAR=!!files.ar,hasAP=!!files.ap,hasRef=!!files.ref,hasSales=!!files.sales;
+  const plIsExcel=isExcelFile(files.pl);
+  const bsIsExcel=isExcelFile(files.bs);
+  const arIsExcel=hasAR&&isExcelFile(files.ar);
+  const apIsExcel=hasAP&&isExcelFile(files.ap);
+  const refIsExcel=hasRef&&isExcelFile(files.ref);
+  const salesIsExcel=hasSales&&isExcelFile(files.sales);
+
+  // Step 1: Parse all Excel files client-side first
+  let excelPL=null,excelBS=null,excelAR=null,excelAP=null,excelRef=null,excelSales=null;
+  try{
+    if(plIsExcel){setStatus('Parsing P&L Excel…','loading');excelPL=await parsePLExcel(files.pl,period);}
+    if(bsIsExcel){setStatus('Parsing Balance Sheet Excel…','loading');excelBS=await parseBSExcel(files.bs);}
+    if(arIsExcel){setStatus('Parsing A/R Aging Excel…','loading');excelAR=await parseARAgingExcel(files.ar);}
+    if(apIsExcel){setStatus('Parsing A/P Aging Excel…','loading');excelAP=await parseAPAgingExcel(files.ap);}
+    if(refIsExcel){setStatus('Parsing Referral Report Excel…','loading');excelRef=await parseReferralExcel(files.ref);}
+    if(salesIsExcel){setStatus('Parsing Sales by Customer Excel…','loading');excelSales=await parseSalesExcel(files.sales);}
+  }catch(err){
+    setStatus('Excel parse error: '+err.message,'error');
+    $('run-import-btn').disabled=false;setProgress(1);return;
+  }
+
+  // Step 2: If both required files are Excel, we may not need an API call at all
+  const needsPL=!plIsExcel,needsBS=!bsIsExcel;
+  const arNeedsPDF=hasAR&&!arIsExcel;
+  const apNeedsPDF=hasAP&&!apIsExcel;
+  const refNeedsPDF=hasRef&&!refIsExcel;
+  const salesNeedsPDF=hasSales&&!salesIsExcel;
+  const needsAPICall=needsPL||needsBS||arNeedsPDF||apNeedsPDF||refNeedsPDF||salesNeedsPDF;
+
+  // If everything came from Excel, skip the API and merge directly
+  if(!needsAPICall){
+    setStatus('All files parsed from Excel — building report…','loading');
+    const parsed={client,period,note:'Imported from QBO. Add your key insights here.',
+      cashP:0,trend:[],expenses:[],arAging:[],ar:[],ap:[],revenueLines:[],cogsLines:[],
+      topJobs:[],jobCounts:[],arjMonth:0,arjL12:0,referrals:[]};
+    if(excelPL)Object.assign(parsed,excelPL);
+    if(excelBS)Object.assign(parsed,excelBS);
+    if(excelAR){parsed.ar=excelAR.ar;parsed.arAging=excelAR.arAging;}
+    if(excelAP)parsed.ap=excelAP.ap;
+    if(excelRef)parsed.referrals=excelRef.referrals;
+    if(excelSales){parsed.topJobs=excelSales.topJobs;if(excelSales.jobCounts.length)parsed.jobCounts=excelSales.jobCounts;parsed.arjMonth=excelSales.arjMonth;parsed.arjL12=excelSales.arjL12;}
+    await new Promise(r=>setTimeout(r,400)); // brief pause so status is visible
+    pendingExtracted=parsed;
+    showReviewScreen(parsed);
+    setStatus('Extraction complete from Excel — review key numbers below','success');
+    return;
+  }
+
+  // Step 3: Build PDF API call for remaining PDF slots
+  const pdfCount=(needsPL?1:0)+(needsBS?1:0)+(arNeedsPDF?1:0)+(apNeedsPDF?1:0)+(refNeedsPDF?1:0)+(salesNeedsPDF?1:0);
+  if(!apiKey){setStatus('Please enter your Anthropic API key — needed for PDF extraction.','error');$('run-import-btn').disabled=false;setProgress(1);return;}
+  setStatus(`Reading ${pdfCount} PDF${pdfCount!==1?'s':''} via API… usually takes 15–30 seconds`,'loading');
+
+  try{
+    const toConvert=[];
+    if(needsPL)toConvert.push(fileToBase64(files.pl));
+    if(needsBS)toConvert.push(fileToBase64(files.bs));
+    if(arNeedsPDF)toConvert.push(fileToBase64(files.ar));
+    if(apNeedsPDF)toConvert.push(fileToBase64(files.ap));
+    if(refNeedsPDF)toConvert.push(fileToBase64(files.ref));
+    if(salesNeedsPDF)toConvert.push(fileToBase64(files.sales));
+    const b64s=await Promise.all(toConvert);
+    let idx=0;
+    const plB64=needsPL?b64s[idx++]:null;
+    const bsB64=needsBS?b64s[idx++]:null;
+    const arB64=arNeedsPDF?b64s[idx++]:null;
+    const apB64=apNeedsPDF?b64s[idx++]:null;
+    const refB64=refNeedsPDF?b64s[idx++]:null;
+    const salesB64=salesNeedsPDF?b64s[idx++]:null;
+
+    const plInstr=needsPL?`P&L by Month L13M included. Extract 13 monthly columns: col 1 = same month prior year (revPY), col 12 = last month (revP), col 13 = current month (rev). Apply same logic to COGS, overhead, and NOI. Trend array = cols 1–12 only.`:`P&L handled via Excel — use placeholders: rev=0,revP=0,revPY=0,cogs=0,cogsP=0,cogsPY=0,ovhd=0,ovhdP=0,ovhdPY=0,noi=0,noiP=0,noiPY=0,trend=[],expenses=[],revenueLines=[],cogsLines=[].`;
+    const bsInstr=needsBS?`Balance Sheet included. Extract cash, total A/R (arBS), total A/P (apBS).`:`Balance Sheet handled via Excel — use cash=0,arBS=0,apBS=0.`;
+    const arInstr=arNeedsPDF?`AR aging PDF included. Extract up to 10 customers: [{name,amt,bucket}] where bucket is the label of the customer's largest aging bucket (e.g. "31–60 days"). Also extract arAging totals: [{bucket:"0–30 days",amt},{bucket:"31–60 days",amt},{bucket:"61–90 days",amt},{bucket:"90+ days",amt}].`:`AR aging handled via Excel or not provided — set ar=[],arAging=[].`;
+    const apInstr=apNeedsPDF?`AP aging included. Extract up to 10 vendors: [{name,amt,due}] where due = bucket label.`:`AP aging handled via Excel or not provided — set ap=[].`;
+    const refInstr=refNeedsPDF?`Referral report included. Extract up to 10 partners by vendor name and total fees: [{name,fees}] sorted by fees desc.`:`Referral report handled via Excel or not provided — set referrals=[].`;
+    const salesInstr=salesNeedsPDF?`L12M Sales by Customer PDF included. Extract top 5 customers by this-month revenue: topJobs=[{client,rev}]. Extract monthly job counts for last 12 months: jobCounts=[{m:"Mon 'YY",count}]. arjMonth=avg rev per job this month. arjL12=avg L12M.`:`Sales report handled via Excel or not provided — set topJobs=[],jobCounts=[],arjMonth=0,arjL12=0.`;
+
+    const prompt=`Expert bookkeeper. Extract from QBO reports. Return ONLY valid JSON, no markdown, no backticks.
+
+Client: ${client}, Period: ${period}
+${plInstr}
+${bsInstr}
+${arInstr}
+${apInstr}
+${refInstr}
+${salesInstr}
+
+IMPORTANT for COGS: Extract ALL individual cost-of-sales line items into cogsLines, including $0 lines. Look under any "Cost of Sales" or "Cost of Goods Sold" parent.
+
+Return this exact structure (all numbers as plain numbers, no $ or commas, negatives as positive):
+{
+  "client":"${client}","period":"${period}",
+  "rev":0,"revP":0,"revPY":0,"cogs":0,"cogsP":0,"cogsPY":0,
+  "ovhd":0,"ovhdP":0,"ovhdPY":0,"noi":0,"noiP":0,"noiPY":0,
+  "cash":0,"cashP":0,"arBS":0,"apBS":0,
+  "trend":[],"expenses":[],"arAging":[],"ar":[],"ap":[],
+  "revenueLines":[],"cogsLines":[],"topJobs":[],"jobCounts":[],
+  "arjMonth":0,"arjL12":0,"referrals":[],
+  "note":"Imported from QBO. Add your key insights here."
+}
+
+Rules: numbers only, no $ or commas, missing = 0. ONLY JSON.`;
+
+    const content=[];
+    if(plB64)content.push({type:'document',source:{type:'base64',media_type:'application/pdf',data:plB64}});
+    if(bsB64)content.push({type:'document',source:{type:'base64',media_type:'application/pdf',data:bsB64}});
+    if(arB64)content.push({type:'document',source:{type:'base64',media_type:'application/pdf',data:arB64}});
+    if(apB64)content.push({type:'document',source:{type:'base64',media_type:'application/pdf',data:apB64}});
+    if(refB64)content.push({type:'document',source:{type:'base64',media_type:'application/pdf',data:refB64}});
+    if(salesB64)content.push({type:'document',source:{type:'base64',media_type:'application/pdf',data:salesB64}});
+    content.push({type:'text',text:prompt});
+
+    const response=await fetch('https://api.anthropic.com/v1/messages',{
+      method:'POST',
+      headers:{'Content-Type':'application/json','x-api-key':apiKey,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
+      body:JSON.stringify({model:'claude-sonnet-4-5',max_tokens:2000,messages:[{role:'user',content}]})
+    });
+    if(!response.ok){const err=await response.json();throw new Error(err.error?.message||'API error '+response.status);}
+    const result=await response.json();
+    const raw=result.content.find(b=>b.type==='text')?.text||'';
+    const parsed=JSON.parse(raw.replace(/```json|```/g,'').trim());
+
+    // Merge Excel data over PDF data — Excel always wins
+    if(excelPL)Object.assign(parsed,excelPL);
+    if(excelBS)Object.assign(parsed,excelBS);
+    if(excelAR){parsed.ar=excelAR.ar;parsed.arAging=excelAR.arAging;}
+    if(excelAP)parsed.ap=excelAP.ap;
+    if(excelRef)parsed.referrals=excelRef.referrals;
+    if(excelSales){
+      parsed.topJobs=excelSales.topJobs;
+      if(excelSales.jobCounts.length)parsed.jobCounts=excelSales.jobCounts;
+      parsed.arjMonth=excelSales.arjMonth;
+      parsed.arjL12=excelSales.arjL12;
+    }
+
+    pendingExtracted=parsed;
+    showReviewScreen(parsed);
+    setStatus('Extraction complete — review key numbers below','success');
+  }catch(err){
+    setStatus('Error: '+err.message,'error');
+    $('run-import-btn').disabled=false;
+    setProgress(1);
+  }
+}
+
+function showReviewScreen(d){
+  const fields=[
+    {key:'rev',label:'Revenue this month'},
+    {key:'revP',label:'Revenue last month'},
+    {key:'revPY',label:'Revenue same month prior year'},
+    {key:'noi',label:'Net operating income (direct from P&L)'},
+    {key:'cogs',label:'COGS this month'},
+    {key:'ovhd',label:'Overhead expenses'},
+    {key:'cash',label:'Cash on hand'},
+    {key:'arBS',label:'Total A/R (balance sheet)'},
+    {key:'apBS',label:'Total A/P (balance sheet)'}
+  ];
+  $('review-fields').innerHTML=fields.map(f=>
+    `<div class="mf"><label>${f.label}</label><input id="rv-${f.key}" type="number" value="${d[f.key]||0}"></div>`
+  ).join('');
+  $('review-screen').classList.add('show');
+  $('import-panel').style.display='none';
+  setProgress(2);
+}
+
+function goToServiceLineMapping(){
+  if(!pendingExtracted)return;
+  // Read any review edits back
+  ['rev','revP','revPY','noi','cogs','ovhd','cash','arBS','apBS'].forEach(k=>{
+    const el=$('rv-'+k);if(el)pendingExtracted[k]=+el.value;
+  });
+  pendingExtracted.noiP=pendingExtracted.noiP||pendingExtracted.revP-pendingExtracted.cogsP-pendingExtracted.ovhdP;
+  pendingExtracted.noiPY=pendingExtracted.noiPY||pendingExtracted.revPY-pendingExtracted.cogsPY-pendingExtracted.ovhdPY;
+  showServiceLineMapping();
+}
+
+function showServiceLineMapping(){
+  const d=pendingExtracted;
+  const revLines=(d.revenueLines&&d.revenueLines.length)?d.revenueLines:
+    (d.serviceLines&&d.serviceLines.length)?d.serviceLines.map(s=>({name:s.name,amt:s.rev})):
+    [{name:'Total revenue',amt:d.rev}];
+  const cogsLines=(d.cogsLines&&d.cogsLines.length)?d.cogsLines:[];
+
+  // Update mapping instruction
+  $('sl-screen').querySelector('.mapping-title').textContent=
+    'Step 3 of 4 — Toggle which revenue lines to show. Check the COGS lines that apply to each service line (checked = included in cost; their amounts will be summed).';
+
+  $('sl-rows').innerHTML=revLines.map((r,i)=>{
+    const cogsCheckboxes=cogsLines.length
+      ? cogsLines.map((c,j)=>
+          `<label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#2c2c2a;margin-bottom:4px;cursor:pointer">
+            <input type="checkbox" id="slc-${i}-${j}" data-amt="${c.amt}" onchange="updateSLRow(${i})" style="accent-color:#1D9E75">
+            ${c.name} <span style="color:#888780">(${fmt(c.amt)})</span>
+          </label>`
+        ).join('')
+      : '<span style="font-size:12px;color:#888780">No COGS lines extracted — add via Edit data after import.</span>';
+
+    return`<div class="sl-row" id="slr-${i}" style="grid-template-columns:24px 1fr 1fr auto;align-items:start">
+      <input type="checkbox" class="sl-toggle" id="slt-${i}" checked onchange="updateSLRow(${i})">
+      <div>
+        <div class="sl-name">${r.name}</div>
+        <div class="sl-rev">${fmt(r.amt)}</div>
+      </div>
+      <div id="slcogs-${i}" data-rev="${r.amt}" style="padding:4px 0">${cogsCheckboxes}</div>
+      <div class="sl-margin" id="slm-${i}">—</div>
+    </div>`;
+  }).join('');
+
+  pendingExtracted._revLines=revLines;
+  pendingExtracted._cogsLines=cogsLines;
+  $('review-screen').classList.remove('show');
+  $('sl-screen').classList.add('show');
+  setProgress(3);
+}
+
+function updateSLRow(i){
+  const tog=$('slt-'+i);
+  const row=$('slr-'+i);
+  const margEl=$('slm-'+i);
+  const cogsDiv=$('slcogs-'+i);
+  const rev=+(cogsDiv?.dataset.rev||0);
+  if(!tog.checked){row.classList.add('disabled');margEl.textContent='—';return;}
+  row.classList.remove('disabled');
+  // Sum all checked COGS checkboxes
+  let cogsTotal=0;
+  if(cogsDiv){
+    cogsDiv.querySelectorAll('input[type=checkbox]').forEach(cb=>{
+      if(cb.checked)cogsTotal+=+(cb.dataset.amt||0);
+    });
+  }
+  const gp=rev-cogsTotal;
+  const m=rev?gp/rev:0;
+  margEl.textContent=pct(m);
+  margEl.className='sl-margin '+(m>=0.65?'sl-tbl-margin-green':m>=0.50?'sl-tbl-margin-neutral':'sl-tbl-margin-red');
+}
+
+function confirmServiceLines(){
+  const d=pendingExtracted;
+  const revLines=d._revLines||[];
+  const cogsLines=d._cogsLines||[];
+  const sls=[];
+  revLines.forEach((r,i)=>{
+    const tog=$('slt-'+i);if(!tog||!tog.checked)return;
+    // Sum checked COGS lines for this revenue line
+    let cogsTotal=0;
+    const cogsDiv=$('slcogs-'+i);
+    if(cogsDiv){
+      cogsDiv.querySelectorAll('input[type=checkbox]').forEach(cb=>{
+        if(cb.checked)cogsTotal+=+(cb.dataset.amt||0);
+      });
+    }
+    sls.push({name:r.name,rev:r.amt,cogs:cogsTotal});
+  });
+  d.serviceLines=sls;
+  delete d._revLines;delete d._cogsLines;delete d.revenueLines;delete d.cogsLines;
+  data=Object.assign({},data,d);
+  // Ensure NOI fields
+  if(!data.noi)data.noi=data.rev-data.cogs-data.ovhd;
+  if(!data.noiP)data.noiP=data.revP-data.cogsP-data.ovhdP;
+  if(!data.noiPY)data.noiPY=data.revPY-data.cogsPY-data.ovhdPY;
+  $('sl-screen').classList.remove('show');
+  $('import-panel').style.display='none';
+  setProgress(4);
+  pendingExtracted=null;
+  render();
+}
+
+function backToReview(){
+  $('sl-screen').classList.remove('show');
+  $('import-panel').style.display='block';
+  showReviewScreen(pendingExtracted);
+}
+function cancelMapping(){
+  $('review-screen').classList.remove('show');
+  $('sl-screen').classList.remove('show');
+  pendingExtracted=null;
+  $('run-import-btn').disabled=false;
+  setProgress(1);
+}
+
+// ─── FORMULA PANEL ───────────────────────────────────────────────────────
+function toggleFormulas(){
+  const p=$('formula-panel');
+  p.classList.toggle('open');
+  if(p.classList.contains('open'))buildFormulaPanel();
+}
+
+function buildFormulaPanel(){
+  const d=data;
+  const rev=d.rev,revP=d.revP,cogs=d.cogs,cogsP=d.cogsP,ovhd=d.ovhd,ovhdP=d.ovhdP;
+  const noi=d.noi||rev-cogs-ovhd;
+  const noiP=d.noiP||revP-cogsP-ovhdP;
+  const gp=rev-cogs,gpP=revP-cogsP;
+  const gm=rev?gp/rev:0;
+  const noiMargin=rev?noi/rev:0;
+  const totalARaging=(d.arAging||[]).reduce((s,r)=>s+r.amt,0)||(d.ar||[]).reduce((s,r)=>s+r.amt,0);
+  const totalAP=(d.ap||[]).reduce((s,r)=>s+r.amt,0)||d.apBS||0;
+  const dso=rev?totalARaging/(rev/30):0;
+  const dpo=cogs?totalAP/(cogs/30):0;
+  const dcoh=(cogs+ovhd)?d.cash/((cogs+ovhd)/365):0;
+
+  const row=(label,formula,result,note='')=>`
+    <div class="fp-row">
+      <div class="fp-label">${label}</div>
+      <code class="fp-formula">${formula}</code>
+      <div class="fp-result">${result}</div>
+      ${note?`<div class="fp-note">${note}</div>`:''}
+    </div>`;
+  const warn=(msg)=>`<div class="fp-warning">⚠ ${msg}</div>`;
+
+  let warnings='';
+  if(rev===0)warnings+=warn('Revenue is $0 — check your data.');
+  if(gm<0.65||gm>0.75)warnings+=warn(`Gross margin is ${pctF(gm)} — restoration benchmark is 65–75%. Check COGS mapping.`);
+  if(noiMargin<0.30||noiMargin>0.40)warnings+=warn(`NOI margin is ${pctF(noiMargin)} — restoration benchmark is 30–40%.`);
+  if(dso>90)warnings+=warn(`DSO is ${daysF(dso)} — restoration benchmark is ≤ 90 days. Follow up on long-aged A/R.`);
+  if(dpo>25)warnings+=warn(`DPO is ${daysF(dpo)} — restoration benchmark is ≤ 25 days. Review vendor payment timing.`);
+  if(dcoh<30)warnings+=warn(`Days cash on hand is ${daysF(dcoh)} — benchmark is ≥ 30 days. Cash cushion is thin.`);
+
+  $('formula-content').innerHTML=`
+    <div class="fp-section">
+      <div class="fp-section-label">Inputs</div>
+      ${row('Revenue (current)','data.rev',fmtF(rev),'Current month total revenue from P&L')}
+      ${row('Revenue (prior month)','data.revP',fmtF(revP),'Prior month — used for MoM changes')}
+      ${row('Revenue (same month PY)','data.revPY',fmtF(d.revPY),'Used for YoY comparison')}
+      ${row('COGS (current)','data.cogs',fmtF(cogs),'Direct costs from P&L')}
+      ${row('Overhead (current)','data.ovhd',fmtF(ovhd),'All expenses excluding COGS')}
+      ${row('NOI (direct from P&L)','data.noi',fmtF(noi),'Pulled directly — NOT reconstructed from components')}
+      ${row('Cash on hand','data.cash',fmtF(d.cash),'From balance sheet')}
+      ${row('Cash (prior month)','data.cashP',fmtF(d.cashP),'')}
+      ${row('A/R (balance sheet)','data.arBS',fmtF(d.arBS),'Total receivables from BS')}
+      ${row('A/P (balance sheet)','data.apBS',fmtF(d.apBS),'Total payables from BS')}
+    </div>
+    <hr class="fp-divider">
+    <div class="fp-section">
+      <div class="fp-section-label">Profitability</div>
+      ${row('Gross profit','Revenue − COGS',fmtF(gp),`${fmtF(rev)} − ${fmtF(cogs)}`)}
+      ${row('Gross margin','GP / Revenue',pctF(gm),`${fmtF(gp)} / ${fmtF(rev)}`)}
+      ${row('GP MoM','(GP − GP prior) / GP prior',pctF(gpP?(gp-gpP)/gpP:0),`(${fmtF(gp)} − ${fmtF(gpP)}) / ${fmtF(gpP)}`)}
+      ${row('NOI (current)','data.noi (direct pull)',fmtF(noi),'Never reconstructed — taken from QBO Net Operating Income line')}
+      ${row('NOI margin','NOI / Revenue',pctF(noiMargin),`${fmtF(noi)} / ${fmtF(rev)}`)}
+      ${row('NOI MoM','(NOI − NOI prior) / NOI prior',pctF(noiP?(noi-noiP)/noiP:0),`(${fmtF(noi)} − ${fmtF(noiP)}) / ${fmtF(noiP)}`)}
+      ${row('NOI YoY','(NOI − NOI PY) / NOI PY',pctF(d.noiPY?(noi-d.noiPY)/d.noiPY:0),'')}
+      ${row('Overhead MoM','(Ovhd − Ovhd prior) / Ovhd prior',pctF(ovhdP?(ovhd-ovhdP)/ovhdP:0),'Inverted color: green = decreased overhead')}
+    </div>
+    <hr class="fp-divider">
+    <div class="fp-section">
+      <div class="fp-section-label">Cash & working capital</div>
+      ${row('Days cash on hand','Cash / ((COGS + Overhead) / 365)',daysF(dcoh),`${fmtF(d.cash)} / ((${fmtF(cogs)} + ${fmtF(ovhd)}) / 365) — daily burn = (COGS + Overhead) / 365 — benchmark ≥ 30`)}
+    </div>
+    <hr class="fp-divider">
+    <div class="fp-section">
+      <div class="fp-section-label">A/R & A/P timing</div>
+      ${row('Total A/R (aging table)','sum(arAging[].amt)',fmtF(totalARaging),'From A/R aging rows — NOT the balance sheet figure')}
+      ${row('DSO','Total A/R aging / (Revenue / 30)',daysF(dso),`${fmtF(totalARaging)} / (${fmtF(rev)} / 30) — benchmark ≤ 90 days`)}
+      ${row('Total A/P (aging table)','sum(ap[].amt)',fmtF(totalAP),'From A/P rows — NOT the balance sheet figure')}
+      ${row('DPO','Total A/P / (COGS / 30)',daysF(dpo),`${fmtF(totalAP)} / (${fmtF(cogs)} / 30) — benchmark ≤ 25 days`)}
+    </div>
+    ${warnings?`<hr class="fp-divider"><div class="fp-section"><div class="fp-section-label">Flags to review</div>${warnings}</div>`:
+    '<div style="margin-top:1rem;font-size:12px;color:#5DCAA5">✓ No flags — all metrics within expected range for a restoration business.</div>'}
+  `;
+}
+
+// ─── SAVE & LOAD ─────────────────────────────────────────────────────────
+function saveJSON(){
+  const filename=`${data.client||'Avilo'} — ${data.period||'Report'}.json`.replace(/[/\\:*?"<>|]/g,'-');
+  const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=filename;a.click();
+}
+
+function loadJSON(e){
+  const f=e.target.files[0];if(!f)return;
+  const r=new FileReader();
+  r.onload=()=>{
+    try{
+      const parsed=JSON.parse(r.result);
+      data=parsed;
+      render();
+    }catch(err){alert('Could not load JSON: '+err.message);}
+  };
+  r.readAsText(f);
+  e.target.value='';
+}
+
+async function exportPDF(){
+  window.print();
+}
+
+// ─── INIT ────────────────────────────────────────────────────────────────
+render();
+</script>
+</body>
+</html>
