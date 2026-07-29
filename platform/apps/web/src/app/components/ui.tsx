@@ -1,5 +1,5 @@
 import clsx from "clsx";
-import type { ReactNode } from "react";
+import { forwardRef, type ReactNode } from "react";
 
 /**
  * A visible block. The page is deliberately composed of separated, titled cards rather
@@ -46,17 +46,24 @@ export function Block({
   );
 }
 
-export function Button({
-  variant = "secondary",
-  size = "md",
-  className,
-  ...props
-}: React.ButtonHTMLAttributes<HTMLButtonElement> & {
-  variant?: "primary" | "secondary" | "ghost" | "danger";
-  size?: "sm" | "md";
-}) {
+/**
+ * Ref-forwarding is not optional here.
+ *
+ * Radix anchors a popover or menu to the DOM node its trigger hands back through a ref.
+ * A plain function component swallows that ref, so Radix has nothing to measure and
+ * parks the panel offscreen at translate(0, -200%) — open, focusable, and invisible.
+ * Every `<Popover.Trigger asChild><Button/>` in the app depends on this.
+ */
+export const Button = forwardRef<
+  HTMLButtonElement,
+  React.ButtonHTMLAttributes<HTMLButtonElement> & {
+    variant?: "primary" | "secondary" | "ghost" | "danger";
+    size?: "sm" | "md";
+  }
+>(function Button({ variant = "secondary", size = "md", className, ...props }, ref) {
   return (
     <button
+      ref={ref}
       {...props}
       className={clsx(
         "inline-flex items-center justify-center gap-1.5 rounded-lg font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50",
@@ -72,7 +79,7 @@ export function Button({
       )}
     />
   );
-}
+});
 
 /** A stat tile, as in the reference table screenshot. */
 export function StatTile({

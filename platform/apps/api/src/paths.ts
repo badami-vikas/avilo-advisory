@@ -12,7 +12,13 @@ import { mkdirSync } from "node:fs";
  */
 export const ORGANIZATION = "Avilo Advisory";
 
-export const BRIDGE_ROOT = join(homedir(), "Documents", "Bridge", ORGANIZATION);
+/**
+ * A hosted deployment has no Documents folder worth writing to, and its filesystem is
+ * usually replaced on every deploy — so the root is overridable and pointed at a mounted
+ * disk. Left unset, the local-first path is unchanged.
+ */
+export const BRIDGE_ROOT =
+  process.env.AVILO_FILES_ROOT ?? join(homedir(), "Documents", "Bridge", ORGANIZATION);
 
 /** The SQLite database. Kept beside the files it describes. */
 export const DATA_DIR = join(BRIDGE_ROOT, ".data");

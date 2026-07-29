@@ -10,6 +10,10 @@ export default defineConfig({
     proxy: {
       // Same-origin in the browser, so no CORS and nothing leaves the machine.
       "/trpc": { target: "http://127.0.0.1:5178", changeOrigin: false },
+      // Present so the login gate can be exercised in development too, by setting
+      // AVILO_PASSWORD before `pnpm dev`. Unused when the gate is off.
+      "/login": { target: "http://127.0.0.1:5178", changeOrigin: false },
+      "/auth": { target: "http://127.0.0.1:5178", changeOrigin: false },
     },
   },
   build: {

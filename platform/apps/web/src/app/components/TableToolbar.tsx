@@ -47,6 +47,8 @@ export function TableToolbar({
   searchPlaceholder,
   onAdd,
   addLabel,
+  filterOpen,
+  onFilterOpenChange,
 }: {
   tableId: string;
   columns: ColumnSpec[];
@@ -57,6 +59,9 @@ export function TableToolbar({
   searchPlaceholder: string;
   onAdd: () => void;
   addLabel: string;
+  /** Controlled, so a column's context menu can open the builder it just added to. */
+  filterOpen?: boolean;
+  onFilterOpenChange?: (open: boolean) => void;
 }) {
   const [lists, setLists] = useState<SavedList[]>([]);
   const [activeList, setActiveList] = useState<string | null>(null);
@@ -136,6 +141,17 @@ export function TableToolbar({
 
   const activeName = lists.find((l) => l.id === activeList)?.name ?? "All";
   const filterCount = view.rowFilters.length;
+
+  const hidden = view.hiddenColumns ?? [];
+  const hiddenCount = hidden.length;
+
+  const toggleColumn = (columnId: string) =>
+    onViewChange({
+      ...view,
+      hiddenColumns: hidden.includes(columnId)
+        ? hidden.filter((id) => id !== columnId)
+        : [...hidden, columnId],
+    });
 
   return (
     <div className="no-print flex flex-wrap items-center gap-2">
@@ -263,7 +279,7 @@ export function TableToolbar({
 
       <div className="ml-auto flex items-center gap-2">
         {/* -------------------------------------------------------- filter */}
-        <Popover.Root>
+        <Popover.Root open={filterOpen} onOpenChange={onFilterOpenChange}>
           <Popover.Trigger asChild>
             <Button className={filterCount > 0 ? "border-accent text-accent" : undefined}>
               <ListFilter size={14} className={filterCount > 0 ? "" : "text-ink-muted"} />
@@ -411,9 +427,55 @@ export function TableToolbar({
           </Popover.Portal>
         </Popover.Root>
 
-        <Button aria-label="View options">
-          <Settings2 size={14} className="text-ink-muted" />
-        </Button>
+        {/*
+          Column visibility. This is the only way back from "Hide column" in a header's
+          context menu, so it lists every column — including the hidden ones, which is
+          the whole point — rather than only what is currently on screen.
+        */}
+        <Popover.Root>
+          <Popover.Trigger asChild>
+            <Button aria-label="Columns">
+              <Settings2 size={14} className="text-ink-muted" />
+              {hiddenCount > 0 ? (
+                <span className="rounded-full bg-accent px-1.5 text-[10.5px] font-semibold text-white">
+                  {hiddenCount}
+                </span>
+              ) : null}
+            </Button>
+          </Popover.Trigger>
+          <Popover.Portal>
+            <Popover.Content
+              align="end"
+              sideOffset={6}
+              className="z-50 max-h-[340px] w-[220px] overflow-y-auto rounded-xl border border-line bg-surface p-1.5 shadow-lg"
+            >
+              <p className="px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.07em] text-ink-faint">
+                Columns
+              </p>
+              {columns.map((column) => {
+                const shown = !hidden.includes(column.id);
+                return (
+                  <button
+                    key={column.id}
+                    onClick={() => toggleColumn(column.id)}
+                    className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-[12.5px] text-ink hover:bg-line-soft"
+                  >
+                    <span className={shown ? "" : "text-ink-faint"}>{column.label}</span>
+                    {shown ? <Check size={12} className="text-accent" /> : null}
+                  </button>
+                );
+              })}
+              {hiddenCount > 0 ? (
+                <button
+                  onClick={() => onViewChange({ ...view, hiddenColumns: [] })}
+                  className="mt-1 w-full rounded-md px-2 py-1.5 text-left text-[12.5px] text-accent hover:bg-accent-soft"
+                >
+                  Show all columns
+                </button>
+              ) : null}
+            </Popover.Content>
+          </Popover.Portal>
+        </Popover.Root>
 
         <Button variant="primary" onClick={onAdd}>
           <Plus size={15} />

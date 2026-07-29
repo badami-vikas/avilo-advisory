@@ -135,7 +135,7 @@ const REFERRALS: (string | number | null)[][] = [
   ["Total", 377000],
 ];
 
-function main(): void {
+async function main(): Promise<void> {
   const db = getDb();
 
   const existing = db.select().from(schema.clients).all();
@@ -177,12 +177,12 @@ function main(): void {
   const lines: string[] = [];
 
   for (const upload of uploads) {
-    const staged = stageFile(id, upload.filename, upload.bytes);
+    const staged = await stageFile(id, upload.filename, upload.bytes);
     if (!staged.classification.reportType) {
       lines.push(`  ${upload.filename} — NOT CLASSIFIED (seed is out of date)`);
       continue;
     }
-    const outcome = commitFile(id, staged.sourceFileId);
+    const outcome = await commitFile(id, staged.sourceFileId);
     facts += outcome.factsWritten;
     details += outcome.detailsWritten;
     lines.push(
@@ -212,4 +212,7 @@ function main(): void {
   );
 }
 
-main();
+main().catch((error) => {
+  process.stderr.write(`Seed failed: ${(error as Error).stack}\n`);
+  process.exit(1);
+});

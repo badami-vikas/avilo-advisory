@@ -4,8 +4,8 @@ Offline, local-first monthly business snapshot for a small-business advisory pra
 Structured to be lifted into [relationship-os](https://github.com/manishsbhoopalam8498/relationship-os)
 as `platform/modules/avilo`.
 
-All six QuickBooks report types import, all dashboard sections render, and PDF export
-honours a chosen period range.
+All six QuickBooks report types import from Excel, CSV or PDF, all dashboard sections
+render, and PDF export honours a chosen period range.
 
 ## Run it
 
@@ -23,6 +23,39 @@ Then open **http://127.0.0.1:5177**. Requires Node 24 and pnpm 11.
 | `pnpm seed:demo` | Loads a demo client so you can see a populated dashboard |
 | `pnpm seed:demo --reset` | Removes all client data, keeping accounts and formulas |
 | `pnpm --filter @avilo/api migrations:generate` | Regenerates SQL after a schema change |
+
+## Hosting it
+
+`render.yaml` deploys this as a single Render web service: the API serves the built
+bundle, so `/trpc` stays same-origin and one session cookie covers both.
+
+**Hosting inverts this application's central assumption.** It has no user accounts and no
+per-record permissions, which was correct while it bound to loopback and the only
+reachable client was the person at the keyboard. On a public address that same design
+shows every client's financials to anyone with the URL. So:
+
+- Binding off `127.0.0.1` **without `AVILO_PASSWORD` is a startup error**, not a warning.
+  An accidentally-public deploy fails loudly at boot rather than serving quietly.
+- Access is one shared passphrase over a signed, `HttpOnly`, `Secure` session cookie,
+  rate-limited per address. That is proportionate for a single practice; it is not
+  multi-tenancy, and two advisers cannot be told apart in the audit log.
+- **A disk is mandatory.** SQLite is a file and Render replaces the filesystem on every
+  deploy. Without the mounted disk in `render.yaml`, every client and every imported
+  figure is erased on each push. Disks need a paid instance; the free tier also idles the
+  service, so for this application "free" means silent data loss.
+
+| Variable | Purpose |
+| --- | --- |
+| `AVILO_HOST` | Bind address. Defaults to `127.0.0.1` |
+| `AVILO_PORT` | Overrides `PORT`, so an ambient value cannot claim the API's port |
+| `AVILO_PASSWORD` | Enables the login gate. Required off loopback; min 12 characters |
+| `AVILO_DB_PATH` | SQLite file. Point at the mounted disk |
+| `AVILO_FILES_ROOT` | Uploaded source files. Point at the mounted disk |
+| `AVILO_SESSION_SECRET` | Optional. Without it, rotating the passphrase ends all sessions |
+
+GitHub Pages cannot host this at all — it serves static files, and there is no backend to
+answer `/trpc`. Cloudflare Workers cannot either without rewriting the data layer:
+`better-sqlite3` is a native module and Workers has no filesystem.
 
 ## Offline
 
@@ -109,16 +142,16 @@ statistics rather than counted as zero.
 
 ## Known gaps
 
-- **PDF ingestion is deferred; Excel/CSV only.** The upload dialog says so rather than
-  silently doing nothing. Structural parsing of a spreadsheet is exact; reading a PDF is
-  interpretation, and that is what failed repeatedly in the v9 build.
+- **PDF import reconstructs geometry, and cannot recover what the export discarded.**
+  Rows are grouped by baseline and columns by clustered right edges — deterministic, no
+  model, no network — and the resulting grid feeds the same six parsers Excel does. Excel
+  remains more reliable because it states its structure rather than drawing one. A scan
+  has no text layer and is refused rather than imported empty.
 - **A combined group export is refused with an explanation**, rather than half-parsed.
   Per-report exports parse exactly; a merged document cannot.
 - The table renders the `@bridge/tables` contract as DOM. relationship-os draws the same
   contract with `@glideapps/glide-data-grid`. Swapping the renderer is contained, because
   no caller knows how a cell is painted.
-- Column right-click context menus are not built yet; sorting is available from the
-  header and from the overflow menu.
 - The web bundle is ~1.3 MB (405 KB gzipped), dominated by mathjs. It is served from
   localhost, so this costs approximately nothing; worth trimming with a narrower mathjs
   import if it ever ships over a network.
@@ -138,13 +171,17 @@ one. Each has a named regression test.
 | A detail line claiming an account before its section total | matches ranked; totals supersede detail lines |
 | A later balance-sheet row silently overwriting an earlier value | equal-rank collisions keep the first and warn |
 | A guessed job count | taken from an explicit column or reported absent |
+| A PDF's right-aligned columns split by drawn width | columns clustered on right edges, not left |
+| A scanned PDF importing as an empty report | no text layer is refused by name |
+| A public bind with no passphrase | startup error, not a warning |
+| A forged or expired session cookie | HMAC over the payload, expiry inside the signature |
 | A 12-month job count labelled "this month" | job performance states its basis |
 | `formatPeriod` throwing and blanking a page | display formatters degrade; `assertPeriod` still throws |
 | Every `button` hidden in print, deleting metric cards from the PDF | chrome hidden by intent (`.no-print`), not by element type |
 
 ## Tests
 
-63 unit tests plus a 27-check end-to-end smoke test over real HTTP and real SQLite.
+121 unit tests plus a 27-check end-to-end smoke test over real HTTP and real SQLite.
 Coverage is concentrated on the four things that broke in the v7→v9 build: parsers,
 the formula evaluator, override precedence, and period/range arithmetic.
 

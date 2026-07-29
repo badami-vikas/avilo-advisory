@@ -11,7 +11,7 @@ import {
   CANONICAL_ACCOUNTS,
   SEED_FORMULAS,
 } from "@avilo/module";
-import { DB_PATH, DATA_DIR, ensureDir } from "./paths.js";
+import { DB_PATH, ensureDir } from "./paths.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -26,7 +26,9 @@ export function getDb(): Db {
 export function getConnection(): { db: Db; raw: Database.Database } {
   if (cached) return cached;
 
-  ensureDir(DATA_DIR);
+  // The database's own directory, not DATA_DIR: AVILO_DB_PATH can point anywhere, and
+  // on a hosted deployment it points at a mounted disk outside the files root.
+  ensureDir(dirname(DB_PATH));
   const raw = new Database(DB_PATH);
 
   // WAL keeps reads non-blocking while an import writes; foreign keys are off by

@@ -500,15 +500,22 @@ const importRouter = router({
         ),
       }),
     )
-    .mutation(({ input }) => {
+    .mutation(async ({ input }) => {
       requireClient(input.clientId);
-      return input.files.map((file) =>
-        stageFile(
-          input.clientId,
-          file.filename,
-          new Uint8Array(Buffer.from(file.content, "base64")),
-        ),
-      );
+      // Sequential rather than concurrent: staging writes the stored copy and the
+      // source_files row, and a multi-file upload of the same report twice must resolve
+      // to one row deterministically rather than racing on the sha256 lookup.
+      const staged = [];
+      for (const file of input.files) {
+        staged.push(
+          await stageFile(
+            input.clientId,
+            file.filename,
+            new Uint8Array(Buffer.from(file.content, "base64")),
+          ),
+        );
+      }
+      return staged;
     }),
 
   /** Teach a label→account mapping, then the caller re-stages to see the effect. */
@@ -541,9 +548,9 @@ const importRouter = router({
         reportType: z.string().optional(),
       }),
     )
-    .mutation(({ input }) => {
+    .mutation(async ({ input }) => {
       try {
-        return commitFile(
+        return await commitFile(
           input.clientId,
           input.sourceFileId,
           input.reportType as ReportType | undefined,

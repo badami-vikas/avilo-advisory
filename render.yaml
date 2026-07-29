@@ -1,0 +1,53 @@
+# Render blueprint.
+#
+# One web service, not two. The API serves the built bundle from the same origin, so
+# `/trpc` needs no CORS and the session cookie covers the app and its data together.
+#
+# The disk is the part that matters. SQLite is a file; Render replaces a service's
+# filesystem on every deploy, so without a mounted disk every client, every imported
+# figure and every override would be erased on each push. Uploaded source files live on
+# the same disk for the same reason.
+#
+# A disk requires a paid instance type. Render's free tier has no persistent storage and
+# stops the instance when idle, which for this application means silent data loss.
+
+services:
+  - type: web
+    name: avilo-advisory
+    runtime: node
+    plan: starter
+    region: oregon
+
+    buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm build
+    startCommand: pnpm --filter @avilo/api start
+
+    healthCheckPath: /health
+
+    disk:
+      name: avilo-data
+      mountPath: /var/data
+      sizeGB: 1
+
+    envVars:
+      - key: NODE_VERSION
+        value: "24"
+
+      # Bind to every interface so Render's proxy can reach the process. The server
+      # refuses to start on a non-loopback address unless AVILO_PASSWORD is set, so this
+      # line cannot quietly publish the data on its own.
+      - key: AVILO_HOST
+        value: 0.0.0.0
+
+      # Both on the mounted disk: everything outside it is lost on deploy.
+      - key: AVILO_DB_PATH
+        value: /var/data/avilo.sqlite
+      - key: AVILO_FILES_ROOT
+        value: /var/data/files
+
+      - key: AVILO_LOG_LEVEL
+        value: warn
+
+      # Set in the Render dashboard, never in this file — it is the whole security
+      # boundary, and this file is in version control.
+      - key: AVILO_PASSWORD
+        sync: false

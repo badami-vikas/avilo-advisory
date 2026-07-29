@@ -1,8 +1,9 @@
 import clsx from "clsx";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
+import * as ContextMenu from "@radix-ui/react-context-menu";
 import { Check, ChevronDown } from "lucide-react";
-import type { ColumnSpec, ViewConfig } from "@avilo/tables";
+import { visibleColumns, type ColumnSpec, type ViewConfig } from "@avilo/tables";
 
 import {
   AGGREGATE_LABELS,
@@ -48,6 +49,12 @@ export interface DataTableProps<Row> {
   rowKey: (row: Row) => string;
   onRowClick?: (row: Row) => void;
   onSort?: (columnId: string) => void;
+  /** Set a column's sort direction outright, rather than cycling it. */
+  onSortDir?: (columnId: string, dir: "asc" | "desc") => void;
+  /** Remove a column from the view. */
+  onHideColumn?: (columnId: string) => void;
+  /** Start a filter on a column. */
+  onFilterColumn?: (columnId: string) => void;
   rowActions?: (row: Row) => ReactNode;
   emptyState: ReactNode;
   onAddRow?: () => void;
@@ -57,13 +64,16 @@ export interface DataTableProps<Row> {
 }
 
 export function DataTable<Row>({
-  columns,
+  columns: allColumns,
   renderers,
   rows,
   view,
   rowKey,
   onRowClick,
   onSort,
+  onSortDir,
+  onHideColumn,
+  onFilterColumn,
   rowActions,
   emptyState,
   onAddRow,
@@ -72,6 +82,14 @@ export function DataTable<Row>({
 }: DataTableProps<Row>) {
   const [editing, setEditing] = useState<{ key: string; col: string } | null>(null);
   const [aggregates, setAggregates] = useState<Record<string, AggregateKind>>({});
+
+  // Hidden and reordered columns are part of the view, not of this component's state —
+  // which is what lets a saved list restore a layout. Resolved through the shared engine
+  // so the table and a stored view can never disagree about what "visible" means.
+  const columns = useMemo(
+    () => visibleColumns({ id: view.id, columns: allColumns }, view),
+    [allColumns, view],
+  );
 
   const sortFor = (id: string) => view.sorts.find((s) => s.id === id);
 
@@ -87,31 +105,26 @@ export function DataTable<Row>({
             {columns.map((column) => {
               const renderer = renderers[column.id];
               const sort = sortFor(column.id);
+              const numeric = renderer?.numeric ?? column.kind === "number";
               return (
-                <th
+                <ColumnHeader
                   key={column.id}
-                  style={column.width ? { width: column.width } : undefined}
-                  className={clsx(
-                    "whitespace-nowrap px-4 py-2.5 text-[10px] font-semibold uppercase tracking-[0.07em] text-ink-faint",
-                    renderer?.align === "right" ? "text-right" : "text-left",
-                    onSort && "cursor-pointer select-none hover:text-ink-muted",
-                  )}
-                  onClick={onSort ? () => onSort(column.id) : undefined}
-                  scope="col"
-                >
-                  <span className="inline-flex items-center gap-1">
-                    {column.label}
-                    {sort ? (
-                      <ChevronDown
-                        size={11}
-                        className={clsx(
-                          "text-ink-muted transition-transform",
-                          sort.dir === "asc" && "rotate-180",
-                        )}
-                      />
-                    ) : null}
-                  </span>
-                </th>
+                  columnId={column.id}
+                  label={column.label}
+                  width={column.width}
+                  align={renderer?.align}
+                  sortDir={sort?.dir ?? null}
+                  numeric={numeric}
+                  aggregate={aggregates[column.id] ?? defaultAggregate(numeric)}
+                  onAggregateChange={(kind) =>
+                    setAggregates((current) => ({ ...current, [column.id]: kind }))
+                  }
+                  onSort={onSort}
+                  onSortDir={onSortDir}
+                  onHideColumn={onHideColumn}
+                  onFilterColumn={onFilterColumn}
+                  showAggregate={showFooter}
+                />
               );
             })}
             {rowActions ? (
@@ -260,6 +273,170 @@ export function DataTable<Row>({
         ) : null}
       </table>
     </div>
+  );
+}
+
+/**
+ * A column header, with a right-click menu.
+ *
+ * Left-click still cycles the sort, because that is the gesture people reach for first.
+ * The context menu exists for everything a header click cannot express — a direction
+ * chosen outright rather than cycled to, hiding the column, filtering on it, or changing
+ * what its footer computes. Nothing here is exclusive to the menu: every item has an
+ * equivalent in the toolbar, so the feature stays discoverable for anyone who never
+ * thinks to right-click, and on touch, where there is no right-click at all.
+ */
+function ColumnHeader({
+  columnId,
+  label,
+  width,
+  align,
+  sortDir,
+  numeric,
+  aggregate,
+  onAggregateChange,
+  onSort,
+  onSortDir,
+  onHideColumn,
+  onFilterColumn,
+  showAggregate,
+}: {
+  columnId: string;
+  label: string;
+  width?: number;
+  align?: "left" | "right" | "center";
+  sortDir: "asc" | "desc" | null;
+  numeric: boolean;
+  aggregate: AggregateKind;
+  onAggregateChange: (kind: AggregateKind) => void;
+  onSort?: (columnId: string) => void;
+  onSortDir?: (columnId: string, dir: "asc" | "desc") => void;
+  onHideColumn?: (columnId: string) => void;
+  onFilterColumn?: (columnId: string) => void;
+  showAggregate: boolean;
+}) {
+  const hasMenu = Boolean(onSortDir || onHideColumn || onFilterColumn || showAggregate);
+
+  const header = (
+    <th
+      style={width ? { width } : undefined}
+      className={clsx(
+        "whitespace-nowrap px-4 py-2.5 text-[10px] font-semibold uppercase tracking-[0.07em] text-ink-faint",
+        align === "right" ? "text-right" : "text-left",
+        onSort && "cursor-pointer select-none hover:text-ink-muted",
+      )}
+      onClick={onSort ? () => onSort(columnId) : undefined}
+      scope="col"
+    >
+      <span className="inline-flex items-center gap-1">
+        {label}
+        {sortDir ? (
+          <ChevronDown
+            size={11}
+            className={clsx(
+              "text-ink-muted transition-transform",
+              sortDir === "asc" && "rotate-180",
+            )}
+          />
+        ) : null}
+      </span>
+    </th>
+  );
+
+  if (!hasMenu) return header;
+
+  const itemClass =
+    "flex cursor-pointer items-center justify-between gap-6 rounded-md px-2 py-1.5 " +
+    "text-[12.5px] text-ink outline-none data-[highlighted]:bg-line-soft " +
+    "data-[disabled]:cursor-default data-[disabled]:text-ink-faint";
+
+  return (
+    <ContextMenu.Root>
+      <ContextMenu.Trigger asChild>{header}</ContextMenu.Trigger>
+      <ContextMenu.Portal>
+        <ContextMenu.Content className="no-print z-50 min-w-[190px] rounded-lg border border-line bg-surface p-1 shadow-lg">
+          <div className="px-2 py-1.5 text-[10px] font-semibold uppercase tracking-[0.07em] text-ink-faint">
+            {label}
+          </div>
+
+          {onSortDir ? (
+            <>
+              <ContextMenu.Item
+                className={itemClass}
+                onSelect={() => onSortDir(columnId, "asc")}
+              >
+                Sort ascending
+                {sortDir === "asc" ? <Check size={12} className="text-accent" /> : null}
+              </ContextMenu.Item>
+              <ContextMenu.Item
+                className={itemClass}
+                onSelect={() => onSortDir(columnId, "desc")}
+              >
+                Sort descending
+                {sortDir === "desc" ? <Check size={12} className="text-accent" /> : null}
+              </ContextMenu.Item>
+            </>
+          ) : null}
+
+          {onFilterColumn ? (
+            <>
+              <ContextMenu.Separator className="my-1 h-px bg-line-soft" />
+              <ContextMenu.Item
+                className={itemClass}
+                onSelect={() => onFilterColumn(columnId)}
+              >
+                Filter on this column
+              </ContextMenu.Item>
+            </>
+          ) : null}
+
+          {showAggregate ? (
+            <>
+              <ContextMenu.Separator className="my-1 h-px bg-line-soft" />
+              <ContextMenu.Sub>
+                <ContextMenu.SubTrigger className={itemClass}>
+                  Summarise
+                  <span className="text-[11px] text-ink-faint">
+                    {AGGREGATE_LABELS[aggregate]}
+                  </span>
+                </ContextMenu.SubTrigger>
+                <ContextMenu.Portal>
+                  <ContextMenu.SubContent
+                    sideOffset={2}
+                    className="no-print z-50 min-w-[150px] rounded-lg border border-line bg-surface p-1 shadow-lg"
+                  >
+                    {availableAggregates(numeric).map((option) => (
+                      <ContextMenu.Item
+                        key={option}
+                        className={itemClass}
+                        onSelect={() => onAggregateChange(option)}
+                      >
+                        {AGGREGATE_LABELS[option]}
+                        {option === aggregate ? (
+                          <Check size={12} className="text-accent" />
+                        ) : null}
+                      </ContextMenu.Item>
+                    ))}
+                  </ContextMenu.SubContent>
+                </ContextMenu.Portal>
+              </ContextMenu.Sub>
+            </>
+          ) : null}
+
+          {onHideColumn ? (
+            <>
+              <ContextMenu.Separator className="my-1 h-px bg-line-soft" />
+              <ContextMenu.Item
+                className={itemClass}
+                onSelect={() => onHideColumn(columnId)}
+              >
+                Hide column
+              </ContextMenu.Item>
+            </>
+          ) : null}
+        </ContextMenu.Content>
+      </ContextMenu.Portal>
+    </ContextMenu.Root>
   );
 }
 

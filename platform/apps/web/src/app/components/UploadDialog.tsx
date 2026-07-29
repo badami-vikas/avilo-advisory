@@ -205,8 +205,9 @@ export function UploadDialog({
               Drop one or more files here
             </p>
             <p className="mt-1 text-[12px] text-ink-muted">
-              Excel or CSV exports from QuickBooks. Any report type, any order — they
-              are identified for you.
+              Excel, CSV or PDF exports from QuickBooks. Any report type, any order —
+              they are identified for you. Excel is the most reliable: it states its
+              structure, where a PDF only draws one.
             </p>
             <input
               ref={inputRef}

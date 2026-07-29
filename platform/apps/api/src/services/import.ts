@@ -20,6 +20,7 @@ import {
   type Period,
   type ReportType,
 } from "@avilo/module";
+import { readPdf } from "@avilo/module/pdf";
 import { getDb, newId, nowIso, schema } from "../db.js";
 import { clientFilesDir, ensureDir } from "../paths.js";
 import { buildResolver } from "./labels.js";
@@ -34,9 +35,17 @@ export interface StagedFile {
   error?: string;
 }
 
-const SPREADSHEET = /\.(xlsx|xlsm|xls|csv)$/i;
+const SUPPORTED = /\.(xlsx|xlsm|xls|csv|pdf)$/i;
 
-function toGrid(filename: string, bytes: Uint8Array): Grid {
+/**
+ * Every accepted format converges on one Grid, so the six parsers never learn which
+ * format a report arrived in. A PDF that reconstructs cleanly is parsed by exactly the
+ * code that parses Excel, and inherits every fix made there.
+ */
+async function toGrid(filename: string, bytes: Uint8Array): Promise<Grid> {
+  if (/\.pdf$/i.test(filename)) {
+    return (await readPdf(bytes, filename)).grid;
+  }
   if (/\.csv$/i.test(filename)) {
     return readCsv(new TextDecoder().decode(bytes));
   }
@@ -49,11 +58,11 @@ function toGrid(filename: string, bytes: Uint8Array): Grid {
  * confirmed it, which is what makes a misclassification a one-click correction rather
  * than a silently wrong dashboard.
  */
-export function stageFile(
+export async function stageFile(
   clientId: string,
   filename: string,
   bytes: Uint8Array,
-): StagedFile {
+): Promise<StagedFile> {
   const db = getDb();
   const client = db
     .select()
@@ -82,10 +91,10 @@ export function stageFile(
 
   const sourceFileId = existing?.id ?? newId("sf");
 
-  if (!SPREADSHEET.test(filename)) {
-    // PDF ingestion lands in Phase 2. Recording the file rather than rejecting it means
-    // the user's upload is not lost, and the reason is explicit rather than a silent
-    // no-op — which is how the prototype behaved when a slot fell through.
+  if (!SUPPORTED.test(filename)) {
+    // Recording the file rather than rejecting it means the user's upload is not lost,
+    // and the reason is explicit rather than a silent no-op — which is how the prototype
+    // behaved when a slot fell through.
     const record = {
       id: sourceFileId,
       clientId,
@@ -99,8 +108,7 @@ export function stageFile(
       classifiedBy: "rules" as const,
       periodsDetected: "[]",
       status: "failed" as const,
-      error:
-        "PDF import arrives in Phase 2. Export this report from QuickBooks as Excel or CSV and upload it again — structural parsing is materially more reliable than reading a PDF.",
+      error: `${extension === "" ? "This file" : `.${extension} files`} cannot be read. Upload an Excel, CSV or PDF export.`,
     };
     if (existing) {
       db.update(schema.sourceFiles).set(record).where(eq(schema.sourceFiles.id, sourceFileId)).run();
@@ -125,7 +133,7 @@ export function stageFile(
 
   let grid: Grid;
   try {
-    grid = toGrid(filename, bytes);
+    grid = await toGrid(filename, bytes);
   } catch (cause) {
     return {
       sourceFileId,
@@ -331,11 +339,11 @@ export interface CommitResult {
  * an active override on the same target is moved to 'superseded' rather than deleted, so
  * the manual value and its author survive and can be restored in one click.
  */
-export function commitFile(
+export async function commitFile(
   clientId: string,
   sourceFileId: string,
   reportTypeOverride?: ReportType,
-): CommitResult {
+): Promise<CommitResult> {
   const db = getDb();
 
   const file = db
@@ -350,7 +358,7 @@ export function commitFile(
 
   // Re-read from the stored copy so a commit is reproducible from disk.
   const bytes = new Uint8Array(readFileSync(file.storedPath));
-  const grid = toGrid(file.filename, bytes);
+  const grid = await toGrid(file.filename, bytes);
   const parsedFile = previewParse(clientId, reportType, grid);
 
   if (!parsedFile) {

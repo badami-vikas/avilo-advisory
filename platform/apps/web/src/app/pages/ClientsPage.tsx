@@ -35,6 +35,7 @@ export function ClientsPage() {
   const navigate = useNavigate();
   const [rows, setRows] = useState<ClientRow[] | null>(null);
   const [search, setSearch] = useState("");
+  const [openFilter, setOpenFilter] = useState(false);
   const [view, setView] = useState<ViewConfig>(() => ({
     ...defaultViewConfig(TABLE_ID),
     sorts: [{ id: "name", dir: "asc" }],
@@ -90,6 +91,36 @@ export function ClientsPage() {
         return { ...current, sorts: [{ id: columnId, dir: "desc" }] };
       return { ...current, sorts: [] };
     });
+  }, []);
+
+  const setSortDir = useCallback((columnId: string, dir: "asc" | "desc") => {
+    setView((current) => ({ ...current, sorts: [{ id: columnId, dir }] }));
+  }, []);
+
+  const hideColumn = useCallback((columnId: string) => {
+    setView((current) => {
+      const hidden = current.hiddenColumns ?? [];
+      return {
+        ...current,
+        hiddenColumns: hidden.includes(columnId) ? hidden : [...hidden, columnId],
+      };
+    });
+  }, []);
+
+  /**
+   * Seed a filter on a column and open the builder, rather than applying one blind.
+   * "contains ''" matches everything, so the row count does not move until the user
+   * types — a filter that silently emptied the table would look like data loss.
+   */
+  const filterOnColumn = useCallback((columnId: string) => {
+    setView((current) => ({
+      ...current,
+      rowFilters: [
+        ...current.rowFilters,
+        { field: columnId, op: "contains" as const, value: "" },
+      ],
+    }));
+    setOpenFilter(true);
   }, []);
 
   /**
@@ -310,6 +341,8 @@ export function ClientsPage() {
         searchPlaceholder="Search clients…"
         onAdd={addClient}
         addLabel="Add Client"
+        filterOpen={openFilter}
+        onFilterOpenChange={setOpenFilter}
       />
 
       <div className="flex flex-wrap gap-2.5">
@@ -349,6 +382,9 @@ export function ClientsPage() {
             view={view}
             rowKey={(row) => row.id}
             onSort={toggleSort}
+            onSortDir={setSortDir}
+            onHideColumn={hideColumn}
+            onFilterColumn={filterOnColumn}
             onRowClick={openDetail}
             onAddRow={addClient}
             addRowLabel="New client"
