@@ -149,13 +149,75 @@ export function AgingBlock({
   );
 }
 
-/** Where your money came from — top customers by revenue. */
+/**
+ * Where your money came from — revenue split by service line.
+ *
+ * These rows come from the income section of the P&L and have been parsed and stored on
+ * every import since the importer was written; they simply had nowhere to appear. The
+ * split is the question an advisor opens the report to answer, and it was in the v9
+ * prototype.
+ */
+export function ServiceLinesBlock({ rows }: { rows: DetailRow[] }) {
+  const lines = rows
+    .filter((row) => Math.abs(row.value) > 0)
+    .sort((a, b) => Math.abs(b.value) - Math.abs(a.value));
+
+  const total = lines.reduce((sum, row) => sum + Math.abs(row.value), 0);
+
+  return (
+    <Block
+      title="Where your money came from"
+      subtitle="Revenue by service line, this period"
+    >
+      {lines.length === 0 ? (
+        emptyFor("service line revenue", "Profit & Loss")
+      ) : (
+        <div className="divide-y divide-line-soft">
+          {lines.map((row) => {
+            const share = total === 0 ? 0 : (Math.abs(row.value) / total) * 100;
+            return (
+              <div key={row.id} className="flex items-center gap-3 px-5 py-2.5">
+                <span className="min-w-0 flex-1 truncate text-[12.5px] text-ink">
+                  {row.label.trim()}
+                </span>
+                <Tip content={`${share.toFixed(1)}% of revenue this period`}>
+                  <span className="h-1.5 w-24 shrink-0 overflow-hidden rounded-full bg-line-soft">
+                    <span
+                      className="block h-full rounded-full bg-accent"
+                      style={{ width: `${share}%` }}
+                    />
+                  </span>
+                </Tip>
+                <span className="num w-12 shrink-0 text-right text-[11.5px] text-ink-faint">
+                  {share.toFixed(0)}%
+                </span>
+                <span className="num w-28 shrink-0 text-right text-[12.5px] font-medium text-ink">
+                  {moneyFull(row.value)}
+                </span>
+              </div>
+            );
+          })}
+          <div className="flex items-center gap-3 bg-line-soft/40 px-5 py-2.5">
+            <span className="min-w-0 flex-1 text-[12px] font-medium text-ink-muted">
+              Total
+            </span>
+            <span className="num w-28 shrink-0 text-right text-[12.5px] font-semibold text-ink">
+              {moneyFull(total)}
+            </span>
+          </div>
+        </div>
+      )}
+    </Block>
+  );
+}
+
+/** Top customers by revenue, from the Sales by Customer export. */
 export function TopCustomersBlock({ rows }: { rows: DetailRow[] }) {
   const top = rows.slice(0, 8);
   return (
     <Block
-      title="Where your money came from"
-      subtitle="Top customers by revenue"
+      title="Top customers"
+      subtitle="By revenue, last 12 months"
     >
       {top.length === 0 ? (
         emptyFor("customer revenue", "Sales by Customer")

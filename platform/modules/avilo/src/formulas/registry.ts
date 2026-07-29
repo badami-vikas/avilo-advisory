@@ -76,4 +76,32 @@ export const SEED_FORMULAS: FormulaDef[] = [
     benchmark: { min: 30, note: "Under 30 days of runway is a liquidity risk." },
     sortOrder: 50,
   },
+  /**
+   * Collection and payment timing.
+   *
+   * Both use a 30-day month rather than 365/12, because the numerator is a
+   * point-in-time balance from an ageing report and the denominator is a single
+   * month's activity from the P&L. Mixing a monthly figure with an annual divisor is
+   * the kind of unit mismatch that produces a plausible-looking number that is wrong
+   * by a factor of twelve.
+   */
+  {
+    id: "dso",
+    label: "Days sales outstanding (DSO)",
+    expression: "ar.total / pl.revenue * 30",
+    unit: "days",
+    description:
+      "Average days to collect. Outstanding receivables divided by one month's revenue.",
+    benchmark: { max: 45, note: "Over 45 days means cash is sitting in customers' hands." },
+    sortOrder: 60,
+  },
+  {
+    id: "dpo",
+    label: "Days payable outstanding (DPO)",
+    expression: "ap.total / ((pl.cogs + pl.overhead)) * 30",
+    unit: "days",
+    description:
+      "Average days taken to pay suppliers. Outstanding payables divided by one month's operating spend.",
+    sortOrder: 70,
+  },
 ];

@@ -159,7 +159,12 @@ describe("evaluateFormulas", () => {
 
 describe("requiredAccounts — the derived checklist", () => {
   it("derives every account the active formulas need, with no hand-maintained list", () => {
+    // Updated when DSO/DPO were added to the registry. That this test failed is the
+    // point: the checklist is derived from the formula graph, so a new formula changes
+    // what the importer demands without anyone editing a list of required accounts.
     expect(requiredAccounts(specs)).toEqual([
+      "ap.total",
+      "ar.total",
       "bs.cash",
       "pl.cogs",
       "pl.overhead",
@@ -184,7 +189,13 @@ describe("requiredAccounts — the derived checklist", () => {
 
   it("reports which required accounts are absent from a given scope", () => {
     const result = evaluateFormulas(specs, scopeOf({ "pl.revenue": 1 }));
-    expect(result.missingAccounts).toEqual(["bs.cash", "pl.cogs", "pl.overhead"]);
+    expect(result.missingAccounts).toEqual([
+      "ap.total",
+      "ar.total",
+      "bs.cash",
+      "pl.cogs",
+      "pl.overhead",
+    ]);
   });
 });
 

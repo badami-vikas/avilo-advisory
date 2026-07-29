@@ -15,6 +15,7 @@ import {
   COOKIE_NAME,
   checkPassword,
   clearFailures,
+  clientAddress,
   clearedCookie,
   isLoopback,
   issueSession,
@@ -39,6 +40,13 @@ const PORT = Number(process.env.AVILO_PORT ?? process.env.PORT ?? 5178);
 const HOST = process.env.AVILO_HOST ?? "127.0.0.1";
 
 /**
+ * Set by `pnpm share` when a Cloudflare Tunnel is publishing this process. The bind
+ * address stays 127.0.0.1 in that mode, so it cannot be inferred — and getting it wrong
+ * means serving client financials to the internet with no login.
+ */
+const BEHIND_CLOUDFLARE = process.env.AVILO_BEHIND_CLOUDFLARE === "1";
+
+/**
  * The built web bundle, when the API is serving it too.
  *
  * A single process is what makes a hosted deployment coherent: the browser talks to one
@@ -52,7 +60,7 @@ const WEB_DIST = resolve(
 );
 
 async function main(): Promise<void> {
-  const auth = resolveAuth(HOST, process.env.AVILO_PASSWORD);
+  const auth = resolveAuth(HOST, process.env.AVILO_PASSWORD, BEHIND_CLOUDFLARE);
 
   getConnection();
 
@@ -102,7 +110,7 @@ async function main(): Promise<void> {
     app.post<{ Body: { password?: string } | undefined }>(
       "/auth/login",
       async (request, reply) => {
-        const address = request.ip;
+        const address = clientAddress(request.headers, request.ip, BEHIND_CLOUDFLARE);
         const gate = throttle(address);
         if (!gate.allowed) {
           return reply

@@ -16,7 +16,16 @@ import type {
   SeriesPoint,
 } from "../types.js";
 
-const CHART_IDS = ["pl.revenue", "net_operating_income", "noi_margin_pct"];
+// Every id any chart draws. Fetched in one series call rather than per chart, because
+// each id costs nothing extra but each call rebuilds the whole period report.
+const CHART_IDS = [
+  "pl.revenue",
+  "net_operating_income",
+  "noi_margin_pct",
+  "gross_profit",
+  "pl.overhead",
+  "gross_margin_pct",
+];
 
 export function ClientDetailPage() {
   const { clientId = "" } = useParams();
@@ -292,6 +301,7 @@ export function ClientDetailPage() {
           report={report}
           series={series}
           detail={detail}
+          formulas={formulas}
           rangeLabel={
             printRange
               ? `${formatPeriod(printRange.start)} – ${formatPeriod(printRange.end)}`

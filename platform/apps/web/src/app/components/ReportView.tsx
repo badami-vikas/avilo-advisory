@@ -8,11 +8,17 @@ import { ChartBlock, type ChartPoint } from "./ChartBlock.js";
 import {
   AgingBlock,
   ReferralBlock,
+  ServiceLinesBlock,
   TopCustomersBlock,
   TopExpensesBlock,
 } from "./DetailSections.js";
 import { byUnit, money } from "../../lib/format.js";
-import type { DetailByKind, PeriodReport, SeriesPoint } from "../types.js";
+import type {
+  DetailByKind,
+  FormulaRow,
+  PeriodReport,
+  SeriesPoint,
+} from "../types.js";
 
 /**
  * The Report view: the rendered dashboard, composed of separated visual blocks.
@@ -25,6 +31,7 @@ export function ReportView({
   report,
   series,
   detail,
+  formulas,
   rangeLabel,
   onSetMetricValue,
 }: {
@@ -32,6 +39,8 @@ export function ReportView({
   report: PeriodReport;
   series: SeriesPoint[];
   detail: DetailByKind;
+  /** Carries the benchmark bands, which is what "Flags to review" is derived from. */
+  formulas: FormulaRow[];
   /** Set only while exporting: the period range the PDF covers. */
   rangeLabel?: string | null;
   onSetMetricValue: (metricId: string, raw: string) => Promise<void>;
@@ -44,6 +53,9 @@ export function ReportView({
     label: point.periodLabel,
     values: point.values,
   }));
+
+  const unitFor = (id: string): string =>
+    formulas.find((f) => f.id === id)?.unit ?? (id.endsWith("_pct") ? "percent" : "currency");
 
   const metricTip = (id: string): string => {
     const m = metric(id);
@@ -58,7 +70,11 @@ export function ReportView({
     const m = metric(id);
     if (!m) return null;
     const ok = m.status === "ok";
-    const unit = id.endsWith("_pct") ? "percent" : id === "days_cash_on_hand" ? "days" : "currency";
+    // The unit is declared on the formula, so read it from there. Inferring it from the
+    // id — "_pct" means percent, this one id means days, everything else is currency —
+    // meant every new formula rendered as dollars until someone remembered to add a
+    // branch here, which is how DSO first shipped as "$8.82".
+    const unit = unitFor(id);
 
     return (
       <div
@@ -94,6 +110,58 @@ export function ReportView({
       </div>
     );
   };
+
+  /**
+   * Flags to review.
+   *
+   * Derived from the benchmark bands already declared in the formula registry, not from
+   * thresholds written again here — the v9 prototype kept its rules in a second place
+   * and they drifted from the formulas they judged. Editing a benchmark changes this
+   * panel, because there is only one definition.
+   */
+  const flags = (() => {
+    const out: { label: string; detail: string; tone: "flag" | "warn" }[] = [];
+
+    for (const metric of report.metrics) {
+      if (metric.status === "missing_inputs") continue;
+      if (metric.status === "error") {
+        out.push({
+          label: metric.label,
+          detail: metric.error ?? "Could not be computed.",
+          tone: "flag",
+        });
+        continue;
+      }
+      if (metric.value === null) continue;
+
+      const formula = formulas.find((f) => f.id === metric.id);
+      if (!formula?.benchmark) continue;
+
+      let band: { min?: number; max?: number; note?: string };
+      try {
+        band = JSON.parse(formula.benchmark) as typeof band;
+      } catch {
+        continue;
+      }
+
+      const unit = formula.unit;
+      if (band.min !== undefined && metric.value < band.min) {
+        out.push({
+          label: metric.label,
+          detail: `${byUnit(metric.value, unit)} — below ${byUnit(band.min, unit)}. ${band.note ?? ""}`.trim(),
+          tone: "flag",
+        });
+      } else if (band.max !== undefined && metric.value > band.max) {
+        out.push({
+          label: metric.label,
+          detail: `${byUnit(metric.value, unit)} — above ${byUnit(band.max, unit)}. ${band.note ?? ""}`.trim(),
+          tone: "warn",
+        });
+      }
+    }
+
+    return out;
+  })();
 
   return (
     <div className="space-y-4">
@@ -238,7 +306,52 @@ export function ReportView({
         </div>
       </Block>
 
+      {/* Gross profit against overhead: the second trend the prototype carried, and the
+          one the twelve months of P&L data actually supports. */}
+      <ChartBlock
+        title="Gross profit and overhead"
+        subtitle="What is earned against what it costs to run"
+        points={points}
+        series={[
+          {
+            id: "gross_profit",
+            label: "Gross profit",
+            unit: "currency",
+            type: "bar",
+            color: "#12b76a",
+          },
+          {
+            id: "pl.overhead",
+            label: "Overhead",
+            unit: "currency",
+            type: "bar",
+            color: "#f79009",
+          },
+          {
+            id: "gross_margin_pct",
+            label: "Gross margin",
+            unit: "percent",
+            type: "line",
+            secondaryAxis: true,
+            color: "#1570ef",
+          },
+        ]}
+      />
+
+      {/* ------------------------------------------------ A/R & A/P timing */}
+      <Block
+        title="A/R & A/P timing"
+        subtitle="How long money takes to arrive, and how long you take to pay"
+      >
+        <div className="grid grid-cols-1 gap-px bg-line-soft sm:grid-cols-2">
+          <MetricCard id="dso" />
+          <MetricCard id="dpo" />
+        </div>
+      </Block>
+
       {/* -------------------------------------------------- Phase 2 sections */}
+      <ServiceLinesBlock rows={detail["pl_income"] ?? []} />
+
       <TopExpensesBlock rows={detail["pl_expense"] ?? []} />
 
       <AgingBlock
@@ -346,6 +459,51 @@ export function ReportView({
       </Block>
 
       <ReferralBlock rows={detail["referral_partner"] ?? []} />
+
+      {/* ------------------------------------------------- Flags to review */}
+      <Block
+        title="Flags to review"
+        subtitle="Measured against the benchmark bands set on each formula"
+      >
+        {flags.length === 0 && report.missingRequired.length === 0 ? (
+          <p className="px-5 py-6 text-[12.5px] text-ink-muted">
+            Nothing outside its benchmark this period.
+          </p>
+        ) : (
+          <div className="divide-y divide-line-soft">
+            {report.missingRequired.length > 0 ? (
+              <div className="flex items-start gap-3 px-5 py-3">
+                <AlertTriangle size={14} className="mt-0.5 shrink-0 text-flag" />
+                <div className="min-w-0">
+                  <p className="text-[12.5px] font-medium text-ink">Missing inputs</p>
+                  <p className="mt-0.5 text-[11.5px] text-ink-muted">
+                    {report.accounts
+                      .filter((a) => a.requiredButMissing)
+                      .map((a) => a.label)
+                      .join(", ")}{" "}
+                    — metrics depending on these are shown as unavailable rather than
+                    estimated.
+                  </p>
+                </div>
+              </div>
+            ) : null}
+            {flags.map((flag) => (
+              <div key={flag.label} className="flex items-start gap-3 px-5 py-3">
+                <AlertTriangle
+                  size={14}
+                  className={`mt-0.5 shrink-0 ${
+                    flag.tone === "flag" ? "text-flag" : "text-warn"
+                  }`}
+                />
+                <div className="min-w-0">
+                  <p className="text-[12.5px] font-medium text-ink">{flag.label}</p>
+                  <p className="mt-0.5 text-[11.5px] text-ink-muted">{flag.detail}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </Block>
     </div>
   );
 }

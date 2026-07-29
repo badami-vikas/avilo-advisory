@@ -41,18 +41,29 @@ export function isLoopback(host: string): boolean {
  * plausible defaults are wrong: refusing to run breaks local use, and running open
  * exposes client data.
  */
-export function resolveAuth(host: string, password: string | undefined): AuthConfig {
+export function resolveAuth(
+  host: string,
+  password: string | undefined,
+  /**
+   * Set when something in front of this process publishes it — a Cloudflare Tunnel, an
+   * SSH reverse tunnel, an ngrok. The bind address alone cannot detect that: a tunnel
+   * connects to 127.0.0.1 and serves the world from it, so keying the gate on the bind
+   * address would leave exactly that case wide open.
+   */
+  published = false,
+): AuthConfig {
   const trimmed = (password ?? "").trim();
-  const loopback = isLoopback(host);
+  const reachableOffMachine = !isLoopback(host) || published;
 
-  if (!loopback && trimmed === "") {
+  if (reachableOffMachine && trimmed === "") {
     throw new Error(
-      `Refusing to bind to ${host} without a passphrase.\n\n` +
+      (published
+        ? `Refusing to publish this application without a passphrase.\n\n`
+        : `Refusing to bind to ${host} without a passphrase.\n\n`) +
         `This application has no user accounts and no per-record permissions — every\n` +
         `client's financials are visible to anyone who can reach it. On loopback that\n` +
-        `is safe. On a public address it is not.\n\n` +
-        `Set AVILO_PASSWORD to enable the login gate, or leave AVILO_HOST unset to bind\n` +
-        `to 127.0.0.1 as before.`,
+        `is safe. Reachable from elsewhere it is not.\n\n` +
+        `Set AVILO_PASSWORD to enable the login gate.`,
     );
   }
 
@@ -77,7 +88,9 @@ export function resolveAuth(host: string, password: string | undefined): AuthCon
     secret:
       process.env.AVILO_SESSION_SECRET ??
       createHmac("sha256", "avilo-session").update(trimmed).digest("hex"),
-    secureCookies: !loopback,
+    // A tunnel terminates TLS at the edge, so the browser is on HTTPS even though this
+    // process speaks plain HTTP to the tunnel daemon on loopback.
+    secureCookies: reachableOffMachine,
   };
 }
 
@@ -154,6 +167,26 @@ export { COOKIE_NAME };
 const attempts = new Map<string, { count: number; until: number }>();
 const MAX_ATTEMPTS = 8;
 const LOCKOUT_MS = 15 * 60 * 1000;
+
+/**
+ * Who to throttle.
+ *
+ * Behind a Cloudflare Tunnel every request arrives from the daemon on loopback, so
+ * `request.ip` is the same value for the whole internet and eight failures from anyone
+ * would lock out everyone. Cloudflare overwrites `CF-Connecting-IP` at its edge, so it
+ * is trustworthy — but only when we know we are actually behind Cloudflare, since a
+ * direct client can set any header it likes.
+ */
+export function clientAddress(
+  headers: Record<string, string | string[] | undefined>,
+  fallback: string,
+  behindCloudflare: boolean,
+): string {
+  if (!behindCloudflare) return fallback;
+  const forwarded = headers["cf-connecting-ip"];
+  const value = Array.isArray(forwarded) ? forwarded[0] : forwarded;
+  return value && value.trim() !== "" ? value.trim() : fallback;
+}
 
 export function throttle(address: string): { allowed: boolean; retryAfter: number } {
   const record = attempts.get(address);

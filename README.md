@@ -22,12 +22,34 @@ Then open **http://127.0.0.1:5177**. Requires Node 24 and pnpm 11.
 | `pnpm typecheck` | Typechecks every package |
 | `pnpm seed:demo` | Loads a demo client so you can see a populated dashboard |
 | `pnpm seed:demo --reset` | Removes all client data, keeping accounts and formulas |
+| `pnpm share` | Publishes this machine over a Cloudflare Tunnel (needs `AVILO_PASSWORD`) |
 | `pnpm --filter @avilo/api migrations:generate` | Regenerates SQL after a schema change |
 
 ## Hosting it
 
-`render.yaml` deploys this as a single Render web service: the API serves the built
-bundle, so `/trpc` stays same-origin and one session cookie covers both.
+Two supported routes. Both serve the built bundle from the API itself, so `/trpc` stays
+same-origin and one session cookie covers the app and its data together.
+
+### Publish from this machine (free)
+
+```bash
+AVILO_PASSWORD='your long passphrase' pnpm share
+```
+
+Builds, starts the API on loopback, and opens a Cloudflare Tunnel to it. The database and
+every uploaded file stay on this computer; Cloudflare terminates TLS at its edge and
+stores nothing. No inbound port is opened on the machine or the router. The URL lives
+until you press Ctrl-C, and a new one is issued next time.
+
+The passphrase check lives in `pnpm share` rather than in this document, because the
+server's own guard keys on its *bind address* — and a tunnel binds to `127.0.0.1` like
+everything else. Publishing would otherwise have been the one path that skipped the login
+gate entirely. `AVILO_BEHIND_CLOUDFLARE=1` tells the server it is reachable, which turns
+the gate on and makes it refuse to start without a passphrase.
+
+### Render (paid)
+
+`render.yaml` deploys this as a single Render web service.
 
 **Hosting inverts this application's central assumption.** It has no user accounts and no
 per-record permissions, which was correct while it bound to loopback and the only
@@ -52,6 +74,11 @@ shows every client's financials to anyone with the URL. So:
 | `AVILO_DB_PATH` | SQLite file. Point at the mounted disk |
 | `AVILO_FILES_ROOT` | Uploaded source files. Point at the mounted disk |
 | `AVILO_SESSION_SECRET` | Optional. Without it, rotating the passphrase ends all sessions |
+| `AVILO_BEHIND_CLOUDFLARE` | Set by `pnpm share`. Forces the gate on and trusts `CF-Connecting-IP` |
+
+Render's free tier has no persistent disk, so a free deploy is not a cheaper version of
+the same thing — it loses every client and figure on each deploy and each idle spin-down.
+Use the tunnel above instead.
 
 GitHub Pages cannot host this at all — it serves static files, and there is no backend to
 answer `/trpc`. Cloudflare Workers cannot either without rewriting the data layer:
@@ -140,6 +167,23 @@ Column footers carry a selectable aggregate: average for numeric columns, distin
 for text, with sum/min/max/median/range available. Empty cells are excluded from
 statistics rather than counted as zero.
 
+## Sections, and one that is deliberately absent
+
+The report renders fourteen blocks and two charts, matching the v9.2 prototype's
+inventory with two exceptions.
+
+**Key Insights is not built.** In the prototype that panel was written by a cloud model,
+and the file carried a field for an Anthropic API key. That is the one thing this build
+cannot do and still be what it claims to be, so it is absent rather than faked. *Flags to
+review* covers the deterministic half of what it did: it is derived from the benchmark
+bands declared on each formula, so editing a benchmark changes the panel and the two
+cannot drift.
+
+**Top 5 jobs this month is not built.** No report supplies job-level revenue — Sales by
+Customer is per customer, not per job. *Top customers* shows what the data actually
+supports, and *Job performance* states its twelve-month basis rather than implying a
+monthly one.
+
 ## Known gaps
 
 - **PDF import reconstructs geometry, and cannot recover what the export discarded.**
@@ -174,6 +218,9 @@ one. Each has a named regression test.
 | A PDF's right-aligned columns split by drawn width | columns clustered on right edges, not left |
 | A scanned PDF importing as an empty report | no text layer is refused by name |
 | A public bind with no passphrase | startup error, not a warning |
+| A tunnel publishing loopback with no passphrase | the gate keys on reachability, not bind address |
+| One attacker's failures locking out every user | throttle keyed on `CF-Connecting-IP` behind the tunnel |
+| A new formula rendering as dollars | the unit is read from the formula, not inferred from its id |
 | A forged or expired session cookie | HMAC over the payload, expiry inside the signature |
 | A 12-month job count labelled "this month" | job performance states its basis |
 | `formatPeriod` throwing and blanking a page | display formatters degrade; `assertPeriod` still throws |
@@ -181,7 +228,7 @@ one. Each has a named regression test.
 
 ## Tests
 
-121 unit tests plus a 27-check end-to-end smoke test over real HTTP and real SQLite.
+126 unit tests plus a 27-check end-to-end smoke test over real HTTP and real SQLite.
 Coverage is concentrated on the four things that broke in the v7→v9 build: parsers,
 the formula evaluator, override precedence, and period/range arithmetic.
 

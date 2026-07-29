@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   checkPassword,
   clearFailures,
+  clientAddress,
   clearedCookie,
   issueSession,
   isLoopback,
@@ -38,6 +39,22 @@ describe("resolveAuth — the posture is decided by the bind address", () => {
 
   it("marks cookies Secure once bound off loopback", () => {
     expect(resolveAuth("0.0.0.0", PASSPHRASE).secureCookies).toBe(true);
+  });
+
+  /**
+   * The hole this closes: a Cloudflare Tunnel connects to 127.0.0.1 and serves the world
+   * from it. Keying the gate on the bind address alone would leave publishing as the one
+   * path that skips the login screen entirely.
+   */
+  it("refuses to run published without a passphrase, even bound to loopback", () => {
+    expect(() => resolveAuth("127.0.0.1", undefined, true)).toThrow(/Refusing to publish/);
+    expect(() => resolveAuth("127.0.0.1", "", true)).toThrow(/AVILO_PASSWORD/);
+  });
+
+  it("marks cookies Secure when published, because the tunnel terminates TLS", () => {
+    // The process speaks plain HTTP to the tunnel daemon, but the browser is on HTTPS.
+    expect(resolveAuth("127.0.0.1", PASSPHRASE, true).secureCookies).toBe(true);
+    expect(resolveAuth("127.0.0.1", PASSPHRASE, false).secureCookies).toBe(false);
   });
 
   it("rejects a passphrase short enough to guess", () => {
@@ -158,6 +175,25 @@ describe("login throttle", () => {
     for (let i = 0; i < 8; i += 1) recordFailure("198.51.100.1");
     expect(throttle("198.51.100.1").allowed).toBe(false);
     expect(throttle("198.51.100.2").allowed).toBe(true);
+  });
+});
+
+describe("clientAddress", () => {
+  const headers = { "cf-connecting-ip": "203.0.113.9" };
+
+  it("uses Cloudflare's client header when behind the tunnel", () => {
+    // Otherwise every request arrives from the daemon on loopback, one attacker's
+    // failures lock out everyone, and the throttle becomes a denial-of-service tool.
+    expect(clientAddress(headers, "127.0.0.1", true)).toBe("203.0.113.9");
+  });
+
+  it("ignores the header when not behind the tunnel, where anyone can forge it", () => {
+    expect(clientAddress(headers, "198.51.100.4", false)).toBe("198.51.100.4");
+  });
+
+  it("falls back when the header is absent or blank", () => {
+    expect(clientAddress({}, "127.0.0.1", true)).toBe("127.0.0.1");
+    expect(clientAddress({ "cf-connecting-ip": "  " }, "127.0.0.1", true)).toBe("127.0.0.1");
   });
 });
 
