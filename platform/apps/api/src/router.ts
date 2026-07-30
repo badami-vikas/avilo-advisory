@@ -163,6 +163,50 @@ const reportRouter = router({
       buildSeries(input.clientId, input.start, input.end, input.ids),
     ),
 
+  /** The advisor's Key Insights note for one client-month. */
+  note: procedure
+    .input(z.object({ clientId: z.string(), period: periodSchema }))
+    .query(({ input }) => {
+      const db = getDb();
+      const row = db
+        .select()
+        .from(schema.periodNotes)
+        .where(
+          and(
+            eq(schema.periodNotes.clientId, input.clientId),
+            eq(schema.periodNotes.period, input.period),
+          ),
+        )
+        .get();
+      return { body: row?.body ?? "" };
+    }),
+
+  setNote: procedure
+    .input(
+      z.object({
+        clientId: z.string(),
+        period: periodSchema,
+        body: z.string().max(5000),
+      }),
+    )
+    .mutation(({ input }) => {
+      const db = getDb();
+      requireClient(input.clientId);
+      db.insert(schema.periodNotes)
+        .values({
+          clientId: input.clientId,
+          period: input.period,
+          body: input.body,
+          updatedAt: nowIso(),
+        })
+        .onConflictDoUpdate({
+          target: [schema.periodNotes.clientId, schema.periodNotes.period],
+          set: { body: input.body, updatedAt: nowIso() },
+        })
+        .run();
+      return { ok: true };
+    }),
+
   /**
    * Entity-level detail for one period: customers owing money, vendors owed, expense
    * lines, top customers, referral partners.

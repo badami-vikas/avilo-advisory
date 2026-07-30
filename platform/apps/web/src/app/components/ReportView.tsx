@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { AlertTriangle } from "lucide-react";
 
 import { Block } from "./ui.js";
@@ -21,6 +21,116 @@ import type {
 } from "../types.js";
 
 /**
+ * Key Insights — the advisor's own commentary.
+ *
+ * In the v9 prototype this was `d.note || 'Add your key insights here.'`: a plain text
+ * field a person typed. It is kept that way deliberately. The numbers are already on the
+ * page; what a client is paying for is someone's reading of them, and a generated
+ * paragraph would be confident prose with nothing behind it.
+ *
+ * Click to edit, blur or Cmd-Enter to save, Escape to abandon.
+ */
+function KeyInsightsBlock({
+  note,
+  onSave,
+}: {
+  note: string;
+  onSave: (body: string) => Promise<void>;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(note);
+
+  // The note belongs to the selected period, so changing period must replace the draft
+  // rather than carry last month's commentary into this month's field.
+  useEffect(() => {
+    setDraft(note);
+    setEditing(false);
+  }, [note]);
+
+  const commit = async () => {
+    setEditing(false);
+    if (draft !== note) await onSave(draft);
+  };
+
+  return (
+    <div className="rounded-xl border border-line bg-accent-soft/40 px-5 py-4">
+      <p className="text-[11px] font-semibold uppercase tracking-[0.06em] text-ink-faint">
+        Key Insights
+      </p>
+      {editing ? (
+        <textarea
+          autoFocus
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          onBlur={() => void commit()}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              setDraft(note);
+              setEditing(false);
+            }
+            if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+              void commit();
+            }
+          }}
+          rows={4}
+          placeholder="Add your key insights here."
+          className="mt-2 w-full resize-y rounded-lg border border-accent bg-surface px-3 py-2 text-[13px] leading-relaxed text-ink outline-none"
+        />
+      ) : (
+        <p
+          onClick={() => setEditing(true)}
+          className={`mt-1.5 cursor-text whitespace-pre-wrap text-[13px] leading-relaxed ${
+            note.trim() === "" ? "text-ink-faint italic" : "text-ink"
+          }`}
+        >
+          {note.trim() === "" ? "Add your key insights here." : note}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Top 5 jobs this month.
+ *
+ * The reference computes this as `customers.sort(by revenue).slice(0, 5)` over the Sales
+ * by Customer export — so a "job" here is really the highest-billing customers, and the
+ * subtitle says so rather than implying a job-level source the export does not contain.
+ */
+function TopJobsBlock({ rows }: { rows: { id: string; label: string; value: number }[] }) {
+  const top = [...rows].sort((a, b) => b.value - a.value).slice(0, 5);
+
+  return (
+    <Block
+      title="Top 5 jobs this month"
+      subtitle="Highest-billing customers in the Sales by Customer export"
+    >
+      {top.length === 0 ? (
+        <p className="px-5 py-6 text-[12.5px] italic text-ink-faint">
+          Import a Sales by Customer report to populate this table.
+        </p>
+      ) : (
+        <div className="divide-y divide-line-soft">
+          {top.map((row, index) => (
+            <div key={row.id} className="flex items-center gap-3 px-5 py-2.5">
+              <span className="num w-5 shrink-0 text-[11.5px] text-ink-faint">
+                {index + 1}
+              </span>
+              <span className="min-w-0 flex-1 truncate text-[12.5px] text-ink">
+                {row.label}
+              </span>
+              <span className="num w-28 shrink-0 text-right text-[12.5px] font-medium text-ink">
+                {money(row.value)}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </Block>
+  );
+}
+
+/**
  * The Report view: the rendered dashboard, composed of separated visual blocks.
  *
  * Explanations are tooltips rather than lines of text under each figure — the earlier
@@ -32,6 +142,8 @@ export function ReportView({
   series,
   detail,
   formulas,
+  note,
+  onSetNote,
   rangeLabel,
   onSetMetricValue,
 }: {
@@ -41,6 +153,9 @@ export function ReportView({
   detail: DetailByKind;
   /** Carries the benchmark bands, which is what "Flags to review" is derived from. */
   formulas: FormulaRow[];
+  /** The advisor's own commentary for this client-month. */
+  note: string;
+  onSetNote: (body: string) => Promise<void>;
   /** Set only while exporting: the period range the PDF covers. */
   rangeLabel?: string | null;
   onSetMetricValue: (metricId: string, raw: string) => Promise<void>;
@@ -197,6 +312,9 @@ export function ReportView({
           </div>
         </Tip>
       ) : null}
+
+      {/* ------------------------------------------------------ Key Insights */}
+      <KeyInsightsBlock note={note} onSave={onSetNote} />
 
       {/* ------------------------------------------------------- At a Glance */}
       <Block title="At a Glance" subtitle={`${clientName} · ${report.periodLabel}`}>
@@ -371,8 +489,10 @@ export function ReportView({
       />
 
       <div className="print-break-before">
-        <TopCustomersBlock rows={detail["customer_sales"] ?? []} />
+        <TopJobsBlock rows={detail["customer_sales"] ?? []} />
       </div>
+
+      <TopCustomersBlock rows={detail["customer_sales"] ?? []} />
 
       {/*
         Job performance is derived from the Sales by Customer export, which covers the

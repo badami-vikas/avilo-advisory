@@ -16,7 +16,9 @@
     "test": "pnpm -r test",
     "db:migrate": "pnpm --filter @avilo/api migrate",
     "seed:demo": "pnpm --filter @avilo/api seed:demo",
-    "share": "node scripts/share.mjs"
+    "share": "node scripts/share.mjs",
+    "app:install": "node scripts/install-service.mjs",
+    "app:uninstall": "node scripts/install-service.mjs --uninstall"
   },
   "devDependencies": {
     "concurrently": "^9.1.2",

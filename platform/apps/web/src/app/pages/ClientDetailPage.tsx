@@ -42,6 +42,7 @@ export function ClientDetailPage() {
     null,
   );
   const [formulas, setFormulas] = useState<FormulaRow[]>([]);
+  const [note, setNote] = useState("");
   const [mode, setMode] = useState<"report" | "raw">("report");
   const [uploading, setUploading] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -74,15 +75,18 @@ export function ClientDetailPage() {
       setReport(null);
       setSeries([]);
       setDetail({});
+      setNote("");
       return;
     }
-    const [periodReport, allPeriods, detailRows] = await Promise.all([
+    const [periodReport, allPeriods, detailRows, noteRow] = await Promise.all([
       api.report.period.query({ clientId, period }),
       api.report.periods.query({ clientId }),
       api.report.detail.query({ clientId, period }),
+      api.report.note.query({ clientId, period }),
     ]);
     setReport(periodReport);
     setDetail(detailRows);
+    setNote(noteRow.body);
 
     // The chart covers the export range when one is chosen, otherwise everything.
     const sorted = [...allPeriods].sort();
@@ -302,6 +306,13 @@ export function ClientDetailPage() {
           series={series}
           detail={detail}
           formulas={formulas}
+          note={note}
+          onSetNote={async (body) => {
+            // Optimistic: the note is free text the user just typed, and re-fetching the
+            // whole report to echo it back would blank the field mid-edit.
+            setNote(body);
+            if (period) await api.report.setNote.mutate({ clientId, period, body });
+          }}
           rangeLabel={
             printRange
               ? `${formatPeriod(printRange.start)} – ${formatPeriod(printRange.end)}`

@@ -17,6 +17,7 @@ import { relations, sql } from "drizzle-orm";
 import {
   index,
   integer,
+  primaryKey,
   real,
   sqliteTable,
   text,
@@ -335,6 +336,27 @@ export const savedViews = sqliteTable("saved_views", {
   isDefault: integer("is_default", { mode: "boolean" }).notNull().default(false),
   createdAt: text("created_at").notNull().default(now),
 });
+
+/**
+ * Key Insights: the advisor's own commentary for one client-month.
+ *
+ * Free text, deliberately. In the v9 prototype this was a plain note field, and the
+ * value of the panel is that a person wrote it — the numbers are already on the page,
+ * and what a client pays for is the reading of them. It is keyed by period so last
+ * month's commentary is not silently reused for this month.
+ */
+export const periodNotes = sqliteTable(
+  "period_notes",
+  {
+    clientId: text("client_id")
+      .notNull()
+      .references(() => clients.id, { onDelete: "cascade" }),
+    period: text("period").notNull(),
+    body: text("body").notNull().default(""),
+    updatedAt: text("updated_at").notNull().default(now),
+  },
+  (table) => [primaryKey({ columns: [table.clientId, table.period] })],
+);
 
 /* ------------------------------------------------------------------ audit */
 
