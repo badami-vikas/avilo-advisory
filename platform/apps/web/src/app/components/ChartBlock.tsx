@@ -60,6 +60,7 @@ export function ChartBlock({
     <Block
       title={title}
       subtitle={subtitle}
+      printHideIfEmpty={points.length === 0}
       actions={
         <div className="chart-toggle no-print inline-flex rounded-lg border border-line p-0.5">
           <ToggleButton

@@ -44,7 +44,11 @@ export function TopExpensesBlock({ rows }: { rows: DetailRow[] }) {
   const total = filtered.reduce((sum, row) => sum + Math.abs(row.value), 0);
 
   return (
-    <Block title="Top expenses this month" subtitle="Largest five, excluding depreciation">
+    <Block
+      title="Top expenses this month"
+      subtitle="Largest five, excluding depreciation"
+      printHideIfEmpty={filtered.length === 0}
+    >
       {filtered.length === 0 ? (
         emptyFor("expense lines", "Profit & Loss")
       ) : (
@@ -95,6 +99,7 @@ export function AgingBlock({
     <Block
       title={title}
       subtitle={subtitle}
+      printHideIfEmpty={top.length === 0}
       actions={
         rows.length > 0 ? (
           <span className="num text-[12.5px] font-semibold text-ink">
@@ -168,6 +173,7 @@ export function ServiceLinesBlock({ rows }: { rows: DetailRow[] }) {
     <Block
       title="Where your money came from"
       subtitle="Revenue by service line, this period"
+      printHideIfEmpty={lines.length === 0}
     >
       {lines.length === 0 ? (
         emptyFor("service line revenue", "Profit & Loss")
@@ -218,6 +224,7 @@ export function TopCustomersBlock({ rows }: { rows: DetailRow[] }) {
     <Block
       title="Top customers"
       subtitle="By revenue, last 12 months"
+      printHideIfEmpty={top.length === 0}
     >
       {top.length === 0 ? (
         emptyFor("customer revenue", "Sales by Customer")
@@ -248,7 +255,11 @@ export function TopCustomersBlock({ rows }: { rows: DetailRow[] }) {
 export function ReferralBlock({ rows }: { rows: DetailRow[] }) {
   const top = rows.slice(0, 8);
   return (
-    <Block title="Top referral partners" subtitle="Last 90 days">
+    <Block
+      title="Top referral partners"
+      subtitle="Last 90 days"
+      printHideIfEmpty={top.length === 0}
+    >
       {top.length === 0 ? (
         emptyFor("referral data", "Referral")
       ) : (

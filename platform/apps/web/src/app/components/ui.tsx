@@ -11,20 +11,25 @@ export function Block({
   actions,
   children,
   className,
-  breakBefore,
+  printHideIfEmpty,
 }: {
   title?: string;
   subtitle?: string;
   actions?: ReactNode;
   children: ReactNode;
   className?: string;
-  breakBefore?: boolean;
+  /**
+   * Drop this block from print output when the section has nothing in it. See the
+   * `[data-print-empty]` rule in app.css — the block still renders normally on screen,
+   * where the empty state tells the advisor what to upload.
+   */
+  printHideIfEmpty?: boolean;
 }) {
   return (
     <section
+      data-print-empty={printHideIfEmpty ? "true" : undefined}
       className={clsx(
         "block-card rounded-xl border border-line bg-surface shadow-[0_1px_2px_rgba(16,24,40,0.04)]",
-        breakBefore && "print-break-before",
         className,
       )}
     >

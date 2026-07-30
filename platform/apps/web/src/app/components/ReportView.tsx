@@ -52,8 +52,13 @@ function KeyInsightsBlock({
     if (draft !== note) await onSave(draft);
   };
 
+  const isEmpty = note.trim() === "";
+
   return (
-    <div className="rounded-xl border border-line bg-accent-soft/40 px-5 py-4">
+    <div
+      data-print-empty={isEmpty ? "true" : undefined}
+      className="rounded-xl border border-line bg-accent-soft/40 px-5 py-4"
+    >
       <p className="text-[11px] font-semibold uppercase tracking-[0.06em] text-ink-faint">
         Key Insights
       </p>
@@ -104,6 +109,7 @@ function TopJobsBlock({ rows }: { rows: { id: string; label: string; value: numb
     <Block
       title="Top 5 jobs this month"
       subtitle="Highest-billing customers in the Sales by Customer export"
+      printHideIfEmpty={top.length === 0}
     >
       {top.length === 0 ? (
         <p className="px-5 py-6 text-[12.5px] italic text-ink-faint">
@@ -520,6 +526,7 @@ export function ReportView({
       <Block
         title="A/R & A/P timing"
         subtitle="How long money takes to arrive, and how long you take to pay"
+        printHideIfEmpty={metric("dso")?.status !== "ok" && metric("dpo")?.status !== "ok"}
       >
         <div className="grid grid-cols-1 gap-px bg-line-soft sm:grid-cols-2">
           <MetricCard id="dso" />
@@ -548,9 +555,7 @@ export function ReportView({
         entityNoun="Vendor"
       />
 
-      <div className="print-break-before">
-        <TopJobsBlock rows={detail["customer_sales"] ?? []} />
-      </div>
+      <TopJobsBlock rows={detail["customer_sales"] ?? []} />
 
       <TopCustomersBlock rows={detail["customer_sales"] ?? []} />
 
@@ -563,6 +568,7 @@ export function ReportView({
       <Block
         title="Job performance"
         subtitle="From the Sales by Customer export — last 12 months"
+        printHideIfEmpty={(detail["customer_sales"] ?? []).length === 0}
       >
         <div className="grid grid-cols-1 gap-px bg-line-soft sm:grid-cols-4">
           {(() => {
@@ -644,6 +650,7 @@ export function ReportView({
       <Block
         title="Flags to review"
         subtitle="Measured against the benchmark bands set on each formula"
+        printHideIfEmpty={flags.length === 0 && report.missingRequired.length === 0}
       >
         {flags.length === 0 && report.missingRequired.length === 0 ? (
           <p className="px-5 py-6 text-[12.5px] text-ink-muted">
