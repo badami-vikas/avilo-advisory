@@ -21,6 +21,7 @@ import {
   type ReportType,
 } from "@avilo/module";
 import { readPdf } from "@avilo/module/pdf";
+import { checkIntegrity, formatPeriod, toCents } from "@avilo/module";
 import { getDb, newId, nowIso, schema } from "../db.js";
 import { clientFilesDir, ensureDir } from "../paths.js";
 import { buildResolver } from "./labels.js";
@@ -412,7 +413,7 @@ export async function commitFile(
           clientId,
           period: fact.period,
           accountId: fact.accountId,
-          value: fact.value,
+          value: toCents(fact.value),
           sourceFileId,
           sourceRowLabel: fact.sourceRowLabel,
           sourceColumnLabel: fact.sourceColumnLabel,
@@ -424,7 +425,7 @@ export async function commitFile(
             schema.facts.accountId,
           ],
           set: {
-            value: fact.value,
+            value: toCents(fact.value),
             sourceFileId,
             sourceRowLabel: fact.sourceRowLabel,
             sourceColumnLabel: fact.sourceColumnLabel,
@@ -520,12 +521,33 @@ export async function commitFile(
       .run();
   });
 
+  /**
+   * Integrity is checked after the write, against the whole period rather than this
+   * file alone. A balance sheet only contradicts the A/R ageing report once both are
+   * present, and the two arrive as separate uploads — checking the file in isolation
+   * would never see the disagreement that matters most.
+   */
+  const integrityWarnings: string[] = [];
+  for (const period of parsed.periods) {
+    const values: Record<string, number> = {};
+    for (const row of db
+      .select()
+      .from(schema.facts)
+      .where(and(eq(schema.facts.clientId, clientId), eq(schema.facts.period, period)))
+      .all()) {
+      values[row.accountId] = row.value;
+    }
+    for (const finding of checkIntegrity(values)) {
+      integrityWarnings.push(`${formatPeriod(period)}: ${finding.message}`);
+    }
+  }
+
   return {
     factsWritten,
     detailsWritten,
     periods: parsed.periods,
     supersededOverrides,
     notices: resolution.notices,
-    warnings: parsed.warnings,
+    warnings: [...parsed.warnings, ...integrityWarnings],
   };
 }

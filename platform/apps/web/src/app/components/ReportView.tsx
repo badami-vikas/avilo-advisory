@@ -146,6 +146,9 @@ export function ReportView({
   onSetNote,
   rangeLabel,
   onSetMetricValue,
+  onSetAccountValue,
+  onSetFormula,
+  onSetSeriesValue,
 }: {
   clientName: string;
   report: PeriodReport;
@@ -159,15 +162,38 @@ export function ReportView({
   /** Set only while exporting: the period range the PDF covers. */
   rangeLabel?: string | null;
   onSetMetricValue: (metricId: string, raw: string) => Promise<void>;
+  onSetAccountValue: (accountId: string, raw: string) => Promise<void>;
+  /** Global, versioned, retroactive. Refused up front if it would create a cycle. */
+  onSetFormula: (formulaId: string, expression: string) => Promise<void>;
+  /** Override a value in a period other than the one on screen. */
+  onSetSeriesValue: (
+    period: string,
+    kind: "account" | "metric",
+    targetId: string,
+    raw: string,
+  ) => Promise<void>;
 }) {
   const [editing, setEditing] = useState<string | null>(null);
+  /** Which figure is showing its formula rather than its value. */
+  const [editingFormula, setEditingFormula] = useState<string | null>(null);
   const metric = (id: string) => report.metrics.find((m) => m.id === id);
   const account = (id: string) => report.accounts.find((a) => a.accountId === id);
 
   const points: ChartPoint[] = series.map((point) => ({
     label: point.periodLabel,
+    period: point.period,
     values: point.values,
   }));
+
+  /**
+   * An edit in a chart's underlying table is the same override as one on the report — it
+   * just names a different month. Routing both through the same mutation is what keeps
+   * the chart, the cards and Raw data showing one number rather than three.
+   */
+  const editChartCell = async (period: string, seriesId: string, raw: string) => {
+    const isMetric = report.metrics.some((m) => m.id === seriesId);
+    await onSetSeriesValue(period, isMetric ? "metric" : "account", seriesId, raw);
+  };
 
   const unitFor = (id: string): string =>
     formulas.find((f) => f.id === id)?.unit ?? (id.endsWith("_pct") ? "percent" : "currency");
@@ -181,49 +207,123 @@ export function ReportView({
     return "Double-click to override this value for this period. The formula is unchanged.";
   };
 
-  const MetricCard = ({ id }: { id: string }) => {
-    const m = metric(id);
-    if (!m) return null;
-    const ok = m.status === "ok";
-    // The unit is declared on the formula, so read it from there. Inferring it from the
-    // id — "_pct" means percent, this one id means days, everything else is currency —
-    // meant every new formula rendered as dollars until someone remembered to add a
-    // branch here, which is how DSO first shipped as "$8.82".
-    const unit = unitFor(id);
+  /**
+   * One figure on the report — imported account or computed metric, same gesture.
+   *
+   * Double-click edits the value for this period; that is an override and the formula is
+   * untouched. When the figure comes from a formula, the editor also offers `fx`, which
+   * swaps to the expression itself — a global, versioned, retroactive change. The two
+   * edits have very different blast radius, so which one you get is decided by which
+   * control you press rather than by a mode set somewhere else.
+   */
+  const Figure = ({
+    id,
+    kind,
+    label,
+    size = "md",
+  }: {
+    id: string;
+    kind: "account" | "metric";
+    label: string;
+    size?: "md" | "lg";
+  }) => {
+    const m = kind === "metric" ? metric(id) : null;
+    const a = kind === "account" ? account(id) : null;
+    if (kind === "metric" && !m) return null;
+
+    const formula = kind === "metric" ? formulas.find((f) => f.id === id) : undefined;
+    const value = kind === "metric" ? (m?.value ?? null) : (a?.value ?? null);
+    const ok = kind === "metric" ? m?.status === "ok" : value !== null;
+    const unit = kind === "metric" ? unitFor(id) : "currency";
+    const isEditing = editing === id;
+    const showFormula = editingFormula === id;
+
+    const tip = (() => {
+      if (kind === "metric") return metricTip(id);
+      if (value === null) {
+        return "No value for this period. Upload the report that supplies it, or enter it here.";
+      }
+      return a?.sourceFilename
+        ? `From ${a.sourceFilename} — double-click to override for this period`
+        : "Double-click to override this value for this period";
+    })();
 
     return (
-      <div
-        className="bg-surface px-5 py-4"
-        onDoubleClick={() => setEditing(id)}
-      >
+      <div className="bg-surface px-5 py-4" onDoubleClick={() => setEditing(id)}>
         <p className="text-[11px] font-medium uppercase tracking-[0.06em] text-ink-faint">
-          {m.label}
+          {label}
         </p>
-        {editing === id ? (
-          <div className="mt-1">
+
+        {showFormula && formula ? (
+          <div className="mt-1.5">
+            <p className="mb-1 text-[10.5px] text-ink-faint">
+              Editing the formula — this applies to every client and every period.
+            </p>
             <InlineEditor
-              initial={m.value === null ? "" : String(Number(m.value.toFixed(4)))}
-              onCancel={() => setEditing(null)}
+              initial={formula.expression}
+              onCancel={() => setEditingFormula(null)}
               onCommit={async (next) => {
+                setEditingFormula(null);
                 setEditing(null);
-                await onSetMetricValue(id, next);
+                await onSetFormula(id, next);
               }}
             />
           </div>
+        ) : isEditing ? (
+          <div className="mt-1 flex items-center gap-2">
+            <div className="min-w-0 flex-1">
+              <InlineEditor
+                initial={value === null ? "" : String(Number(value.toFixed(4)))}
+                onCancel={() => setEditing(null)}
+                onCommit={async (next) => {
+                  setEditing(null);
+                  if (kind === "metric") await onSetMetricValue(id, next);
+                  else await onSetAccountValue(id, next);
+                }}
+              />
+            </div>
+            {formula ? (
+              <Tip content="Edit the formula instead of this one value">
+                <button
+                  // onMouseDown, not onClick: the editor commits on blur, and a click
+                  // would fire after that blur had already closed this control.
+                  onMouseDown={(event) => {
+                    event.preventDefault();
+                    setEditingFormula(id);
+                  }}
+                  className="shrink-0 rounded-md border border-line px-2 py-1 font-serif text-[12px] italic text-ink-muted hover:bg-line-soft hover:text-ink"
+                >
+                  fx
+                </button>
+              </Tip>
+            ) : null}
+          </div>
         ) : (
-          <Tip content={metricTip(id)}>
+          <Tip content={tip}>
             <p
-              className={`num mt-1 cursor-pointer text-[21px] font-semibold tracking-tight ${
-                ok ? "text-ink" : "text-flag"
-              }`}
+              className={`num mt-1 cursor-pointer font-semibold tracking-tight ${
+                size === "lg" ? "text-[24px]" : "text-[21px]"
+              } ${ok ? "text-ink" : "text-flag"}`}
             >
-              {ok ? byUnit(m.value, unit) : "Unavailable"}
-              {!ok ? <AlertTriangle size={13} className="ml-1.5 inline align-[-2px]" /> : null}
+              {ok
+                ? byUnit(value, unit)
+                : kind === "metric"
+                  ? "Unavailable"
+                  : "Missing"}
+              {!ok ? (
+                <AlertTriangle size={13} className="ml-1.5 inline align-[-2px]" />
+              ) : null}
             </p>
           </Tip>
         )}
       </div>
     );
+  };
+
+  const MetricCard = ({ id }: { id: string }) => {
+    const m = metric(id);
+    if (!m) return null;
+    return <Figure id={id} kind="metric" label={m.label} />;
   };
 
   /**
@@ -319,40 +419,19 @@ export function ReportView({
       {/* ------------------------------------------------------- At a Glance */}
       <Block title="At a Glance" subtitle={`${clientName} · ${report.periodLabel}`}>
         <div className="grid grid-cols-1 gap-px bg-line-soft sm:grid-cols-3">
-          {[
-            { id: "pl.revenue", label: "Revenue" },
-            { id: "net_operating_income", label: "Net Operating Income", isMetric: true },
-            { id: "bs.cash", label: "Total cash in bank accounts" },
-          ].map((item) => {
-            const value = item.isMetric
-              ? (metric(item.id)?.value ?? null)
-              : (account(item.id)?.value ?? null);
-            const missing = value === null;
-            return (
-              <div key={item.id} className="bg-surface px-5 py-4">
-                <p className="text-[11px] font-medium uppercase tracking-[0.06em] text-ink-faint">
-                  {item.label}
-                </p>
-                <Tip
-                  content={
-                    missing
-                      ? "No value for this period. Upload the report that supplies it, or enter it in Raw data."
-                      : account(item.id)?.sourceFilename
-                        ? `From ${account(item.id)?.sourceFilename}`
-                        : "Computed from imported data"
-                  }
-                >
-                  <p
-                    className={`num mt-1 text-[24px] font-semibold tracking-tight ${
-                      missing ? "text-flag" : "text-ink"
-                    }`}
-                  >
-                    {missing ? "Missing" : byUnit(value, "currency")}
-                  </p>
-                </Tip>
-              </div>
-            );
-          })}
+          <Figure id="pl.revenue" kind="account" label="Revenue" size="lg" />
+          <Figure
+            id="net_operating_income"
+            kind="metric"
+            label="Net Operating Income"
+            size="lg"
+          />
+          <Figure
+            id="bs.cash"
+            kind="account"
+            label="Total cash in bank accounts"
+            size="lg"
+          />
         </div>
       </Block>
 
@@ -375,6 +454,7 @@ export function ReportView({
         title="Revenue & Net Operating Income margin"
         subtitle="Every period imported for this client"
         points={points}
+        onEditCell={editChartCell}
         series={[
           { id: "pl.revenue", label: "Revenue", unit: "currency", type: "bar", color: "#b2ddff" },
           {
@@ -398,28 +478,7 @@ export function ReportView({
       {/* -------------------------------------------------------- liquidity */}
       <Block title="Cash position">
         <div className="grid grid-cols-1 gap-px bg-line-soft sm:grid-cols-2">
-          <div className="bg-surface px-5 py-4">
-            <p className="text-[11px] font-medium uppercase tracking-[0.06em] text-ink-faint">
-              Total cash in bank accounts
-            </p>
-            <Tip
-              content={
-                account("bs.cash")?.value === null
-                  ? "Upload a Balance Sheet to populate this."
-                  : `From ${account("bs.cash")?.sourceFilename ?? "an imported file"}`
-              }
-            >
-              <p
-                className={`num mt-1 text-[21px] font-semibold tracking-tight ${
-                  account("bs.cash")?.value === null ? "text-flag" : "text-ink"
-                }`}
-              >
-                {account("bs.cash")?.value === null
-                  ? "Missing"
-                  : money(account("bs.cash")?.value ?? null)}
-              </p>
-            </Tip>
-          </div>
+          <Figure id="bs.cash" kind="account" label="Total cash in bank accounts" />
           <MetricCard id="days_cash_on_hand" />
         </div>
       </Block>
@@ -430,6 +489,7 @@ export function ReportView({
         title="Gross profit and overhead"
         subtitle="What is earned against what it costs to run"
         points={points}
+        onEditCell={editChartCell}
         series={[
           {
             id: "gross_profit",

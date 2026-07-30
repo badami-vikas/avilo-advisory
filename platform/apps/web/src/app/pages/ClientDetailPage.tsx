@@ -153,6 +153,33 @@ export function ClientDetailPage() {
   };
 
   /** A value override: this client, this period, permanent, formula untouched. */
+  /**
+   * Override a value in an explicitly named period.
+   *
+   * The chart's underlying table edits months other than the one selected, so the period
+   * cannot be taken from component state — doing so would silently write October's
+   * correction onto whichever month happened to be on screen.
+   */
+  const setOverrideIn = useCallback(
+    async (
+      targetPeriod: string,
+      targetKind: "account" | "metric",
+      targetId: string,
+      raw: string,
+    ) => {
+      await api.overrides.set.mutate({
+        clientId,
+        period: targetPeriod,
+        targetKind,
+        targetId,
+        value: parseTyped(raw),
+        previousValue: null,
+      });
+      await refresh();
+    },
+    [clientId, refresh],
+  );
+
   const setOverride = useCallback(
     async (targetKind: "account" | "metric", targetId: string, raw: string) => {
       if (!period) return;
@@ -319,6 +346,9 @@ export function ClientDetailPage() {
               : null
           }
           onSetMetricValue={(id, raw) => setOverride("metric", id, raw)}
+          onSetAccountValue={(id, raw) => setOverride("account", id, raw)}
+          onSetFormula={setFormula}
+          onSetSeriesValue={setOverrideIn}
         />
       ) : (
         <RawDataView

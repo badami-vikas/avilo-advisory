@@ -1,0 +1,72 @@
+# Every check that has caught a real defect in this repository, on every push.
+#
+# The UI bugs found during the build — a component that swallowed its ref, a stored view
+# setting that was never applied, a unit inferred from an id — were all found by hand.
+# That is the argument for running this automatically rather than remembering to.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      # --frozen-lockfile so CI fails on an out-of-date lockfile rather than quietly
+      # resolving something different from what anyone has run locally.
+      - run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Unit tests
+        run: pnpm test
+
+      - name: Build
+        run: pnpm build
+
+      # The offline guarantee is a product promise, so it is enforced rather than
+      # asserted. A CDN link or an absolute http(s) origin reaching the bundle should
+      # fail the build, not be discovered by someone on a plane.
+      - name: Offline audit
+        run: node scripts/audit-offline.mjs
+
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: End-to-end smoke test over real HTTP and real SQLite
+        run: |
+          AVILO_DB_PATH="$RUNNER_TEMP/smoke.sqlite" \
+          AVILO_FILES_ROOT="$RUNNER_TEMP/files" \
+          AVILO_PORT=5178 \
+          pnpm --filter @avilo/api start &
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:5178/health >/dev/null && break
+            sleep 1
+          done
+          pnpm --filter @avilo/api exec tsx src/scripts/smoke.ts

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { InlineEditor } from "./DataTable.js";
 import { BarChart3, Table2 } from "lucide-react";
 import Chart from "chart.js/auto";
 
@@ -16,9 +17,20 @@ export interface Series {
 }
 
 export interface ChartPoint {
+  /** Display label, e.g. "Oct 2024". */
   label: string;
+  /** ISO period, e.g. "2024-10". An edit has to know which month it writes to, and the
+   *  display label is a formatting choice that must never be parsed back into one. */
+  period: string;
   values: Record<string, number | null>;
 }
+
+/** Write a value for one series in one period. Absent ⇒ the table is read-only. */
+export type ChartCellEdit = (
+  period: string,
+  seriesId: string,
+  raw: string,
+) => Promise<void>;
 
 /**
  * A chart with a graph/table toggle.
@@ -33,12 +45,14 @@ export function ChartBlock({
   series,
   points,
   height = 260,
+  onEditCell,
 }: {
   title: string;
   subtitle?: string;
   series: Series[];
   points: ChartPoint[];
   height?: number;
+  onEditCell?: ChartCellEdit;
 }) {
   const [mode, setMode] = useState<"graph" | "table">("graph");
 
@@ -72,7 +86,7 @@ export function ChartBlock({
           <ChartCanvas series={series} points={points} height={height} />
         </div>
       ) : (
-        <UnderlyingTable series={series} points={points} />
+        <UnderlyingTable series={series} points={points} onEditCell={onEditCell} />
       )}
 
       {/*
@@ -224,10 +238,14 @@ function ChartCanvas({
 function UnderlyingTable({
   series,
   points,
+  onEditCell,
 }: {
   series: Series[];
   points: ChartPoint[];
+  onEditCell?: ChartCellEdit;
 }) {
+  const [editing, setEditing] = useState<{ period: string; id: string } | null>(null);
+
   return (
     <div className="overflow-x-auto">
       <table className="w-full border-collapse text-[12.5px]">
@@ -248,17 +266,50 @@ function UnderlyingTable({
         </thead>
         <tbody>
           {points.map((point) => (
-            <tr key={point.label} className="border-b border-line-soft last:border-b-0">
+            <tr key={point.period} className="border-b border-line-soft last:border-b-0">
               <td className="px-4 py-2 text-ink-muted">{point.label}</td>
-              {series.map((s) => (
-                <td key={s.id} className="num px-4 py-2 text-right text-ink">
-                  {byUnit(point.values[s.id], s.unit)}
-                </td>
-              ))}
+              {series.map((s) => {
+                const active =
+                  editing?.period === point.period && editing?.id === s.id;
+                const value = point.values[s.id] ?? null;
+                return (
+                  <td
+                    key={s.id}
+                    className={`num px-4 py-2 text-right text-ink ${
+                      onEditCell ? "cursor-pointer hover:bg-line-soft/60" : ""
+                    }`}
+                    onDoubleClick={
+                      onEditCell
+                        ? () => setEditing({ period: point.period, id: s.id })
+                        : undefined
+                    }
+                  >
+                    {active && onEditCell ? (
+                      <InlineEditor
+                        initial={value === null ? "" : String(Number(value.toFixed(4)))}
+                        align="right"
+                        onCancel={() => setEditing(null)}
+                        onCommit={async (next) => {
+                          setEditing(null);
+                          await onEditCell(point.period, s.id, next);
+                        }}
+                      />
+                    ) : (
+                      byUnit(value, s.unit)
+                    )}
+                  </td>
+                );
+              })}
             </tr>
           ))}
         </tbody>
       </table>
+      {onEditCell ? (
+        <p className="no-print px-4 pb-3 pt-1 text-[11px] text-ink-faint">
+          Double-click any figure to correct it for that month. Edits here are the same
+          overrides as on the report, so both views stay in step.
+        </p>
+      ) : null}
     </div>
   );
 }
