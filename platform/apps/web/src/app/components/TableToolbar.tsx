@@ -7,6 +7,7 @@ import {
   ArrowUpDown,
   Check,
   ChevronDown,
+  LayoutGrid,
   Layers,
   ListFilter,
   MoreVertical,
@@ -50,6 +51,8 @@ export function TableToolbar({
   addLabel,
   filterOpen,
   onFilterOpenChange,
+  viewMode = "table",
+  onViewModeChange,
 }: {
   tableId: string;
   columns: ColumnSpec[];
@@ -63,6 +66,10 @@ export function TableToolbar({
   /** Controlled, so a column's context menu can open the builder it just added to. */
   filterOpen?: boolean;
   onFilterOpenChange?: (open: boolean) => void;
+  /** Which layout renders the rows. Column controls (sort/filter/hide) stay meaningful
+   *  in both — a card grid still has an underlying row order and a hidden-field set. */
+  viewMode?: "table" | "card";
+  onViewModeChange?: (mode: "table" | "card") => void;
 }) {
   const [lists, setLists] = useState<SavedList[]>([]);
   const [activeList, setActiveList] = useState<string | null>(null);
@@ -270,11 +277,48 @@ export function TableToolbar({
         </DropdownMenu.Portal>
       </DropdownMenu.Root>
 
-      {collapseButtons ? null : (
-        <button className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-lg border border-line bg-surface px-3 text-[13px] font-medium text-ink hover:bg-line-soft">
-          <Table2 size={14} className="text-ink-muted" />
-          {hideLabels ? null : "Table View"}
-        </button>
+      {collapseButtons || !onViewModeChange ? null : (
+        <DropdownMenu.Root>
+          <DropdownMenu.Trigger asChild>
+            <button className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-lg border border-line bg-surface px-3 text-[13px] font-medium text-ink hover:bg-line-soft">
+              {viewMode === "card" ? (
+                <LayoutGrid size={14} className="text-ink-muted" />
+              ) : (
+                <Table2 size={14} className="text-ink-muted" />
+              )}
+              {hideLabels ? null : viewMode === "card" ? "Card View" : "Table View"}
+              <ChevronDown size={13} className="text-ink-faint" />
+            </button>
+          </DropdownMenu.Trigger>
+          <DropdownMenu.Portal>
+            <DropdownMenu.Content
+              align="start"
+              sideOffset={4}
+              className="z-50 min-w-[170px] rounded-lg border border-line bg-surface p-1 shadow-lg"
+            >
+              <DropdownMenu.Item
+                onSelect={() => onViewModeChange("table")}
+                className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-[12.5px] text-ink outline-none data-[highlighted]:bg-line-soft"
+              >
+                <Table2 size={13} className="text-ink-muted" />
+                Table
+                {viewMode === "table" ? (
+                  <Check size={12} className="ml-auto text-accent" />
+                ) : null}
+              </DropdownMenu.Item>
+              <DropdownMenu.Item
+                onSelect={() => onViewModeChange("card")}
+                className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-[12.5px] text-ink outline-none data-[highlighted]:bg-line-soft"
+              >
+                <LayoutGrid size={13} className="text-ink-muted" />
+                Card
+                {viewMode === "card" ? (
+                  <Check size={12} className="ml-auto text-accent" />
+                ) : null}
+              </DropdownMenu.Item>
+            </DropdownMenu.Content>
+          </DropdownMenu.Portal>
+        </DropdownMenu.Root>
       )}
 
       {/* ---------------------------------------------------------- search */}
@@ -538,12 +582,48 @@ export function TableToolbar({
                       </span>
                     ) : null}
                   </DropdownMenu.Item>
-                  <DropdownMenu.Item
-                    className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-[12.5px] text-ink outline-none data-[highlighted]:bg-line-soft"
-                  >
-                    <Table2 size={13} className="text-ink-muted" />
-                    Table View
-                  </DropdownMenu.Item>
+                  {onViewModeChange ? (
+                    <DropdownMenu.Sub>
+                      <DropdownMenu.SubTrigger className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-[12.5px] text-ink outline-none data-[highlighted]:bg-line-soft">
+                        {viewMode === "card" ? (
+                          <LayoutGrid size={13} className="text-ink-muted" />
+                        ) : (
+                          <Table2 size={13} className="text-ink-muted" />
+                        )}
+                        View
+                        <span className="ml-auto text-[11.5px] text-ink-faint">
+                          {viewMode === "card" ? "Card" : "Table"}
+                        </span>
+                      </DropdownMenu.SubTrigger>
+                      <DropdownMenu.Portal>
+                        <DropdownMenu.SubContent
+                          sideOffset={2}
+                          className="z-50 min-w-[150px] rounded-lg border border-line bg-surface p-1 shadow-lg"
+                        >
+                          <DropdownMenu.Item
+                            onSelect={() => onViewModeChange("table")}
+                            className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-[12.5px] text-ink outline-none data-[highlighted]:bg-line-soft"
+                          >
+                            <Table2 size={13} className="text-ink-muted" />
+                            Table
+                            {viewMode === "table" ? (
+                              <Check size={12} className="ml-auto text-accent" />
+                            ) : null}
+                          </DropdownMenu.Item>
+                          <DropdownMenu.Item
+                            onSelect={() => onViewModeChange("card")}
+                            className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-[12.5px] text-ink outline-none data-[highlighted]:bg-line-soft"
+                          >
+                            <LayoutGrid size={13} className="text-ink-muted" />
+                            Card
+                            {viewMode === "card" ? (
+                              <Check size={12} className="ml-auto text-accent" />
+                            ) : null}
+                          </DropdownMenu.Item>
+                        </DropdownMenu.SubContent>
+                      </DropdownMenu.Portal>
+                    </DropdownMenu.Sub>
+                  ) : null}
                   <DropdownMenu.Separator className="my-1 h-px bg-line-soft" />
                 </>
               ) : null}

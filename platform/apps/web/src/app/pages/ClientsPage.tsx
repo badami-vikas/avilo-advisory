@@ -8,6 +8,7 @@ import { api } from "../../lib/trpc.js";
 import { money, percent } from "../../lib/format.js";
 import { Block, Button, EmptyState, Spinner, StatTile } from "../components/ui.js";
 import { DataTable, type ColumnRender } from "../components/DataTable.js";
+import { ClientCardView } from "../components/ClientCardView.js";
 import { TableToolbar } from "../components/TableToolbar.js";
 import { UploadDialog } from "../components/UploadDialog.js";
 
@@ -41,6 +42,7 @@ export function ClientsPage() {
     sorts: [{ id: "name", dir: "asc" }],
   }));
   const [uploadFor, setUploadFor] = useState<ClientRow | null>(null);
+  const [viewMode, setViewMode] = useState<"table" | "card">("table");
   const [error, setError] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
@@ -329,6 +331,43 @@ export function ClientsPage() {
     return { revenue, flags, avgMargin };
   }, [visible]);
 
+  /** Shared between the table and the card grid, so neither can drift from the other. */
+  const emptyState = (
+    <EmptyState
+      title={view.rowFilters.length > 0 || search ? "No clients match" : "No clients yet"}
+      body={
+        view.rowFilters.length > 0 || search
+          ? "Adjust or clear the filters to see more."
+          : "Add a client, then drag their QuickBooks exports in. Nothing is pre-filled — every figure you see will come from a file you uploaded."
+      }
+      action={
+        view.rowFilters.length === 0 && !search ? (
+          <Button variant="primary" onClick={addClient}>
+            Add your first client
+          </Button>
+        ) : null
+      }
+    />
+  );
+
+  const rowActions = (row: ClientRow) => (
+    <>
+      <Button size="sm" onClick={() => setUploadFor(row)} title="Upload source files">
+        <Upload size={13} />
+        Upload
+      </Button>
+      <Button
+        size="sm"
+        onClick={() => navigate(`/client/${row.id}?export=1`)}
+        title="Download a PDF report"
+        disabled={!row.latestPeriod}
+      >
+        <Download size={13} />
+        Download
+      </Button>
+    </>
+  );
+
   return (
     <div className="space-y-4">
       <TableToolbar
@@ -343,6 +382,8 @@ export function ClientsPage() {
         addLabel="Add Client"
         filterOpen={openFilter}
         onFilterOpenChange={setOpenFilter}
+        viewMode={viewMode}
+        onViewModeChange={setViewMode}
       />
 
       <div className="flex flex-wrap gap-2.5">
@@ -374,6 +415,29 @@ export function ClientsPage() {
       <Block>
         {rows === null ? (
           <Spinner label="Loading clients…" />
+        ) : viewMode === "card" ? (
+          <ClientCardView<ClientRow>
+            rows={visible}
+            renderers={renderers}
+            rowKey={(row) => row.id}
+            onRowClick={openDetail}
+            headerField="name"
+            badgeField="stage"
+            fields={[
+              { id: "latestPeriod", label: "Latest period" },
+              { id: "revenue", label: "Revenue" },
+              { id: "netOperatingIncome", label: "Net Op. Income" },
+              { id: "grossMarginPct", label: "Gross margin" },
+              { id: "noiMarginPct", label: "NOI margin" },
+              { id: "daysCashOnHand", label: "Days cash" },
+              { id: "owner", label: "Owner" },
+              { id: "data", label: "Data" },
+            ]}
+            onAddRow={addClient}
+            addRowLabel="New client"
+            emptyState={emptyState}
+            rowActions={rowActions}
+          />
         ) : (
           <DataTable<ClientRow>
             columns={COLUMNS}
@@ -388,44 +452,8 @@ export function ClientsPage() {
             onRowClick={openDetail}
             onAddRow={addClient}
             addRowLabel="New client"
-            emptyState={
-              <EmptyState
-                title={
-                  view.rowFilters.length > 0 || search
-                    ? "No clients match"
-                    : "No clients yet"
-                }
-                body={
-                  view.rowFilters.length > 0 || search
-                    ? "Adjust or clear the filters to see more."
-                    : "Add a client, then drag their QuickBooks exports in. Nothing is pre-filled — every figure you see will come from a file you uploaded."
-                }
-                action={
-                  view.rowFilters.length === 0 && !search ? (
-                    <Button variant="primary" onClick={addClient}>
-                      Add your first client
-                    </Button>
-                  ) : null
-                }
-              />
-            }
-            rowActions={(row) => (
-              <>
-                <Button size="sm" onClick={() => setUploadFor(row)} title="Upload source files">
-                  <Upload size={13} />
-                  Upload
-                </Button>
-                <Button
-                  size="sm"
-                  onClick={() => navigate(`/client/${row.id}?export=1`)}
-                  title="Download a PDF report"
-                  disabled={!row.latestPeriod}
-                >
-                  <Download size={13} />
-                  Download
-                </Button>
-              </>
-            )}
+            emptyState={emptyState}
+            rowActions={rowActions}
           />
         )}
       </Block>
