@@ -20,6 +20,7 @@ import {
 import type { ColumnSpec, FilterOp, RowFilter, ViewConfig } from "@avilo/tables";
 
 import { api } from "../../lib/trpc.js";
+import { atMost, useToolbarDensity } from "../../lib/useToolbarDensity.js";
 import { Button } from "./ui.js";
 
 const FILTER_OPS: { value: FilterOp; label: string; needsValue: boolean }[] = [
@@ -142,6 +143,17 @@ export function TableToolbar({
   const activeName = lists.find((l) => l.id === activeList)?.name ?? "All";
   const filterCount = view.rowFilters.length;
 
+  const { ref: toolbarRef, density } = useToolbarDensity<HTMLDivElement>();
+  // Labels go first, then the search gives up its flexible width, then whole buttons
+  // move into the overflow. Nothing ever wraps.
+  const hideLabels = atMost(density, "icons");
+  const shrinkSearch = atMost(density, "narrow");
+  const collapseButtons = atMost(density, "compact");
+
+  // At the narrowest width the Columns panel is opened from the overflow menu instead
+  // of its own button, so its open state has to be controllable from outside.
+  const [columnsOpen, setColumnsOpen] = useState(false);
+
   const hidden = view.hiddenColumns ?? [];
   const hiddenCount = hidden.length;
 
@@ -154,13 +166,13 @@ export function TableToolbar({
     });
 
   return (
-    <div className="no-print flex flex-wrap items-center gap-2">
+    <div ref={toolbarRef} className="no-print flex flex-nowrap items-center gap-2 overflow-hidden">
       {/* ------------------------------------------------------ lists ("All") */}
       <DropdownMenu.Root>
         <DropdownMenu.Trigger asChild>
           <button className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-line bg-surface px-3 text-[13px] font-medium text-ink hover:bg-line-soft">
             <Layers size={14} className="text-ink-muted" />
-            {activeName}
+            {hideLabels ? null : activeName}
             <ChevronDown size={13} className="text-ink-faint" />
           </button>
         </DropdownMenu.Trigger>
@@ -258,13 +270,15 @@ export function TableToolbar({
         </DropdownMenu.Portal>
       </DropdownMenu.Root>
 
-      <button className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-line bg-surface px-3 text-[13px] font-medium text-ink hover:bg-line-soft">
-        <Table2 size={14} className="text-ink-muted" />
-        Table View
-      </button>
+      {collapseButtons ? null : (
+        <button className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-lg border border-line bg-surface px-3 text-[13px] font-medium text-ink hover:bg-line-soft">
+          <Table2 size={14} className="text-ink-muted" />
+          {hideLabels ? null : "Table View"}
+        </button>
+      )}
 
       {/* ---------------------------------------------------------- search */}
-      <div className="relative min-w-[200px] flex-1 sm:max-w-md">
+      <div className={`relative flex-1 ${shrinkSearch ? "min-w-[44px]" : "min-w-[160px] sm:max-w-md"}`}>
         <Search
           size={14}
           className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-faint"
@@ -283,7 +297,7 @@ export function TableToolbar({
           <Popover.Trigger asChild>
             <Button className={filterCount > 0 ? "border-accent text-accent" : undefined}>
               <ListFilter size={14} className={filterCount > 0 ? "" : "text-ink-muted"} />
-              Filter
+              {hideLabels ? null : "Filter"}
               {filterCount > 0 ? (
                 <span className="ml-0.5 rounded bg-accent px-1.5 text-[11px] font-semibold text-white">
                   {filterCount}
@@ -432,8 +446,18 @@ export function TableToolbar({
           context menu, so it lists every column — including the hidden ones, which is
           the whole point — rather than only what is currently on screen.
         */}
-        <Popover.Root>
-          <Popover.Trigger asChild>
+        <Popover.Root
+          open={collapseButtons ? columnsOpen : undefined}
+          onOpenChange={collapseButtons ? setColumnsOpen : undefined}
+        >
+          {/*
+            When collapsed, the trigger is not rendered at all — relying on a `hidden`
+            class loses to the button's own `inline-flex`, since both are display
+            utilities and source order decides. Radix still needs something to position
+            against, so a zero-size anchor stays in the flow.
+          */}
+          {collapseButtons ? <Popover.Anchor className="h-0 w-0" /> : null}
+          <Popover.Trigger asChild style={collapseButtons ? { display: "none" } : undefined}>
             <Button aria-label="Columns">
               <Settings2 size={14} className="text-ink-muted" />
               {hiddenCount > 0 ? (
@@ -477,9 +501,9 @@ export function TableToolbar({
           </Popover.Portal>
         </Popover.Root>
 
-        <Button variant="primary" onClick={onAdd}>
+        <Button variant="primary" onClick={onAdd} aria-label={addLabel}>
           <Plus size={15} />
-          {addLabel}
+          {hideLabels ? null : addLabel}
         </Button>
 
         {/* ------------------------------------------------ overflow (3 dots) */}
@@ -500,6 +524,30 @@ export function TableToolbar({
                 already click-to-sort, so a top-level button was a second path to the
                 same thing.
               */}
+              {collapseButtons ? (
+                <>
+                  <DropdownMenu.Item
+                    onSelect={() => setColumnsOpen(true)}
+                    className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-[12.5px] text-ink outline-none data-[highlighted]:bg-line-soft"
+                  >
+                    <Settings2 size={13} className="text-ink-muted" />
+                    Columns
+                    {hiddenCount > 0 ? (
+                      <span className="ml-auto text-[11.5px] text-ink-faint">
+                        {hiddenCount} hidden
+                      </span>
+                    ) : null}
+                  </DropdownMenu.Item>
+                  <DropdownMenu.Item
+                    className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-[12.5px] text-ink outline-none data-[highlighted]:bg-line-soft"
+                  >
+                    <Table2 size={13} className="text-ink-muted" />
+                    Table View
+                  </DropdownMenu.Item>
+                  <DropdownMenu.Separator className="my-1 h-px bg-line-soft" />
+                </>
+              ) : null}
+
               <DropdownMenu.Sub>
                 <DropdownMenu.SubTrigger className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-[12.5px] text-ink outline-none data-[highlighted]:bg-line-soft">
                   <ArrowUpDown size={13} className="text-ink-muted" />

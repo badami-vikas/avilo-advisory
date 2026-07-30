@@ -24,6 +24,21 @@ Then open **http://127.0.0.1:5177**. Requires Node 24 and pnpm 11.
 | `pnpm seed:demo --reset` | Removes all client data, keeping accounts and formulas |
 | `pnpm share` | Publishes this machine over a Cloudflare Tunnel (needs `AVILO_PASSWORD`) |
 | `pnpm --filter @avilo/api migrations:generate` | Regenerates SQL after a schema change |
+| `pnpm app:install` | Runs it as a background service on `127.0.0.1:5180`, starting at login |
+| `pnpm app:uninstall` | Removes the service. Data is untouched |
+| `AVILO_PASSWORD=… pnpm share` | Publishes over a Cloudflare Tunnel |
+| `pnpm --filter @avilo/api exec tsx src/scripts/check-integrity.ts` | Accounting checks over stored data |
+
+### Which port is which
+
+| Port | What it is |
+| --- | --- |
+| 5177 | The web app in development (`pnpm dev`) |
+| 5178 | The API in development. JSON only — a browser shows `{"ok":true,…}` |
+| 5180 | The installed service: one process serving both the app and its API |
+
+`127.0.0.1` and `localhost` are the same loopback interface. The literal IP is used
+because `localhost` can resolve to IPv6 `::1`, which is a different bind.
 
 ## Hosting it
 
@@ -129,6 +144,28 @@ build log traced to four structural decisions, each inverted here.
 | Nothing persisted across reloads | SQLite |
 | Cloud model reads PDFs | Deterministic classifier, offline, with an optional local-model tiebreak |
 | CDN dependencies | Everything bundled |
+
+## Accounting integrity
+
+Reading numbers faithfully is not the same as the numbers being right. A balance sheet
+whose two sides disagree parses perfectly and produces a confident, wrong dashboard, so
+these run on every import and can be run over stored data at any time:
+
+- the accounting equation, Assets = Liabilities + Equity
+- the balance sheet's A/R and A/P against the ageing reports' totals
+- ageing buckets against the ageing report's own stated total
+- gross profit against revenue less cost of goods sold
+
+They are warnings, not refusals: the discrepancy is usually real, the documents are the
+client's, and the advisor is who should see it. Missing inputs are skipped rather than
+treated as zero, so a client with only a P&L sees no balance-sheet noise.
+
+**Money is rounded to cents on write, half away from zero.** The obvious
+`Math.round(v * 100) / 100` is wrong twice: in float64 `1.005 * 100` is
+100.49999999999999 while `-1250.005 * 100` is -125000.50000000001, so the same fractional
+part rounds in opposite directions; and `Math.round` rounds half toward +Infinity, so
+-0.005 becomes -0.00 while +0.005 becomes +0.01 — a systematic upward bias across a
+column of negatives, which is how several of these exports carry expenses.
 
 ## Design decisions worth knowing
 
