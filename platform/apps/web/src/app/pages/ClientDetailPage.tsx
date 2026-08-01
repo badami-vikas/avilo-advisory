@@ -4,8 +4,10 @@ import { Download, FileText, Table2, Upload, X } from "lucide-react";
 import { formatPeriod } from "@avilo/module";
 
 import { api } from "../../lib/trpc.js";
+import { parseFigure } from "../../lib/format.js";
 import { exportReportPdf } from "../../lib/desktop.js";
 import { Block, Button, EmptyState, Spinner } from "../components/ui.js";
+import { ClientHeader } from "../components/ClientHeader.js";
 import { ReportView } from "../components/ReportView.js";
 import { RawDataView } from "../components/RawDataView.js";
 import { UploadDialog } from "../components/UploadDialog.js";
@@ -141,20 +143,6 @@ export function ClientDetailPage() {
 
   /* ------------------------------------------------------------- editing */
 
-  /** Parse a hand-typed figure, tolerating "$1,234.56" and "(1,234)". */
-  const parseTyped = (raw: string): number => {
-    let text = raw.trim();
-    if (text === "") throw new Error("Enter a number, or press Escape to cancel.");
-    let negative = false;
-    if (/^\(.*\)$/.test(text)) {
-      negative = true;
-      text = text.slice(1, -1);
-    }
-    const numeric = Number(text.replace(/[$,\s%]/g, ""));
-    if (!Number.isFinite(numeric)) throw new Error(`"${raw}" is not a number.`);
-    return negative ? -numeric : numeric;
-  };
-
   /** A value override: this client, this period, permanent, formula untouched. */
   /**
    * Override a value in an explicitly named period.
@@ -175,7 +163,7 @@ export function ClientDetailPage() {
         period: targetPeriod,
         targetKind,
         targetId,
-        value: parseTyped(raw),
+        value: parseFigure(raw),
         previousValue: null,
       });
       await refresh();
@@ -196,12 +184,21 @@ export function ClientDetailPage() {
         period,
         targetKind,
         targetId,
-        value: parseTyped(raw),
+        value: parseFigure(raw),
         previousValue: current,
       });
       await refresh();
     },
     [clientId, period, refresh, report],
+  );
+
+  /** The client's own record — name, stage, industry, fiscal year, notes. */
+  const patchClient = useCallback(
+    async (field: string, value: string | number | null) => {
+      await api.clients.update.mutate({ id: clientId, patch: { [field]: value } });
+      await loadShell();
+    },
+    [clientId, loadShell],
   );
 
   /** A formula edit: global, versioned, retroactive, refused if invalid. */
@@ -252,14 +249,15 @@ export function ClientDetailPage() {
     <div className="space-y-4">
       {/* ------------------------------------------------------ page header */}
       <div className="no-print flex flex-wrap items-center gap-3">
-        <div className="mr-auto">
-          <h1 className="text-[19px] font-semibold tracking-tight text-ink">{title}</h1>
-          <p className="mt-0.5 text-[12.5px] text-ink-muted">
-            {periods.length === 0
+        <ClientHeader
+          client={client}
+          subtitle={
+            periods.length === 0
               ? "No source files imported yet"
-              : `${periods.length} period${periods.length === 1 ? "" : "s"} imported`}
-          </p>
-        </div>
+              : `${periods.length} period${periods.length === 1 ? "" : "s"} imported`
+          }
+          onPatch={patchClient}
+        />
 
         {/* Report / Raw data toggle, at the top as specified. */}
         <div className="inline-flex rounded-lg border border-line bg-surface p-0.5">

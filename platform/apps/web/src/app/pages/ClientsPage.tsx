@@ -5,7 +5,7 @@ import { applyView, defaultViewConfig, type ColumnSpec, type ViewConfig } from "
 import { formatPeriod } from "@avilo/module";
 
 import { api } from "../../lib/trpc.js";
-import { money, percent } from "../../lib/format.js";
+import { money, parseFigure, percent } from "../../lib/format.js";
 import { Block, Button, EmptyState, Spinner, StatTile } from "../components/ui.js";
 import { DataTable, type ColumnRender } from "../components/DataTable.js";
 import { ClientCardView } from "../components/ClientCardView.js";
@@ -23,14 +23,34 @@ const COLUMNS: ColumnSpec[] = [
   { id: "name", label: "Client", kind: "text", editable: true, width: 230 },
   { id: "stage", label: "Stage", kind: "select", editable: true, options: STAGES, width: 130 },
   { id: "latestPeriod", label: "Latest period", kind: "text", width: 140 },
-  { id: "revenue", label: "Revenue", kind: "number", format: "currency", width: 120 },
-  { id: "netOperatingIncome", label: "Net Op. Income", kind: "number", format: "currency", width: 140 },
-  { id: "grossMarginPct", label: "Gross margin", kind: "number", format: "percent", width: 130 },
-  { id: "noiMarginPct", label: "NOI margin", kind: "number", format: "percent", width: 120 },
-  { id: "daysCashOnHand", label: "Days cash", kind: "number", width: 110 },
+  { id: "revenue", label: "Revenue", kind: "number", format: "currency", editable: true, width: 120 },
+  { id: "netOperatingIncome", label: "Net Op. Income", kind: "number", format: "currency", editable: true, width: 140 },
+  { id: "grossMarginPct", label: "Gross margin", kind: "number", format: "percent", editable: true, width: 130 },
+  { id: "noiMarginPct", label: "NOI margin", kind: "number", format: "percent", editable: true, width: 120 },
+  { id: "daysCashOnHand", label: "Days cash", kind: "number", editable: true, width: 110 },
   { id: "owner", label: "Owner", kind: "text", editable: true, width: 140 },
+  // Stored on every client and, until now, typeable nowhere. Present here so a client
+  // added from this table can be filled in without leaving it.
+  { id: "legalName", label: "Legal name", kind: "text", editable: true, width: 180 },
+  { id: "industry", label: "Industry", kind: "text", editable: true, width: 170 },
   { id: "data", label: "Data", kind: "text", width: 140 },
 ];
+
+/**
+ * Which stored value each metric column is showing.
+ *
+ * The figures in this table are the client's *latest period*, so an edit here is an
+ * override on that period — the same write the element page makes, against the same
+ * target. Routing it anywhere else would put the correction on a month the user was not
+ * looking at.
+ */
+const METRIC_TARGETS: Record<string, { kind: "account" | "metric"; id: string }> = {
+  revenue: { kind: "account", id: "pl.revenue" },
+  netOperatingIncome: { kind: "metric", id: "net_operating_income" },
+  grossMarginPct: { kind: "metric", id: "gross_margin_pct" },
+  noiMarginPct: { kind: "metric", id: "noi_margin_pct" },
+  daysCashOnHand: { kind: "metric", id: "days_cash_on_hand" },
+};
 
 export function ClientsPage() {
   const navigate = useNavigate();
@@ -135,12 +155,60 @@ export function ClientsPage() {
     [navigate],
   );
 
+  /**
+   * Override a metric shown in this table.
+   *
+   * Refuses when the client has no period rather than inventing one: a figure has to
+   * belong to a month, and guessing which month a correction applies to is the kind of
+   * silent write that is only discovered when the numbers stop reconciling.
+   */
+  const overrideMetric = useCallback(
+    async (row: ClientRow, columnId: string, raw: string) => {
+      const target = METRIC_TARGETS[columnId];
+      if (!target || !row.latestPeriod) return;
+      const current = (row as unknown as Record<string, number | null>)[columnId] ?? null;
+      await api.overrides.set.mutate({
+        clientId: row.id,
+        period: row.latestPeriod,
+        targetKind: target.kind,
+        targetId: target.id,
+        value: parseFigure(raw),
+        previousValue: current,
+      });
+      await reload();
+    },
+    [reload],
+  );
+
   const metricTip = useCallback(
     (row: ClientRow, what: string) =>
       !row.latestPeriod
         ? "No data imported yet. Use Upload to add a QuickBooks export."
-        : `${what} for ${formatPeriod(row.latestPeriod)}, computed from imported data. Double-click to open the element page and edit it there.`,
+        : `${what} for ${formatPeriod(row.latestPeriod)}, computed from imported data. Double-click to correct it for that period.`,
     [],
+  );
+
+  /**
+   * The shared parts of a metric column.
+   *
+   * `canEdit` gates it on the row having a period to write to, so a client with nothing
+   * imported keeps the old behaviour — double-click opens the element page, where Upload
+   * is — instead of offering an editor whose commit would be discarded.
+   */
+  const metricColumn = useCallback(
+    (columnId: string, what: string): ColumnRender<ClientRow> => ({
+      align: "right",
+      numeric: true,
+      tip: (row) => metricTip(row, what),
+      onDoubleClick: openDetail,
+      canEdit: (row) => Boolean(row.latestPeriod),
+      editValue: (row) => {
+        const value = (row as unknown as Record<string, number | null>)[columnId];
+        return value === null || value === undefined ? "" : String(value);
+      },
+      onEdit: (row, next) => overrideMetric(row, columnId, next),
+    }),
+    [metricTip, openDetail, overrideMetric],
   );
 
   const renderers = useMemo<Record<string, ColumnRender<ClientRow>>>(
@@ -186,64 +254,74 @@ export function ClientsPage() {
           ),
       },
       revenue: {
-        align: "right",
-        numeric: true,
+        ...metricColumn("revenue", "Total revenue"),
         value: (row) => row.revenue,
         formatAggregate: money,
-        tip: (row) => metricTip(row, "Total revenue"),
-        onDoubleClick: openDetail,
         render: (row) => (
           <span className="num font-medium text-ink">{money(row.revenue)}</span>
         ),
       },
       netOperatingIncome: {
-        align: "right",
-        numeric: true,
+        ...metricColumn("netOperatingIncome", "Net Operating Income"),
         value: (row) => row.netOperatingIncome,
         formatAggregate: money,
-        tip: (row) => metricTip(row, "Net Operating Income"),
-        onDoubleClick: openDetail,
         render: (row) => (
           <span className="num text-ink">{money(row.netOperatingIncome)}</span>
         ),
       },
       grossMarginPct: {
-        align: "right",
-        numeric: true,
+        ...metricColumn("grossMarginPct", "Gross margin"),
         value: (row) => row.grossMarginPct,
         formatAggregate: (v) => percent(v),
-        tip: (row) => metricTip(row, "Gross margin"),
-        onDoubleClick: openDetail,
         render: (row) => (
           <span className="num text-ink-muted">{percent(row.grossMarginPct)}</span>
         ),
       },
       noiMarginPct: {
-        align: "right",
-        numeric: true,
+        ...metricColumn("noiMarginPct", "Net Operating Income margin"),
         value: (row) => row.noiMarginPct,
         formatAggregate: (v) => percent(v),
-        tip: (row) => metricTip(row, "Net Operating Income margin"),
-        onDoubleClick: openDetail,
         render: (row) => (
           <span className="num text-ink-muted">{percent(row.noiMarginPct)}</span>
         ),
       },
       daysCashOnHand: {
-        align: "right",
-        numeric: true,
+        ...metricColumn("daysCashOnHand", "Days cash on hand"),
         value: (row) => row.daysCashOnHand,
         formatAggregate: (v) => String(Math.round(v)),
         tip: (row) =>
-          row.daysCashOnHand === null
+          row.daysCashOnHand === null && row.latestPeriod
             ? "Needs a Balance Sheet import — cash in bank accounts is missing"
             : metricTip(row, "Days cash on hand"),
-        onDoubleClick: openDetail,
         render: (row) =>
           row.daysCashOnHand === null ? (
             <span className="text-ink-faint">—</span>
           ) : (
             <span className="num text-ink-muted">{Math.round(row.daysCashOnHand)}</span>
+          ),
+      },
+      legalName: {
+        value: (row) => row.legalName ?? "",
+        editValue: (row) => row.legalName ?? "",
+        onEdit: (row, next) => patch(row, "legalName", next),
+        tip: () => "The registered entity name. Double-click to edit",
+        render: (row) =>
+          row.legalName ? (
+            <span className="text-ink-muted">{row.legalName}</span>
+          ) : (
+            <span className="text-ink-faint">—</span>
+          ),
+      },
+      industry: {
+        value: (row) => row.industry ?? "",
+        editValue: (row) => row.industry ?? "",
+        onEdit: (row, next) => patch(row, "industry", next),
+        tip: () => "Double-click to set the industry",
+        render: (row) =>
+          row.industry ? (
+            <span className="text-ink-muted">{row.industry}</span>
+          ) : (
+            <span className="text-ink-faint">—</span>
           ),
       },
       owner: {
@@ -286,7 +364,7 @@ export function ClientsPage() {
         },
       },
     }),
-    [metricTip, openDetail, patch],
+    [metricColumn, metricTip, openDetail, patch],
   );
 
   const visible = useMemo(() => {

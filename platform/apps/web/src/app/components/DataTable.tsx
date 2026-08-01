@@ -29,6 +29,15 @@ export interface ColumnRender<Row> {
   align?: "left" | "right" | "center";
   /** Present ⇒ the cell is inline-editable on double-click. */
   onEdit?: (row: Row, next: string) => void | Promise<void>;
+  /**
+   * Narrow `onEdit` to particular rows.
+   *
+   * Some values are editable only when the row has somewhere to put them — a period
+   * figure needs a period. Without this the choice would be per column, and a column
+   * that is editable for most rows would offer an editor on the rows where the commit
+   * has nowhere to go and would be silently dropped.
+   */
+  canEdit?: (row: Row) => boolean;
   editValue?: (row: Row) => string;
   /** Fixed choices render a select rather than a text input. */
   options?: string[];
@@ -63,6 +72,21 @@ export interface DataTableProps<Row> {
   showFooter?: boolean;
 }
 
+/**
+ * How long a click waits to find out whether it is half of a double-click.
+ *
+ * Only applied to cells that are both editable and navigable, where the gesture is
+ * genuinely ambiguous. Without it the first click of a double-click navigates
+ * immediately, the row unmounts, and the second click lands on a page that has already
+ * replaced the table — which is why double-click-to-edit appeared to be treated as a
+ * single click. `stopPropagation` on the double-click handler cannot help: by the time
+ * it runs, the navigation has already been requested.
+ *
+ * 220ms is just above a comfortable double-click interval and below the point where a
+ * deliberate single click starts to feel unresponsive.
+ */
+const DOUBLE_CLICK_GRACE_MS = 220;
+
 export function DataTable<Row>({
   columns: allColumns,
   renderers,
@@ -82,6 +106,17 @@ export function DataTable<Row>({
 }: DataTableProps<Row>) {
   const [editing, setEditing] = useState<{ key: string; col: string } | null>(null);
   const [aggregates, setAggregates] = useState<Record<string, AggregateKind>>({});
+
+  // A pending row-open, held back long enough for a second click to cancel it.
+  const pendingOpen = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cancelPendingOpen = () => {
+    if (pendingOpen.current === null) return;
+    clearTimeout(pendingOpen.current);
+    pendingOpen.current = null;
+  };
+  // Navigating away unmounts this component mid-timer; without the cleanup the callback
+  // still fires and pushes a route the user has already left.
+  useEffect(() => cancelPendingOpen, []);
 
   // Hidden and reordered columns are part of the view, not of this component's state —
   // which is what lets a saved list restore a layout. Resolved through the shared engine
@@ -149,7 +184,8 @@ export function DataTable<Row>({
                 {columns.map((column) => {
                   const renderer = renderers[column.id] ?? {};
                   const isEditing = editing?.key === key && editing.col === column.id;
-                  const editable = Boolean(renderer.onEdit);
+                  const editable =
+                    Boolean(renderer.onEdit) && (renderer.canEdit?.(row) ?? true);
 
                   const cell = (
                     <td
@@ -165,12 +201,24 @@ export function DataTable<Row>({
                           ? (event) => {
                               if ((event.target as HTMLElement).closest("[data-stop]"))
                                 return;
-                              onRowClick(row);
+                              // Nothing to edit here, so the click is unambiguous and
+                              // opening the row immediately costs nothing.
+                              if (!editable) {
+                                onRowClick(row);
+                                return;
+                              }
+                              cancelPendingOpen();
+                              pendingOpen.current = setTimeout(() => {
+                                pendingOpen.current = null;
+                                onRowClick(row);
+                              }, DOUBLE_CLICK_GRACE_MS);
                             }
                           : undefined
                       }
                       onDoubleClick={(event) => {
                         event.stopPropagation();
+                        // The first click of this pair has already scheduled a row-open.
+                        cancelPendingOpen();
                         if (editable) setEditing({ key, col: column.id });
                         else renderer.onDoubleClick?.(row);
                       }}

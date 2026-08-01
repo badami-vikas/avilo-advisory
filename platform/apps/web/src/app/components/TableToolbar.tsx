@@ -7,13 +7,14 @@ import {
   ArrowUpDown,
   Check,
   ChevronDown,
+  Eye,
+  EyeOff,
   LayoutGrid,
   Layers,
   ListFilter,
   MoreVertical,
   Plus,
   Search,
-  Settings2,
   Table2,
   Trash2,
   X,
@@ -156,10 +157,6 @@ export function TableToolbar({
   const hideLabels = atMost(density, "icons");
   const shrinkSearch = atMost(density, "narrow");
   const collapseButtons = atMost(density, "compact");
-
-  // At the narrowest width the Columns panel is opened from the overflow menu instead
-  // of its own button, so its open state has to be controllable from outside.
-  const [columnsOpen, setColumnsOpen] = useState(false);
 
   const hidden = view.hiddenColumns ?? [];
   const hiddenCount = hidden.length;
@@ -490,61 +487,6 @@ export function TableToolbar({
           context menu, so it lists every column — including the hidden ones, which is
           the whole point — rather than only what is currently on screen.
         */}
-        <Popover.Root
-          open={collapseButtons ? columnsOpen : undefined}
-          onOpenChange={collapseButtons ? setColumnsOpen : undefined}
-        >
-          {/*
-            When collapsed, the trigger is not rendered at all — relying on a `hidden`
-            class loses to the button's own `inline-flex`, since both are display
-            utilities and source order decides. Radix still needs something to position
-            against, so a zero-size anchor stays in the flow.
-          */}
-          {collapseButtons ? <Popover.Anchor className="h-0 w-0" /> : null}
-          <Popover.Trigger asChild style={collapseButtons ? { display: "none" } : undefined}>
-            <Button aria-label="Columns">
-              <Settings2 size={14} className="text-ink-muted" />
-              {hiddenCount > 0 ? (
-                <span className="rounded-full bg-accent px-1.5 text-[10.5px] font-semibold text-white">
-                  {hiddenCount}
-                </span>
-              ) : null}
-            </Button>
-          </Popover.Trigger>
-          <Popover.Portal>
-            <Popover.Content
-              align="end"
-              sideOffset={6}
-              className="z-50 max-h-[340px] w-[220px] overflow-y-auto rounded-xl border border-line bg-surface p-1.5 shadow-lg"
-            >
-              <p className="px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.07em] text-ink-faint">
-                Columns
-              </p>
-              {columns.map((column) => {
-                const shown = !hidden.includes(column.id);
-                return (
-                  <button
-                    key={column.id}
-                    onClick={() => toggleColumn(column.id)}
-                    className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-[12.5px] text-ink hover:bg-line-soft"
-                  >
-                    <span className={shown ? "" : "text-ink-faint"}>{column.label}</span>
-                    {shown ? <Check size={12} className="text-accent" /> : null}
-                  </button>
-                );
-              })}
-              {hiddenCount > 0 ? (
-                <button
-                  onClick={() => onViewChange({ ...view, hiddenColumns: [] })}
-                  className="mt-1 w-full rounded-md px-2 py-1.5 text-left text-[12.5px] text-accent hover:bg-accent-soft"
-                >
-                  Show all columns
-                </button>
-              ) : null}
-            </Popover.Content>
-          </Popover.Portal>
-        </Popover.Root>
-
         <Button variant="primary" onClick={onAdd} aria-label={addLabel}>
           <Plus size={15} />
           {hideLabels ? null : addLabel}
@@ -568,20 +510,89 @@ export function TableToolbar({
                 already click-to-sort, so a top-level button was a second path to the
                 same thing.
               */}
+              {/*
+                View options live here at every width now, rather than behind a separate
+                icon in the toolbar. The icon was a control panel with no label whose
+                contents nobody could guess, and it competed for space with the actions
+                that do have names.
+
+                A submenu rather than the popover this used to open. Closing a menu and
+                opening a floating panel in the same tick makes Radix dismiss the panel
+                as an outside interaction of the menu that is still tearing down, so the
+                click appeared to do nothing at all. One layer has no such race — and it
+                lets the list stay open across several toggles, which is how anyone
+                actually uses it.
+              */}
+              <DropdownMenu.Sub>
+                <DropdownMenu.SubTrigger className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-[12.5px] text-ink outline-none data-[highlighted]:bg-line-soft">
+                  <Eye size={13} className="text-ink-muted" />
+                  View options
+                  {hiddenCount > 0 ? (
+                    <span className="ml-auto text-[11.5px] text-ink-faint">
+                      {hiddenCount} hidden
+                    </span>
+                  ) : null}
+                </DropdownMenu.SubTrigger>
+                <DropdownMenu.Portal>
+                  <DropdownMenu.SubContent
+                    sideOffset={2}
+                    className="z-50 max-h-[340px] min-w-[220px] overflow-y-auto rounded-lg border border-line bg-surface p-1 shadow-lg"
+                  >
+                    <p className="px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.07em] text-ink-faint">
+                      Columns
+                    </p>
+                    {columns.map((column) => {
+                      const shown = !hidden.includes(column.id);
+                      return (
+                        <DropdownMenu.Item
+                          key={column.id}
+                          // Keep the menu open: hiding columns is usually several
+                          // decisions, not one.
+                          onSelect={(event) => {
+                            event.preventDefault();
+                            toggleColumn(column.id);
+                          }}
+                          className="flex cursor-pointer items-center justify-between gap-3 rounded-md px-2 py-1.5 text-[12.5px] text-ink outline-none data-[highlighted]:bg-line-soft"
+                        >
+                          <span className={shown ? "" : "text-ink-faint"}>
+                            {column.label}
+                          </span>
+                          {/*
+                            An eye, open or struck through, rather than a tick-or-nothing.
+                            A tick says "selected" and its absence says nothing at all, so
+                            a hidden column looked identical to one the list had simply
+                            not marked. Both states are drawn now, and both say what they
+                            mean.
+                          */}
+                          {shown ? (
+                            <Eye size={13} className="shrink-0 text-accent" />
+                          ) : (
+                            <EyeOff size={13} className="shrink-0 text-ink-faint" />
+                          )}
+                        </DropdownMenu.Item>
+                      );
+                    })}
+                    {hiddenCount > 0 ? (
+                      <>
+                        <DropdownMenu.Separator className="my-1 h-px bg-line-soft" />
+                        <DropdownMenu.Item
+                          onSelect={(event) => {
+                            event.preventDefault();
+                            onViewChange({ ...view, hiddenColumns: [] });
+                          }}
+                          className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-[12.5px] text-accent outline-none data-[highlighted]:bg-accent-soft"
+                        >
+                          <Eye size={13} />
+                          Show all columns
+                        </DropdownMenu.Item>
+                      </>
+                    ) : null}
+                  </DropdownMenu.SubContent>
+                </DropdownMenu.Portal>
+              </DropdownMenu.Sub>
+
               {collapseButtons ? (
                 <>
-                  <DropdownMenu.Item
-                    onSelect={() => setColumnsOpen(true)}
-                    className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-[12.5px] text-ink outline-none data-[highlighted]:bg-line-soft"
-                  >
-                    <Settings2 size={13} className="text-ink-muted" />
-                    Columns
-                    {hiddenCount > 0 ? (
-                      <span className="ml-auto text-[11.5px] text-ink-faint">
-                        {hiddenCount} hidden
-                      </span>
-                    ) : null}
-                  </DropdownMenu.Item>
                   {onViewModeChange ? (
                     <DropdownMenu.Sub>
                       <DropdownMenu.SubTrigger className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-[12.5px] text-ink outline-none data-[highlighted]:bg-line-soft">
@@ -624,9 +635,10 @@ export function TableToolbar({
                       </DropdownMenu.Portal>
                     </DropdownMenu.Sub>
                   ) : null}
-                  <DropdownMenu.Separator className="my-1 h-px bg-line-soft" />
                 </>
               ) : null}
+
+              <DropdownMenu.Separator className="my-1 h-px bg-line-soft" />
 
               <DropdownMenu.Sub>
                 <DropdownMenu.SubTrigger className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-[12.5px] text-ink outline-none data-[highlighted]:bg-line-soft">

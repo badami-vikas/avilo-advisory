@@ -43,6 +43,27 @@ export function count(value: number | null | undefined): string {
   return integer.format(value);
 }
 
+/**
+ * Parse a hand-typed figure, tolerating what people actually type into a financial
+ * table: "$1,234.56", "(1,234)" for a negative, "41.8%".
+ *
+ * Throws rather than returning NaN or 0 — a silently-zeroed figure in an accounting
+ * application is the worst possible outcome of a typo.
+ */
+export function parseFigure(raw: string): number {
+  let text = raw.trim();
+  if (text === "") throw new Error("Enter a number, or press Escape to cancel.");
+  let negative = false;
+  // Accounting notation: parentheses mean negative.
+  if (/^\(.*\)$/.test(text)) {
+    negative = true;
+    text = text.slice(1, -1);
+  }
+  const numeric = Number(text.replace(/[$,\s%]/g, ""));
+  if (!Number.isFinite(numeric)) throw new Error(`"${raw}" is not a number.`);
+  return negative ? -numeric : numeric;
+}
+
 export function byUnit(
   value: number | null | undefined,
   unit: string | undefined,

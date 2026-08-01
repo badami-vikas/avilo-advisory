@@ -62,6 +62,22 @@ export async function serveHost<T extends ModuleRegistry>(
     // A year of monthly exports can arrive in a single upload.
     bodyLimit: options.bodyLimit ?? 64 * 1024 * 1024,
     trustProxy: options.trustProxy ?? false,
+
+    /**
+     * Fastify matches the whole tRPC surface with a single `:path` parameter, and its
+     * default limit on a route parameter is 100 characters.
+     *
+     * A batched tRPC request puts every procedure name in that parameter, comma
+     * separated — and once each name carries its module prefix, six batched calls is
+     * about 150 characters. Over the limit Fastify does not error; it simply fails to
+     * match the route and returns 404, which surfaces in the browser as "Unable to
+     * transform response from server" with nothing pointing at the cause.
+     *
+     * The limit exists to bound router matching work, not to protect anything here: this
+     * is one route with one parameter. It scales with how many modules are registered
+     * and how many queries a page fires at once, so it is set well clear of both.
+     */
+    maxParamLength: 5000,
   });
 
   await options.configure?.(app);

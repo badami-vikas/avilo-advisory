@@ -8,8 +8,11 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { createRef } from "react";
 import { cleanup, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 
 import { Button } from "../src/app/components/ui.js";
+import { DataTable } from "../src/app/components/DataTable.js";
+import { parseFigure } from "../src/lib/format.js";
 import { visibleColumns, defaultViewConfig, type ColumnSpec } from "@avilo/tables";
 
 // `globals: false` keeps the vitest API explicit, which also means testing-library's
@@ -119,5 +122,124 @@ describe("units come from the formula, not from the id", () => {
   it("falls back sensibly for an account that has no formula", () => {
     expect(unitFor("pl.revenue", formulas)).toBe("currency");
     expect(unitFor("some_margin_pct", formulas)).toBe("percent");
+  });
+});
+
+describe("double-click edits a cell instead of opening the row", () => {
+  /**
+   * The defect: every cell called `onRowClick` on click and `setEditing` on double-click.
+   * The first click of a double-click therefore navigated, the row unmounted, and the
+   * second click landed on a page that had replaced the table — so double-click-to-edit
+   * looked like it was being treated as a single click. `stopPropagation` in the
+   * double-click handler could not help: the navigation was already requested.
+   *
+   * The fix holds an editable cell's row-open back long enough for a second click to
+   * cancel it. These tests pin both halves — the editor must open, and the row must NOT.
+   */
+  const columns: ColumnSpec[] = [
+    { id: "name", label: "Client", kind: "text" },
+    { id: "period", label: "Period", kind: "text" },
+  ];
+
+  interface Row {
+    id: string;
+    name: string;
+    period: string;
+  }
+
+  const rows: Row[] = [{ id: "c1", name: "Phoenix", period: "Oct 2024" }];
+
+  function setup() {
+    const opened: Row[] = [];
+    const edits: string[] = [];
+    render(
+      <DataTable<Row>
+        columns={columns}
+        renderers={{
+          name: {
+            value: (row) => row.name,
+            editValue: (row) => row.name,
+            onEdit: (_row, next) => void edits.push(next),
+          },
+          period: { value: (row) => row.period },
+        }}
+        rows={rows}
+        view={defaultViewConfig("t")}
+        rowKey={(row) => row.id}
+        onRowClick={(row) => opened.push(row)}
+        emptyState={<span>none</span>}
+        showFooter={false}
+      />,
+    );
+    return { opened, edits };
+  }
+
+  it("opens the editor on an editable cell and does not open the row", async () => {
+    const { opened } = setup();
+
+    await userEvent.dblClick(screen.getByText("Phoenix"));
+
+    // Plain property rather than jest-dom's toHaveValue: this suite deliberately has no
+    // custom matchers installed.
+    expect((screen.getByRole("textbox") as HTMLInputElement).value).toBe("Phoenix");
+    expect(opened).toEqual([]);
+  });
+
+  it("still opens the row from a cell that has nothing to edit", async () => {
+    const { opened } = setup();
+
+    await userEvent.click(screen.getByText("Oct 2024"));
+
+    // No editor to wait for, so this one is immediate — the grace period applies only
+    // where the gesture is ambiguous.
+    expect(opened).toHaveLength(1);
+    expect(opened[0]!.id).toBe("c1");
+  });
+
+  it("treats a cell as read-only when canEdit rejects the row", async () => {
+    const opened: Row[] = [];
+    render(
+      <DataTable<Row>
+        columns={columns}
+        renderers={{
+          name: {
+            value: (row) => row.name,
+            editValue: (row) => row.name,
+            onEdit: () => {},
+            // A period figure with no period to write to: the commit would be dropped,
+            // so the editor must never appear in the first place.
+            canEdit: () => false,
+          },
+          period: { value: (row) => row.period },
+        }}
+        rows={rows}
+        view={defaultViewConfig("t")}
+        rowKey={(row) => row.id}
+        onRowClick={(row) => opened.push(row)}
+        emptyState={<span>none</span>}
+        showFooter={false}
+      />,
+    );
+
+    await userEvent.dblClick(screen.getByText("Phoenix"));
+
+    expect(screen.queryByRole("textbox")).toBeNull();
+  });
+});
+
+describe("figures are parsed the way people type them", () => {
+  it("accepts currency, thousands separators and accounting negatives", () => {
+    expect(parseFigure("$1,234.56")).toBe(1234.56);
+    expect(parseFigure("(1,250)")).toBe(-1250);
+    expect(parseFigure("41.8%")).toBe(41.8);
+  });
+
+  /**
+   * Throwing matters more than it looks: a silently-zeroed figure is the worst possible
+   * outcome of a typo in an accounting application.
+   */
+  it("refuses what is not a number rather than yielding NaN or 0", () => {
+    expect(() => parseFigure("abc")).toThrow();
+    expect(() => parseFigure("")).toThrow();
   });
 });
