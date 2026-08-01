@@ -1,38 +1,84 @@
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { mkdirSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 /**
- * Local file locations.
+ * Where this module keeps things.
  *
- * User-visible files live under ~/Documents/Bridge/<Organization>/<Module>/<Sub-module>/
- * per the relationship-os local-files rule, so uploads land where the platform will
- * expect them after integration rather than in an app-private directory that would need
- * migrating.
+ * These used to be module-level constants resolved from the environment at import time.
+ * That works for exactly one module in exactly one process: it means the module decides
+ * its own storage locations, and two modules in one host would race to name the same
+ * directories. The host decides now, and calls `configurePaths` before anything opens a
+ * file. The environment-variable defaults remain for the standalone dev path and for
+ * tests, which have no host.
  */
+
 export const ORGANIZATION = "Avilo Advisory";
 
+interface Paths {
+  filesRoot: string;
+  dbPath: string;
+  migrationsDir: string;
+}
+
 /**
- * A hosted deployment has no Documents folder worth writing to, and its filesystem is
- * usually replaced on every deploy — so the root is overridable and pointed at a mounted
- * disk. Left unset, the local-first path is unchanged.
+ * The layout when nobody has configured one: a source checkout or a test run.
+ *
+ * `~/Documents/Bridge/<Organization>/` is the relationship-os local-files convention, and
+ * `homedir()` resolves correctly on Windows too, so the desktop build inherits a sensible
+ * default rather than a POSIX-shaped guess.
  */
-export const BRIDGE_ROOT =
-  process.env.AVILO_FILES_ROOT ?? join(homedir(), "Documents", "Bridge", ORGANIZATION);
+function defaults(): Paths {
+  const filesRoot =
+    process.env.AVILO_FILES_ROOT ??
+    join(homedir(), "Documents", "Bridge", ORGANIZATION);
+  return {
+    filesRoot,
+    dbPath: process.env.AVILO_DB_PATH ?? join(filesRoot, ".data", "avilo.sqlite"),
+    migrationsDir: join(dirname(fileURLToPath(import.meta.url)), "..", "migrations"),
+  };
+}
 
-/** The SQLite database. Kept beside the files it describes. */
-export const DATA_DIR = join(BRIDGE_ROOT, ".data");
+let configured: Paths | null = null;
 
-export const DB_PATH = process.env.AVILO_DB_PATH ?? join(DATA_DIR, "avilo.sqlite");
+/**
+ * Point the module at host-provided locations. Must be called before the first database
+ * or file access; the module descriptor's `init` is the only correct place.
+ */
+export function configurePaths(paths: Partial<Paths>): void {
+  configured = { ...(configured ?? defaults()), ...paths };
+}
+
+function current(): Paths {
+  configured ??= defaults();
+  return configured;
+}
+
+/** Root of the user-visible file tree. Uploads live under here. */
+export function filesRoot(): string {
+  return current().filesRoot;
+}
+
+/** The SQLite database file. */
+export function dbPath(): string {
+  return current().dbPath;
+}
+
+/** Drizzle migrations, shipped with the code. */
+export function migrationsDir(): string {
+  return current().migrationsDir;
+}
 
 /** Per-client upload directory. */
 export function clientFilesDir(clientName: string): string {
-  return join(BRIDGE_ROOT, sanitizeFolderName(clientName), "Source files");
+  return join(filesRoot(), sanitizeFolderName(clientName), "Source files");
 }
 
 /**
  * Make a client name safe as a folder component without mangling it beyond recognition —
- * the folder is user-visible in Finder, so readability matters.
+ * the folder is user-visible in Finder and Explorer, so readability matters. The
+ * character class already covers both platforms' reserved set.
  */
 export function sanitizeFolderName(name: string): string {
   const cleaned = name

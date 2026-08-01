@@ -3,6 +3,9 @@ dist/
 *.tsbuildinfo
 .DS_Store
 
+# Packaged installers. Hundreds of megabytes each, and rebuilt from source by CI.
+platform/apps/desktop/release/
+
 # Local database + user files never enter version control.
 data/
 *.sqlite

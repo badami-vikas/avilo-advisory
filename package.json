@@ -16,9 +16,13 @@
     "test": "pnpm -r test",
     "db:migrate": "pnpm --filter @avilo/api migrate",
     "seed:demo": "pnpm --filter @avilo/api seed:demo",
+    "app": "pnpm --filter @avilo/web build && pnpm --filter @avilo/desktop start",
+    "app:build": "pnpm --filter @avilo/web build && pnpm --filter @avilo/desktop build",
+    "app:mac": "pnpm --filter @avilo/web build && pnpm --filter @avilo/desktop dist:mac",
+    "app:win": "pnpm --filter @avilo/web build && pnpm --filter @avilo/desktop dist:win",
     "share": "node scripts/share.mjs",
-    "app:install": "node scripts/install-service.mjs",
-    "app:uninstall": "node scripts/install-service.mjs --uninstall"
+    "service:install": "node scripts/install-service.mjs",
+    "service:uninstall": "node scripts/install-service.mjs --uninstall"
   },
   "devDependencies": {
     "concurrently": "^9.1.2",

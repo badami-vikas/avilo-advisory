@@ -8,3 +8,6 @@ packages:
 allowBuilds:
   esbuild: true
   better-sqlite3: true
+  # electron's install script downloads the platform runtime; without it the package is
+  # metadata and nothing can be launched or packaged.
+  electron: true

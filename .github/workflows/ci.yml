@@ -70,3 +70,58 @@ jobs:
             sleep 1
           done
           pnpm --filter @avilo/api exec tsx src/scripts/smoke.ts
+
+  # The installers, and proof that each one actually runs on the platform it targets.
+  #
+  # Building both from one machine is possible — nothing in the tree is compiled from
+  # source, so a Mac can produce the Windows installer — but *running* one is not, and
+  # running it is where the platform-specific failures live: whether the native SQLite
+  # addon loads against this Electron's Node-API version, and whether the migrations
+  # shipped into `resources` were found. `electron --smoke` boots the real application
+  # headlessly and reads its own /health, so a green job means the app works, not merely
+  # that an installer was produced.
+  desktop:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: dist:mac
+            artifact: macos-installers
+          - os: windows-latest
+            target: dist:win
+            artifact: windows-installer
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build the web bundle and the shell
+        run: pnpm app:build
+
+      - name: Smoke test the real application on this platform
+        run: pnpm --filter @avilo/desktop exec electron . --smoke
+
+      - name: Package installers
+        run: pnpm --filter @avilo/desktop ${{ matrix.target }}
+        env:
+          # Nothing is published from CI, and there are no signing certificates in this
+          # repository. An unsigned build is the honest artifact; adding CSC_LINK and
+          # (on macOS) APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD / APPLE_TEAM_ID as secrets
+          # is what turns these into installers that open without a warning.
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            platform/apps/desktop/release/*.dmg
+            platform/apps/desktop/release/*.exe
+          if-no-files-found: error

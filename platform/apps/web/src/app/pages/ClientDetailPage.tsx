@@ -4,6 +4,7 @@ import { Download, FileText, Table2, Upload, X } from "lucide-react";
 import { formatPeriod } from "@avilo/module";
 
 import { api } from "../../lib/trpc.js";
+import { exportReportPdf } from "../../lib/desktop.js";
 import { Block, Button, EmptyState, Spinner } from "../components/ui.js";
 import { ReportView } from "../components/ReportView.js";
 import { RawDataView } from "../components/RawDataView.js";
@@ -117,16 +118,18 @@ export function ClientDetailPage() {
   }, [report, searchParams, setSearchParams]);
 
   /**
-   * Print only once the chosen range has actually been applied to the charts.
+   * Export only once the chosen range has actually been applied to the charts.
    *
-   * Printing immediately would export whatever range happened to be on screen. The
+   * Exporting immediately would capture whatever range happened to be on screen. The
    * timer restarts whenever `series` changes, so it fires after the data settles rather
    * than after a fixed guess.
    */
   useEffect(() => {
     if (!printRange) return;
     const timer = setTimeout(() => {
-      window.print();
+      // In the desktop shell this is a native save dialog; in a browser it falls back to
+      // the print sheet. Either way the same print stylesheets decide the pagination.
+      void exportReportPdf();
       setPrintRange(null);
     }, 400);
     return () => clearTimeout(timer);

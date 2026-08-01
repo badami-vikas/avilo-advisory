@@ -17,6 +17,7 @@
   "dependencies": {
     "@avilo/module": "workspace:*",
     "@avilo/tables": "workspace:*",
+    "@bridge/module-host": "workspace:*",
     "@fastify/cors": "^10.0.1",
     "@fastify/formbody": "^8.0.2",
     "@fastify/multipart": "^9.0.3",

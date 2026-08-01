@@ -7,42 +7,87 @@ as `platform/modules/avilo`.
 All six QuickBooks report types import from Excel, CSV or PDF, all dashboard sections
 render, and PDF export honours a chosen period range.
 
-## Run it
+## Install it
+
+It is a desktop application. Build the installers with:
 
 ```bash
-pnpm install && pnpm dev
+pnpm install && pnpm app:mac    # .dmg for Apple Silicon and Intel
+pnpm install && pnpm app:win    # .exe installer for Windows x64 and arm64
 ```
 
-Then open **http://127.0.0.1:5177**. Requires Node 24 and pnpm 11.
+Installers land in `platform/apps/desktop/release/`. Nothing in the tree is compiled
+from source, so **either installer can be built from either platform** — a Mac produces
+the Windows `.exe` and vice versa. CI builds both on every push and, more usefully,
+*runs* each one on its own platform (see `--smoke` below).
+
+Both builds are currently **unsigned**, because this repository holds no signing
+certificates. In practice:
+
+- **macOS** refuses an unsigned app on first open. Right-click the app → Open → Open.
+  Providing `CSC_LINK`, `CSC_KEY_PASSWORD`, and the `APPLE_ID` / `APPLE_APP_SPECIFIC_PASSWORD`
+  / `APPLE_TEAM_ID` trio produces a notarised build that opens normally.
+- **Windows** shows a SmartScreen warning. More Info → Run anyway. An EV or OV code
+  signing certificate in `CSC_LINK` removes it.
+
+### Where your things live
+
+| | Path |
+| --- | --- |
+| Your uploads and exports | `~/Documents/Bridge/Avilo Advisory/` (macOS and Windows alike) |
+| The database | Beside them, in `.data/` |
+| Application state | The OS's per-user app-data directory |
+
+Uninstalling removes the application and leaves `Documents/Bridge` alone. An install
+that finds a database from a previous version adopts it in place — no migration step,
+no copy that can be interrupted halfway.
+
+### Development
+
+```bash
+pnpm install && pnpm app        # build the web bundle, then launch the shell
+pnpm dev                        # browser + hot reload, at http://127.0.0.1:5177
+```
+
+Requires Node 24 and pnpm 11.
 
 | Command | What it does |
 | --- | --- |
-| `pnpm dev` | Starts the API (5178) and web client (5177) |
+| `pnpm app` | Builds and launches the desktop shell |
+| `pnpm app:build` | Builds the web bundle and the shell, without packaging |
+| `pnpm app:mac` / `pnpm app:win` | Builds installers |
+| `pnpm --filter @avilo/desktop exec electron . --smoke` | Boots the real app headlessly, reads its own `/health`, exits 0 or 1 |
+| `pnpm dev` | API (5178) and web client (5177), with hot reload |
 | `pnpm test` | Runs the test suite |
 | `pnpm typecheck` | Typechecks every package |
 | `pnpm seed:demo` | Loads a demo client so you can see a populated dashboard |
 | `pnpm seed:demo --reset` | Removes all client data, keeping accounts and formulas |
-| `pnpm share` | Publishes this machine over a Cloudflare Tunnel (needs `AVILO_PASSWORD`) |
 | `pnpm --filter @avilo/api migrations:generate` | Regenerates SQL after a schema change |
-| `pnpm app:install` | Runs it as a background service on `127.0.0.1:5180`, starting at login |
-| `pnpm app:uninstall` | Removes the service. Data is untouched |
-| `AVILO_PASSWORD=… pnpm share` | Publishes over a Cloudflare Tunnel |
 | `pnpm --filter @avilo/api exec tsx src/scripts/check-integrity.ts` | Accounting checks over stored data |
 
-### Which port is which
+The shell binds to **port 0** — the OS picks a free loopback port at launch. There is
+nothing to configure, nothing to collide with, and nothing for anything off the machine
+to reach. The fixed ports below exist only in development.
 
 | Port | What it is |
 | --- | --- |
 | 5177 | The web app in development (`pnpm dev`) |
 | 5178 | The API in development. JSON only — a browser shows `{"ok":true,…}` |
-| 5180 | The installed service: one process serving both the app and its API |
 
 `127.0.0.1` and `localhost` are the same loopback interface. The literal IP is used
 because `localhost` can resolve to IPv6 `::1`, which is a different bind.
 
-## Hosting it
+## Hosting it (optional)
 
-Two supported routes. Both serve the built bundle from the API itself, so `/trpc` stays
+The desktop app is the product; this section is the other surface the same host can
+serve, kept because it is what a merged, multi-user deployment would grow from. Skip it
+if you only want the installer.
+
+The background launchd/login service that previously ran this on `127.0.0.1:5180` is
+gone — the desktop app fills that role, and two processes writing one SQLite file is a
+hazard rather than a feature. `pnpm service:install` still exists if you want it back.
+
+Two supported routes. Both serve the built bundle from the host itself, so `/trpc` stays
 same-origin and one session cookie covers the app and its data together.
 
 ### Publish from this machine (free)
@@ -116,19 +161,51 @@ relationship-os will expect them.
 ```
 platform/
   apps/
-    api/        @avilo/api      Fastify + tRPC + Drizzle over SQLite
-    web/        @avilo/web      React + Vite + Tailwind
+    desktop/    @avilo/desktop      Electron shell. Knows about modules, not about Avilo
+    api/        @avilo/api          Fastify + tRPC + Drizzle over SQLite
+    web/        @avilo/web          React + Vite + Tailwind
   modules/
-    avilo/      @avilo/module   Domain layer: schema, accounts, periods,
-                                formula engine, classifier, importers
+    avilo/      @avilo/module       Domain layer: schema, accounts, periods,
+                                    formula engine, classifier, importers
   packages/
-    tables/     @avilo/tables   Port of @bridge/tables — the table contract
-reference/                      The v9.2 single-file prototype and session log
+    module-host/ @bridge/module-host The module contract and the single-process host
+    tables/      @avilo/tables       Port of @bridge/tables — the table contract
+reference/                          The v9.2 single-file prototype and session log
 ```
 
-The domain layer has no framework and no I/O. Integration is: move
-`platform/modules/avilo`, delete `packages/tables` and repoint imports at
-`@bridge/tables`, swap the Drizzle driver for Supabase.
+## Merging with another module
+
+Avilo is registered, not hardcoded. The whole of its wiring is one key:
+
+```ts
+// platform/apps/api/src/host.ts
+export const MODULES = {
+  avilo: aviloModule,
+} as const;
+```
+
+Adding a second module is adding a second key. Everything that used to be an
+application-level decision now belongs to the host, which is what makes that true:
+
+- **The port.** A module has no `listen`, no Fastify instance, and no way to open a
+  socket. One process, one port, however many modules.
+- **The namespace.** The host mounts each module's router under its own id, so the wire
+  path is `/trpc/avilo.clients.list` and the typed client call is
+  `client.avilo.clients.list`. Two modules cannot collide, and the compiler knows which
+  module a call belongs to.
+- **The paths.** A module receives `filesRoot`, `dataDir` and `resourcesDir` in its
+  `init` and reads no environment variables. Two modules cannot race for a directory,
+  and the same module code runs unchanged under a desktop shell or a served deployment.
+- **The lifecycle.** `init` runs before the host listens, so a module that cannot start
+  stops the host from claiming it did; `dispose` runs in reverse order on quit.
+
+Nothing in `@bridge/module-host` or in the Electron shell mentions clients, periods or
+financials — the shell names its window from the registry. The domain layer below all of
+it still has no framework and no I/O.
+
+Integration into relationship-os is then: move `platform/modules/avilo`, delete
+`packages/tables` and repoint imports at `@bridge/tables`, register `aviloModule` in that
+app's host, and swap the Drizzle driver for Supabase.
 
 ## How this differs from the v9 prototype
 

@@ -1,8 +1,7 @@
 import Database from "better-sqlite3";
 import { drizzle, type BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { dirname } from "node:path";
 import { eq, sql } from "drizzle-orm";
 
 import { schema } from "@avilo/module";
@@ -11,9 +10,7 @@ import {
   CANONICAL_ACCOUNTS,
   SEED_FORMULAS,
 } from "@avilo/module";
-import { DB_PATH, ensureDir } from "./paths.js";
-
-const here = dirname(fileURLToPath(import.meta.url));
+import { dbPath, ensureDir, migrationsDir } from "./paths.js";
 
 export type Db = BetterSQLite3Database<typeof schema>;
 
@@ -26,10 +23,11 @@ export function getDb(): Db {
 export function getConnection(): { db: Db; raw: Database.Database } {
   if (cached) return cached;
 
-  // The database's own directory, not DATA_DIR: AVILO_DB_PATH can point anywhere, and
-  // on a hosted deployment it points at a mounted disk outside the files root.
-  ensureDir(dirname(DB_PATH));
-  const raw = new Database(DB_PATH);
+  // The database's own directory rather than a derived one: the host can put the
+  // database anywhere, including outside the files root.
+  const file = dbPath();
+  ensureDir(dirname(file));
+  const raw = new Database(file);
 
   // WAL keeps reads non-blocking while an import writes; foreign keys are off by
   // default in SQLite and the schema relies on them for cascade deletes.
@@ -37,7 +35,7 @@ export function getConnection(): { db: Db; raw: Database.Database } {
   raw.pragma("foreign_keys = ON");
 
   const db = drizzle(raw, { schema });
-  migrate(db, { migrationsFolder: join(here, "..", "migrations") });
+  migrate(db, { migrationsFolder: migrationsDir() });
   seedReferenceData(db);
 
   cached = { db, raw };
@@ -119,6 +117,20 @@ export function seedReferenceData(db: Db): void {
         .run();
     }
   });
+}
+
+/**
+ * Close the database and forget the handle.
+ *
+ * A desktop application quits and relaunches far more often than a server restarts, and
+ * SQLite's WAL leaves a `-wal` file behind if the connection is not closed cleanly.
+ * Recoverable, but it means the next launch starts by replaying a journal instead of
+ * opening a file.
+ */
+export function closeConnection(): void {
+  if (!cached) return;
+  cached.raw.close();
+  cached = null;
 }
 
 export function newId(prefix: string): string {

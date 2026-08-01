@@ -1,0 +1,94 @@
+appId: com.avilo.advisory
+productName: Avilo Advisory
+copyright: Avilo Advisory
+
+directories:
+  output: release
+  buildResources: build
+
+# Only the bundle and the two dependencies that could not be bundled. Everything else
+# the main process needs is already inside main.mjs.
+files:
+  - dist/main.mjs
+  - dist/preload.cjs
+  - package.json
+  - node_modules/better-sqlite3/**
+  - node_modules/pdfjs-dist/**
+  - "!dist/web/**"
+  - "!dist/modules/**"
+  # pdfjs ships a browser build, a legacy build, sourcemaps and a viewer. The main
+  # process imports the Node build and nothing else; the rest is ~40 MB of dead weight
+  # in every installer.
+  - "!node_modules/pdfjs-dist/{web,image_decoders}/**"
+  - "!node_modules/pdfjs-dist/**/*.map"
+
+# Read-only assets, kept outside the asar so the SQLite migration runner and the static
+# file server can read them as ordinary files.
+extraResources:
+  - from: dist/web
+    to: web
+  - from: dist/modules
+    to: modules
+
+asar: true
+asarUnpack:
+  # A native addon has to be a real file on disk for the dynamic loader to open it.
+  - "**/node_modules/better-sqlite3/**"
+  - "**/*.node"
+
+# No rebuild, deliberately.
+#
+# better-sqlite3 v13 ships pure Node-API prebuilds — 60 napi symbols, no V8 symbols — and
+# Node-API is ABI-stable, so one binary serves both Node and Electron. What is *not*
+# stable is the Node-API version: the prebuild registers at a version Electron 34's Node
+# 20 does not implement, and loading it segfaults inside node_module_register before the
+# first window exists. Electron 43 carries Node 22, which does, so the shipped binary is
+# the right one and rebuilding it from source would only add a C++ toolchain to the list
+# of things every build machine needs. It also means the Windows installer can be built
+# from a Mac: there is nothing to compile.
+npmRebuild: false
+
+mac:
+  category: public.app-category.finance
+  target:
+    - target: dmg
+      arch: [arm64, x64]
+  # Apple Silicon and Intel builds are both produced; the DMG names carry the arch.
+  darkModeSupport: true
+  # No Developer ID certificate is configured, so the build is unsigned and macOS will
+  # refuse it on first open until the user right-clicks and chooses Open. Set
+  # CSC_LINK / CSC_KEY_PASSWORD (and APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD / APPLE_TEAM_ID
+  # for notarisation) to produce a build that opens normally.
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+
+dmg:
+  contents:
+    - x: 140
+      y: 200
+    - x: 400
+      y: 200
+      type: link
+      path: /Applications
+
+win:
+  target:
+    - target: nsis
+      arch: [x64, arm64]
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  # Uninstalling removes the application. It does not touch ~/Documents/Bridge, which is
+  # where the user's own uploads and exports live.
+  deleteAppDataOnUninstall: false
+
+linux:
+  target:
+    - AppImage
+  category: Office

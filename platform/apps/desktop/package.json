@@ -1,0 +1,33 @@
+{
+  "name": "@avilo/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Installable macOS and Windows shell. Runs the module host in-process on an ephemeral loopback port; ships no browser build and opens no outbound connection.",
+  "main": "dist/main.mjs",
+  "scripts": {
+    "build": "node build.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "start": "pnpm build && electron .",
+    "rebuild": "electron-builder install-app-deps",
+    "pack": "pnpm build && electron-builder --dir",
+    "dist:mac": "pnpm build && electron-builder --mac",
+    "dist:win": "pnpm build && electron-builder --win"
+  },
+  "dependencies": {
+    "better-sqlite3": "^13.0.1",
+    "pdfjs-dist": "^6.1.200"
+  },
+  "devDependencies": {
+    "@avilo/api": "workspace:*",
+    "@avilo/web": "workspace:*",
+    "@bridge/module-host": "workspace:*",
+    "@types/node": "^22.10.5",
+    "electron": "^43.2.0",
+    "electron-builder": "^25.1.8",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.5"
+  }
+}
