@@ -51,13 +51,204 @@ body {
   background: var(--color-flag-soft);
 }
 
+/* --------------------------------------------------------------- document */
+/*
+  The report as a *document* rather than a dashboard.
+  ONE copy of these rules, deliberately.
+
+  They used to live inside `@media print`, which meant the exported PDF was the only place
+  anyone could see what the report actually looked like — the advisor had to export a file
+  to check their own formatting. Now the same rules are keyed off a `.paper` root, and two
+  things wear that root: the on-screen Report view, and the tree that is exported.
+
+  Anything that only makes sense to a print engine — page size, margins, break control,
+  the canvas rescale — stays in `@media print` below, because it has no meaning on screen.
+
+  Export sets the Report view first (see ClientDetailPage), so what is exported is exactly
+  what was on screen. `ReportView` also adds `.paper` on `beforeprint`, which covers the
+  browser's own Cmd-P from any view.
+*/
+.paper {
+  background: #fff;
+  color: var(--color-ink);
+}
+
+/*
+  On screen the page is separated cards, which is what makes each section readable on its
+  own. As a document that same treatment is a stack of boxes with rules between them,
+  wasting a third of the width on padding — so the card chrome comes off and the sections
+  become a continuous flow separated by their headings, as in the reference report.
+*/
+.paper .block-card {
+  border: none !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.paper .block-card > div:first-child {
+  border-bottom: 1px solid #d0d5dd !important;
+  padding: 0 0 4px !important;
+  margin-bottom: 8px;
+}
+
+/* Section headings: small, uppercase, letter-spaced — the reference's own voice. */
+.paper .block-card h2 {
+  font-size: 9.5pt !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.08em !important;
+  text-transform: uppercase !important;
+  color: #101828 !important;
+}
+
+/*
+  Subtitles are instructions to the person editing ("double-click any figure…"), which
+  means nothing in a document and confuses the client reading it.
+*/
+.paper .block-card h2 + p {
+  display: none !important;
+}
+
+/* Cell padding tuned for a screen is wasteful at document scale. */
+.paper .block-card td,
+.paper .block-card th {
+  padding: 3px 6px !important;
+  font-size: 8.5pt !important;
+}
+
+.paper .block-card [class*="px-5"] {
+  padding-left: 0 !important;
+  padding-right: 0 !important;
+}
+
+/* The card grids draw their separators with a background showing through 1px gaps. */
+.paper .block-card .bg-line-soft {
+  background: transparent !important;
+}
+
+/* Sections sit closer together than the 16px the dashboard uses. */
+.paper .space-y-4 > * + * {
+  margin-top: 11px;
+}
+
+/* The masthead, and only in the document. */
+.paper .print-masthead {
+  margin-bottom: 14px;
+  padding-bottom: 8px;
+  border-bottom: 2px solid #101828;
+}
+
+/* Practice and client on one baseline, as in the reference. */
+.paper .print-titleline {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.paper .print-practice {
+  font-size: 8pt;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #475467;
+  white-space: nowrap;
+}
+
+.paper .print-client {
+  font-size: 17pt;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: #101828;
+}
+
+.paper .print-legal {
+  font-size: 10pt;
+  font-weight: 400;
+  color: #667085;
+}
+
+.paper .print-period {
+  font-size: 11pt;
+  color: #101828;
+}
+
+.paper .print-kicker {
+  font-size: 8.5pt;
+  color: #667085;
+}
+
+/* A card that is a button must not look like one in a document. */
+.paper button {
+  background: transparent !important;
+  cursor: default;
+}
+
+.paper .print-only {
+  display: block;
+}
+
+/*
+  Hide chrome by intent, not by element type.
+
+  An earlier version hid every `button`, which also removed the profitability and
+  days-cash cards from the PDF — they are buttons so that double-click can open the
+  editor. Interactive chrome is marked `.no-print` instead; content that happens to be
+  focusable still shows.
+*/
+.paper .no-print,
+.paper .chart-toggle,
+.paper nav,
+.paper [role="dialog"] {
+  display: none !important;
+}
+
+/*
+  Sections the advisor left out of this client's report.
+
+  Separate from `data-print-empty`, which is about a section having no data. This one is a
+  deliberate editorial choice, it is per client, and it is reversible from Raw data ›
+  Report format — so the section still renders in the Standard view, marked.
+*/
+.paper [data-print-excluded="true"] {
+  display: none !important;
+}
+
+/*
+  Sections with nothing to show drop out entirely. In the Standard view an empty section
+  says "Upload an A/R Ageing report to populate this" — useful, it tells the advisor what
+  is still missing. In a client-facing document the same box is a broken-looking
+  placeholder for data that will never arrive from *this* export.
+*/
+.paper [data-print-empty="true"] {
+  display: none !important;
+}
+
+/* ------------------------------------------------------------- paper sheet */
+/*
+  The sheet itself, on screen only: a real A4 page the advisor can look at before
+  committing to a PDF. `210mm` rather than a pixel width so the on-screen line breaks are
+  the ones the printer will produce.
+*/
+@media screen {
+  .paper-frame {
+    display: flex;
+    justify-content: center;
+    padding: 8px 0 28px;
+  }
+
+  .paper-frame .paper {
+    width: 210mm;
+    min-height: 297mm;
+    padding: 14mm 12mm;
+    box-shadow: 0 2px 18px rgba(16, 24, 40, 0.13);
+    border-radius: 2px;
+  }
+}
+
 /* ------------------------------------------------------------------ print */
 /*
   PDF export is the browser's own print-to-PDF, which produces vector output. The v9
   session established that the html2canvas raster pipeline gave unacceptable quality.
-
-  Everything interactive disappears: toolbars, the upload dialog, editors, the formula
-  panel, and — as specified — the per-chart graph/table toggles.
 */
 @media print {
   @page {
@@ -74,106 +265,24 @@ body {
     background: #fff;
   }
 
-  /*
-    The exported report is a document, not a dashboard.
-
-    On screen the page is separated cards, which is what makes each section readable on
-    its own. On paper that same treatment prints a stack of boxes with rules between
-    them and wastes a third of the width on padding — so the card chrome comes off and
-    the sections become a continuous flow separated by their headings, as in the
-    reference report.
-  */
-  .block-card {
-    border: none !important;
-    border-radius: 0 !important;
-    background: transparent !important;
-  }
-
-  .block-card > div:first-child {
-    border-bottom: 1px solid #d0d5dd !important;
-    padding: 0 0 4px !important;
-    margin-bottom: 8px;
-  }
-
-  /* Section headings: small, uppercase, letter-spaced — the reference's own voice. */
-  .block-card h2 {
-    font-size: 9.5pt !important;
-    font-weight: 600 !important;
-    letter-spacing: 0.08em !important;
-    text-transform: uppercase !important;
-    color: #101828 !important;
+  /* The sheet's own frame is a screen affordance; on paper the page *is* the frame. */
+  .paper-frame .paper {
+    width: auto;
+    min-height: 0;
+    padding: 0;
+    box-shadow: none;
+    border-radius: 0;
   }
 
   /*
-    Subtitles are instructions to the person editing ("double-click any figure…"), which
-    means nothing on paper and confuses the client reading it.
-  */
-  .block-card h2 + p {
-    display: none !important;
-  }
-
-  /* Cell padding tuned for a screen is wasteful at print scale. */
-  .block-card td,
-  .block-card th {
-    padding: 3px 6px !important;
-    font-size: 8.5pt !important;
-  }
-
-  .block-card [class*="px-5"] {
-    padding-left: 0 !important;
-    padding-right: 0 !important;
-  }
-
-  /* The card grids draw their separators with a background showing through 1px gaps. */
-  .block-card .bg-line-soft {
-    background: transparent !important;
-  }
-
-  /* The masthead, and only on paper. */
-  .print-masthead {
-    margin-bottom: 14px;
-    padding-bottom: 8px;
-    border-bottom: 2px solid #101828;
-  }
-
-  /* Practice and client on one baseline, as in the reference. */
-  .print-titleline {
-    display: flex;
-    align-items: baseline;
-    gap: 10px;
-  }
-
-  .print-practice {
-    font-size: 8pt;
-    font-weight: 600;
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
-    color: #475467;
-    white-space: nowrap;
-  }
-
-  .print-client {
-    font-size: 17pt;
-    font-weight: 600;
-    letter-spacing: -0.01em;
-    color: #101828;
-  }
-
-  .print-legal {
-    font-size: 10pt;
-    font-weight: 400;
-    color: #667085;
-  }
-
-  /*
-    Charts are rendered to a canvas sized to the *screen* container — around 1180px wide.
-    A printed page is about 520pt, so the bitmap ran off the right edge and the last two
-    months of every twelve-month chart were simply not in the PDF.
+    Charts are rendered to a canvas sized to their container — around 1180px wide in the
+    Standard view. A printed page is about 520pt, so the bitmap ran off the right edge and
+    the last two months of every twelve-month chart were simply not in the PDF.
 
     Chart.js writes its dimensions to inline styles, so these have to win outright.
     Scaling the raster rather than re-rendering is deliberate: `printToPDF` does not fire
-    the resize events Chart.js would need, and it rasterises well above screen density,
-    so a scaled canvas prints sharp.
+    the resize events Chart.js would need, and it rasterises well above screen density, so
+    a scaled canvas prints sharp.
   */
   canvas {
     max-width: 100% !important;
@@ -181,39 +290,19 @@ body {
     height: auto !important;
   }
 
-  /* The box that sizes the chart on screen must collapse to the scaled canvas on paper. */
+  /*
+    The box that sizes the chart on screen must collapse to the scaled canvas on paper.
+    Screen-only sizing, so this cannot move up into `.paper`: Chart.js needs a sized box
+    to draw into, and a height of auto there would collapse the canvas to nothing.
+  */
   .chart-frame {
     height: auto !important;
   }
 
-  .print-period {
-    font-size: 11pt;
-    color: #101828;
-  }
-
-  .print-kicker {
-    font-size: 8.5pt;
-    color: #667085;
-  }
-
   /*
-    Sections the advisor left out of this client's report.
-
-    Separate from `data-print-empty`, which is about a section having no data. This one
-    is a deliberate editorial choice, it is per client, and it is reversible from
-    Raw data › Report format — so the section still renders on screen, marked.
-  */
-  [data-print-excluded="true"] {
-    display: none !important;
-  }
-
-  /*
-    Hide chrome by intent, not by element type.
-
-    An earlier version hid every `button`, which also removed the profitability and
-    days-cash cards from the PDF — they are buttons so that double-click can open the
-    editor. Interactive chrome is marked `.no-print` instead; content that happens to
-    be focusable still prints.
+    A last line of defence for anything printed from outside a `.paper` root — the
+    browser's own Cmd-P while the dashboard is on screen, say. The document rules above do
+    the real work.
   */
   .no-print,
   .chart-toggle,
@@ -222,32 +311,10 @@ body {
     display: none !important;
   }
 
-  /* A card that is a button must not look like one on paper. */
-  button {
-    background: transparent !important;
-    cursor: default;
-  }
-
-  .print-only {
-    display: block !important;
-  }
-
   .block-card {
     break-inside: avoid;
     page-break-inside: avoid;
     box-shadow: none !important;
-  }
-
-  /*
-    Sections with nothing to show hide entirely on paper. On screen an empty section says
-    "Upload an A/R Ageing report to populate this" — useful, it tells the advisor what's
-    still missing. On a client-facing PDF the same box is a broken-looking placeholder for
-    data that will never arrive from *this* export, so the whole block is dropped instead.
-    Driven by `data-print-empty` rather than a JS media-query check, because @page layout
-    only exists inside the browser's own print engine — this has to be resolved in CSS.
-  */
-  [data-print-empty="true"] {
-    display: none !important;
   }
 
   a {

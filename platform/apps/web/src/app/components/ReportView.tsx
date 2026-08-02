@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { AlertTriangle, EyeOff } from "lucide-react";
 
 import { Block } from "./ui.js";
@@ -163,6 +163,7 @@ export function ReportView({
   onSetFormula,
   onSetSeriesValue,
   layout,
+  paper = false,
 }: {
   clientName: string;
   /** Shown in brackets after the trading name when the layout asks for it. */
@@ -190,8 +191,35 @@ export function ReportView({
   ) => Promise<void>;
   /** Which sections run in what order, and which of them reach the PDF. */
   layout: ReportLayout;
+  /**
+   * Render as the document rather than as dashboard cards — see the `.paper` block in
+   * app.css. The Report view sets this; the Standard view does not.
+   */
+  paper?: boolean;
 }) {
   const [editing, setEditing] = useState<string | null>(null);
+  const root = useRef<HTMLDivElement>(null);
+
+  /**
+   * Printing always produces the document, from whichever view is on screen.
+   *
+   * The app's own export switches to the Report view first, so this is for the browser's
+   * Cmd-P and the native Print menu item, which React never hears about. Adding the class
+   * to the live node is the only way to reach a print that has already begun.
+   */
+  useEffect(() => {
+    if (paper) return;
+    const node = root.current;
+    if (!node) return;
+    const before = () => node.classList.add("paper");
+    const after = () => node.classList.remove("paper");
+    window.addEventListener("beforeprint", before);
+    window.addEventListener("afterprint", after);
+    return () => {
+      window.removeEventListener("beforeprint", before);
+      window.removeEventListener("afterprint", after);
+    };
+  }, [paper]);
   /** Which figure is showing its formula rather than its value. */
   const [editingFormula, setEditingFormula] = useState<string | null>(null);
   const metric = (id: string) => report.metrics.find((m) => m.id === id);
@@ -692,9 +720,9 @@ export function ReportView({
   };
 
   return (
-    <div className="space-y-4">
+    <div ref={root} className={paper ? "paper space-y-4" : "space-y-4"}>
       {/*
-        Print-only masthead, matching the reference report: practice, then client, then
+        Document-only masthead, matching the reference report: practice, then client, then
         what the document is. On paper this is the only thing identifying the PDF once it
         has left the application.
       */}

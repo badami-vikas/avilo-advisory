@@ -676,8 +676,92 @@ const viewsRouter = router({
   }),
 });
 
+/* ------------------------------------------------------------ sticky notes */
+
+const STICKY_COLORS = ["yellow", "blue", "green", "pink"] as const;
+
+/**
+ * The advisor's working memory for a client.
+ *
+ * Ordering is `pinned, sortOrder, createdAt` and is applied here rather than in the
+ * component, so the board reads the same whichever surface asks for it.
+ */
+const stickyNotesRouter = router({
+  list: procedure.input(z.object({ clientId: z.string() })).query(({ input }) => {
+    const db = getDb();
+    return db
+      .select()
+      .from(schema.stickyNotes)
+      .where(eq(schema.stickyNotes.clientId, input.clientId))
+      .orderBy(
+        desc(schema.stickyNotes.pinned),
+        schema.stickyNotes.sortOrder,
+        schema.stickyNotes.createdAt,
+      )
+      .all();
+  }),
+
+  create: procedure
+    .input(
+      z.object({
+        clientId: z.string(),
+        body: z.string().max(4000).default(""),
+        color: z.enum(STICKY_COLORS).default("yellow"),
+      }),
+    )
+    .mutation(({ input }) => {
+      const db = getDb();
+      requireClient(input.clientId);
+      const id = newId("note");
+      // New notes go to the front of the pile: the thing just written down is the thing
+      // being thought about.
+      const lowest = db
+        .select({ sortOrder: schema.stickyNotes.sortOrder })
+        .from(schema.stickyNotes)
+        .where(eq(schema.stickyNotes.clientId, input.clientId))
+        .orderBy(schema.stickyNotes.sortOrder)
+        .get();
+      db.insert(schema.stickyNotes)
+        .values({
+          id,
+          clientId: input.clientId,
+          body: input.body,
+          color: input.color,
+          sortOrder: (lowest?.sortOrder ?? 0) - 1,
+        })
+        .run();
+      return { id };
+    }),
+
+  update: procedure
+    .input(
+      z.object({
+        id: z.string(),
+        body: z.string().max(4000).optional(),
+        color: z.enum(STICKY_COLORS).optional(),
+        pinned: z.boolean().optional(),
+      }),
+    )
+    .mutation(({ input }) => {
+      const db = getDb();
+      const { id, ...patch } = input;
+      db.update(schema.stickyNotes)
+        .set({ ...patch, updatedAt: nowIso() })
+        .where(eq(schema.stickyNotes.id, id))
+        .run();
+      return { ok: true };
+    }),
+
+  remove: procedure.input(z.object({ id: z.string() })).mutation(({ input }) => {
+    const db = getDb();
+    db.delete(schema.stickyNotes).where(eq(schema.stickyNotes.id, input.id)).run();
+    return { ok: true };
+  }),
+});
+
 export const appRouter = router({
   views: viewsRouter,
+  stickyNotes: stickyNotesRouter,
   clients: clientsRouter,
   report: reportRouter,
   accounts: accountsRouter,

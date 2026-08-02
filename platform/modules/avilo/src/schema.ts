@@ -358,6 +358,40 @@ export const periodNotes = sqliteTable(
   (table) => [primaryKey({ columns: [table.clientId, table.period] })],
 );
 
+/**
+ * Sticky notes: the advisor's own reminders about a client.
+ *
+ * Deliberately not the same thing as `periodNotes`. Key Insights is commentary *about one
+ * month*, written for the client to read, and it prints. A sticky note is working memory
+ * — "chase the Q3 invoice", "owner wants to buy a second truck" — it belongs to the
+ * relationship rather than to a month, there are many of them, and none of them are for
+ * the client's eyes.
+ *
+ * The single `clients.notes` field this replaces could hold exactly one thought, so in
+ * practice it held a growing wall of undated text.
+ */
+export const stickyNotes = sqliteTable(
+  "sticky_notes",
+  {
+    id: text("id").primaryKey(),
+    clientId: text("client_id")
+      .notNull()
+      .references(() => clients.id, { onDelete: "cascade" }),
+    body: text("body").notNull().default(""),
+    /** yellow | blue | green | pink — a label the advisor assigns, not a status. */
+    color: text("color").notNull().default("yellow"),
+    /** Manual order, so a note can be dragged to the front of the pile. */
+    sortOrder: integer("sort_order").notNull().default(0),
+    /** Pinned notes lead, regardless of order. */
+    pinned: integer("pinned", { mode: "boolean" }).notNull().default(false),
+    createdAt: text("created_at").notNull().default(now),
+    updatedAt: text("updated_at").notNull().default(now),
+  },
+  (t) => [index("sticky_notes_client_idx").on(t.clientId)],
+);
+
+export type StickyNote = typeof stickyNotes.$inferSelect;
+
 /* ------------------------------------------------------------------ audit */
 
 export const auditLog = sqliteTable(

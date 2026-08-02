@@ -15,6 +15,8 @@ import {
 } from "../report/layout.js";
 import { ReportView } from "../components/ReportView.js";
 import { RawDataView } from "../components/RawDataView.js";
+import { StickyNotes } from "../components/StickyNotes.js";
+import { Dashboard } from "../dashboard/Dashboard.js";
 import { UploadDialog } from "../components/UploadDialog.js";
 import type {
   ClientRecord,
@@ -26,13 +28,39 @@ import type {
 
 // Every id any chart draws. Fetched in one series call rather than per chart, because
 // each id costs nothing extra but each call rebuilds the whole period report.
+//
+// The dashboard added the balance-sheet and ageing totals: a working-capital line, a
+// profit-to-cash bridge and a thirteen-week projection all need a *history* of cash and
+// of what is owed both ways, not just this month's figure.
 const CHART_IDS = [
   "pl.revenue",
+  "pl.cogs",
+  "pl.overhead",
+  "gross_profit",
+  "gross_margin_pct",
   "net_operating_income",
   "noi_margin_pct",
-  "gross_profit",
-  "pl.overhead",
-  "gross_margin_pct",
+  "bs.cash",
+  "ar.total",
+  "ap.total",
+  "days_cash_on_hand",
+  "dso",
+  "dpo",
+];
+
+/**
+ * How the same month is presented.
+ *
+ * Standard is the working surface — cards, editable figures, the Raw data tables behind
+ * them. Report is the document that will be exported, shown on an actual A4 sheet.
+ * Dashboard is the analysis: the same numbers, asked what they mean.
+ */
+type ViewMode = "standard" | "report" | "dashboard";
+
+const VIEWS: { id: ViewMode; label: string; hint: string }[] = [
+  { id: "standard", label: "Standard view", hint: "Working surface — every figure editable" },
+  { id: "report", label: "Report view", hint: "The document, exactly as it will export" },
+  { id: "dashboard", label: "Interactive dashboard", hint: "What the numbers mean, and what to do" },
 ];
 
 export function ClientDetailPage() {
@@ -46,12 +74,40 @@ export function ClientDetailPage() {
   const [report, setReport] = useState<PeriodReport | null>(null);
   const [series, setSeries] = useState<SeriesPoint[]>([]);
   const [detail, setDetail] = useState<DetailByKind>({});
+  /** The month before the one on screen — what the movement bridges compare against. */
+  const [priorDetail, setPriorDetail] = useState<DetailByKind>({});
   const [printRange, setPrintRange] = useState<{ start: string; end: string } | null>(
     null,
   );
   const [formulas, setFormulas] = useState<FormulaRow[]>([]);
   const [note, setNote] = useState("");
   const [mode, setMode] = useState<"report" | "raw">("report");
+
+  /**
+   * The view lives in the URL.
+   *
+   * Every surface in this application is a routable URL, and this is a surface: an
+   * advisor sending a colleague "look at the dashboard for October" should be able to
+   * send a link rather than three instructions. It also gives the PDF probe and any
+   * future automation a way to ask for the document without driving a dropdown.
+   */
+  const view = ((): ViewMode => {
+    const requested = searchParams.get("view");
+    return VIEWS.some((entry) => entry.id === requested)
+      ? (requested as ViewMode)
+      : "standard";
+  })();
+
+  const setView = useCallback(
+    (next: ViewMode) => {
+      const params = new URLSearchParams(searchParams);
+      // "standard" is the default, so it stays out of the URL rather than decorating it.
+      if (next === "standard") params.delete("view");
+      else params.set("view", next);
+      setSearchParams(params, { replace: true });
+    },
+    [searchParams, setSearchParams],
+  );
   const [uploading, setUploading] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -86,6 +142,7 @@ export function ClientDetailPage() {
       setReport(null);
       setSeries([]);
       setDetail({});
+      setPriorDetail({});
       setNote("");
       return;
     }
@@ -98,6 +155,17 @@ export function ClientDetailPage() {
     setReport(periodReport);
     setDetail(detailRows);
     setNote(noteRow.body);
+
+    /*
+      Last month's detail, for the movement bridges on the dashboard: which service line
+      moved revenue, which customer went quiet. `availablePeriods` is newest-first, so the
+      previous month is the entry after this one — and it may not exist, in which case the
+      bridges say so rather than comparing against nothing.
+    */
+    const prior = allPeriods[allPeriods.indexOf(period) + 1];
+    setPriorDetail(
+      prior ? await api.report.detail.query({ clientId, period: prior }) : {},
+    );
 
     // The chart covers the export range when one is chosen, otherwise everything.
     const sorted = [...allPeriods].sort();
@@ -136,6 +204,14 @@ export function ClientDetailPage() {
    */
   useEffect(() => {
     if (!printRange) return;
+    /*
+      Export the document, from wherever the user was.
+
+      The Report view carries the `.paper` root the document stylesheet keys off, so the
+      PDF is literally the sheet on screen rather than a second rendering of it. Switching
+      first also means the advisor sees what they are about to send.
+    */
+    setView("report");
     const timer = setTimeout(() => {
       // In the desktop shell this is a native save dialog; in a browser it falls back to
       // the print sheet. Either way the same print stylesheets decide the pagination.
@@ -296,9 +372,47 @@ export function ClientDetailPage() {
 
   if (!client || periods === null) return <Spinner label="Loading client…" />;
 
+  /**
+   * The report, as cards or as the document.
+   *
+   * One call site's worth of props, two call sites. Writing it twice is how the Standard
+   * view and the Report view drift apart, which is the one thing the Report view exists
+   * to prevent.
+   */
+  const renderReport = (paper: boolean) =>
+    report ? (
+      <ReportView
+        clientName={client.name}
+        legalName={client.legalName}
+        report={report}
+        series={series}
+        detail={detail}
+        formulas={formulas}
+        note={note}
+        onSetNote={async (body) => {
+          // Optimistic: the note is free text the user just typed, and re-fetching the
+          // whole report to echo it back would blank the field mid-edit.
+          setNote(body);
+          if (period) await api.report.setNote.mutate({ clientId, period, body });
+        }}
+        rangeLabel={
+          printRange
+            ? `${formatPeriod(printRange.start)} – ${formatPeriod(printRange.end)}`
+            : null
+        }
+        onSetMetricValue={(id, raw) => setOverride("metric", id, raw)}
+        onSetAccountValue={(id, raw) => setOverride("account", id, raw)}
+        onSetFormula={setFormula}
+        onSetSeriesValue={setOverrideIn}
+        layout={layout}
+        paper={paper}
+      />
+    ) : null;
+
   return (
     <div className="space-y-4">
       {/* ------------------------------------------------------ page header */}
+      {/* Line one: who this is. */}
       <div className="no-print flex flex-wrap items-center gap-3">
         <ClientHeader
           client={client}
@@ -309,35 +423,58 @@ export function ClientDetailPage() {
           }
           onPatch={patchClient}
         />
+      </div>
 
-        {/* Report / Raw data toggle, at the top as specified. */}
-        <div className="inline-flex rounded-lg border border-line bg-surface p-0.5">
-          <button
-            onClick={() => setMode("report")}
-            aria-pressed={mode === "report"}
-            className={`inline-flex h-8 items-center gap-1.5 rounded-md px-3 text-[13px] font-medium transition-colors ${
-              mode === "report" ? "bg-ink text-white" : "text-ink-muted hover:text-ink"
-            }`}
-          >
-            <FileText size={14} />
-            Report
-          </button>
-          <button
-            onClick={() => setMode("raw")}
-            aria-pressed={mode === "raw"}
-            className={`inline-flex h-8 items-center gap-1.5 rounded-md px-3 text-[13px] font-medium transition-colors ${
-              mode === "raw" ? "bg-ink text-white" : "text-ink-muted hover:text-ink"
-            }`}
-          >
-            <Table2 size={14} />
-            Raw data
-          </button>
-        </div>
+      {/* Line two: the advisor's own working memory about them. */}
+      <StickyNotes
+        clientId={clientId}
+        legacyNote={client.notes}
+        onClearLegacy={() => patchClient("notes", null)}
+      />
+
+      {/*
+        Line three: what to do with the month, and how to look at it.
+
+        Left-indented and grouped: the four things that act on the data sit together, and
+        the choice of presentation sits apart from them on the right, because changing how
+        you are looking at something is a different kind of act from changing it.
+      */}
+      <div className="no-print flex flex-wrap items-center gap-2 pl-1">
+        {/*
+          Report / Raw data governs what the Standard view shows. In the Report and
+          Dashboard views there is nothing for it to switch, so it steps aside rather than
+          sitting there inert.
+        */}
+        {view === "standard" ? (
+          <div className="inline-flex rounded-lg border border-line bg-surface p-0.5">
+            <button
+              onClick={() => setMode("report")}
+              aria-pressed={mode === "report"}
+              className={`inline-flex h-8 items-center gap-1.5 rounded-md px-3 text-[13px] font-medium transition-colors ${
+                mode === "report" ? "bg-ink text-white" : "text-ink-muted hover:text-ink"
+              }`}
+            >
+              <FileText size={14} />
+              Report
+            </button>
+            <button
+              onClick={() => setMode("raw")}
+              aria-pressed={mode === "raw"}
+              className={`inline-flex h-8 items-center gap-1.5 rounded-md px-3 text-[13px] font-medium transition-colors ${
+                mode === "raw" ? "bg-ink text-white" : "text-ink-muted hover:text-ink"
+              }`}
+            >
+              <Table2 size={14} />
+              Raw data
+            </button>
+          </div>
+        ) : null}
 
         {periods.length > 0 ? (
           <select
             value={period ?? ""}
             onChange={(event) => setPeriod(event.target.value)}
+            aria-label="Period"
             className="h-9 rounded-lg border border-line bg-surface px-2.5 text-[13px] text-ink outline-none focus:border-accent"
           >
             {periods.map((p) => (
@@ -352,14 +489,29 @@ export function ClientDetailPage() {
           <Upload size={14} />
           Upload
         </Button>
-        <Button
-          variant="primary"
-          onClick={() => setExporting(true)}
-          disabled={!report}
-        >
+        <Button variant="primary" onClick={() => setExporting(true)} disabled={!report}>
           <Download size={14} />
           Download PDF
         </Button>
+
+        <div className="ml-auto flex items-center gap-2">
+          <label htmlFor="view-mode" className="text-[12px] text-ink-faint">
+            View
+          </label>
+          <select
+            id="view-mode"
+            value={view}
+            onChange={(event) => setView(event.target.value as ViewMode)}
+            title={VIEWS.find((entry) => entry.id === view)?.hint}
+            className="h-9 rounded-lg border border-line bg-surface px-2.5 text-[13px] font-medium text-ink outline-none focus:border-accent"
+          >
+            {VIEWS.map((entry) => (
+              <option key={entry.id} value={entry.id}>
+                {entry.label}
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
 
       {/* ------------------------------------------------------------ body */}
@@ -378,32 +530,23 @@ export function ClientDetailPage() {
         </Block>
       ) : !report ? (
         <Spinner label="Building report…" />
-      ) : mode === "report" ? (
-        <ReportView
+      ) : view === "dashboard" ? (
+        <Dashboard
           clientName={client.name}
-          legalName={client.legalName}
           report={report}
           series={series}
           detail={detail}
+          priorDetail={priorDetail}
           formulas={formulas}
-          note={note}
-          onSetNote={async (body) => {
-            // Optimistic: the note is free text the user just typed, and re-fetching the
-            // whole report to echo it back would blank the field mid-edit.
-            setNote(body);
-            if (period) await api.report.setNote.mutate({ clientId, period, body });
-          }}
-          rangeLabel={
-            printRange
-              ? `${formatPeriod(printRange.start)} – ${formatPeriod(printRange.end)}`
-              : null
-          }
-          onSetMetricValue={(id, raw) => setOverride("metric", id, raw)}
-          onSetAccountValue={(id, raw) => setOverride("account", id, raw)}
-          onSetFormula={setFormula}
-          onSetSeriesValue={setOverrideIn}
-          layout={layout}
         />
+      ) : view === "report" ? (
+        // The same component as the Standard view's report, on an A4 sheet. Not a second
+        // rendering — one component, one stylesheet, wearing the `.paper` root.
+        <div className="paper-frame">
+          {renderReport(true)}
+        </div>
+      ) : mode === "report" ? (
+        renderReport(false)
       ) : (
         <RawDataView
           report={report}

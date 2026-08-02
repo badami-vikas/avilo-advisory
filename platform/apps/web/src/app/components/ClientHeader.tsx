@@ -72,12 +72,15 @@ const FIELDS: Field[] = [
     parse: (raw) => MONTHS.indexOf(raw) + 1,
     placeholder: "January",
   },
-  {
-    id: "notes",
-    label: "Notes",
-    value: (c) => c.notes ?? "",
-    placeholder: "Add a note",
-  },
+  /*
+    No `notes` field here.
+
+    It was a single line in a row of metadata chips, which is the wrong shape for the
+    thing it held: an advisor's running thoughts about a client are many, dated, and
+    reordered. They live on the sticky-notes board below the header now — see
+    StickyNotes.tsx. The column is still in the schema and still carries whatever was
+    typed into it, so nothing written before this change was lost.
+  */
 ];
 
 export function ClientHeader({
