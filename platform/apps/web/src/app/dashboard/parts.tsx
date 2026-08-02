@@ -8,9 +8,10 @@
  */
 
 import { useEffect, useState, type ReactNode } from "react";
-import { ChevronDown, Info, Minus, TrendingDown, TrendingUp, X } from "lucide-react";
+import { ChevronDown, Info, Minus, TrendingDown, TrendingUp, Upload, X } from "lucide-react";
 
 import { Tip } from "../components/Tooltip.js";
+import { useUpload } from "../components/upload-context.js";
 import type { Movement, Severity } from "./insights.js";
 
 /* ----------------------------------------------------------------- panel */
@@ -32,6 +33,7 @@ export function Panel({
   children,
   defaultOpen = true,
   lead,
+  basis,
   /** Shown in the header when the section has a finding worth surfacing collapsed. */
   badge,
 }: {
@@ -51,6 +53,14 @@ export function Panel({
   defaultOpen?: boolean;
   /** A small visual immediately left of the badge — a gauge, a swatch. */
   lead?: ReactNode;
+  /**
+   * What period these figures cover, when it is not the selected month.
+   *
+   * The month picker moves the profit & loss. It does not move a balance, which is a
+   * date, or a customer ranking, which is a year. Sections whose basis differs say so in
+   * their own header rather than leaving the reader to infer it from the toolbar.
+   */
+  basis?: string;
   badge?: ReactNode;
 }) {
   const [open, setOpen] = useState(defaultOpen);
@@ -89,6 +99,11 @@ export function Panel({
             <p className="mt-0.5 text-[11.5px] text-ink-muted">{subtitle}</p>
           ) : null}
         </button>
+        {basis ? (
+          <span className="shrink-0 rounded-md border border-line bg-line-soft px-1.5 py-[2px] text-[10.5px] font-medium text-ink-muted">
+            {basis}
+          </span>
+        ) : null}
         {lead ? <div className="shrink-0">{lead}</div> : null}
         {badge ? <div className="shrink-0">{badge}</div> : null}
         {actions ? <div className="shrink-0">{actions}</div> : null}
@@ -295,11 +310,37 @@ export function SeverityChip({ severity }: { severity: Severity }) {
  * have imported yet. Saying which file turns a dead panel into a task.
  */
 export function NeedsData({ what, upload }: { what: string; upload: string }) {
-  return (
-    <div className="rounded-lg border border-dashed border-line bg-canvas px-4 py-6 text-center">
+  const openImporter = useUpload();
+
+  const body = (
+    <>
       <p className="text-[12.5px] font-medium text-ink">{what}</p>
-      <p className="mt-1 text-[12px] text-ink-muted">Import {upload} to fill this in.</p>
-    </div>
+      <p className="mt-1 text-[12px] text-ink-muted">
+        Import {upload} to fill this in.
+      </p>
+    </>
+  );
+
+  if (!openImporter) {
+    return (
+      <div className="rounded-lg border border-dashed border-line bg-canvas px-4 py-6 text-center">
+        {body}
+      </div>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={openImporter}
+      className="group flex w-full flex-col items-center rounded-lg border border-dashed border-line bg-canvas px-4 py-6 text-center transition-colors hover:border-accent hover:bg-accent-soft/40"
+    >
+      {body}
+      <span className="mt-2.5 inline-flex items-center gap-1.5 rounded-lg border border-line bg-surface px-2.5 py-1 text-[11.5px] font-medium text-ink-muted transition-colors group-hover:border-accent group-hover:text-accent">
+        <Upload size={12} />
+        Choose files
+      </span>
+    </button>
   );
 }
 

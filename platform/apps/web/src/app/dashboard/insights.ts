@@ -1250,6 +1250,27 @@ export function narrative(
   return beats;
 }
 
+/**
+ * The last day of a reporting month, spelled out.
+ *
+ * Every window on the dashboard ends here. A profit & loss covers the month up to this
+ * date, a balance is a photograph taken on it, a customer ranking looks back a year from
+ * it, and the projection starts from it. Stating the same date in every section's basis
+ * is what makes the one month picker in the toolbar mean something: it does not put every
+ * panel on the same window — it puts them all on the same *end*.
+ */
+export function periodEnd(period: string): string {
+  const [year, month] = period.split("-").map(Number);
+  if (!year || !month) return period;
+  // Day zero of the next month is the last day of this one.
+  return new Date(Date.UTC(year, month, 0)).toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+}
+
 /* -------------------------------------------------------------- helpers */
 
 function describeChange(m: Movement): string {

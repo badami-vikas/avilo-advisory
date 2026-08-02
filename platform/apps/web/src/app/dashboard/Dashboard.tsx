@@ -33,10 +33,12 @@ import {
   money,
   movement,
   narrative,
+  periodEnd,
   trailingMean,
   trendPct,
   valueAt,
   warnings as buildWarnings,
+  type Beat,
   type HealthDimension,
 } from "./insights.js";
 import { Radar, Sparkline, type RadarAxis } from "./charts.js";
@@ -65,7 +67,6 @@ const NAV = [
   { id: "payables", label: "Money you owe" },
   { id: "referrals", label: "Referrals" },
   { id: "forecast", label: "Thirteen weeks ahead" },
-  { id: "collections", label: "Collections planner" },
   { id: "goal", label: "What would it take?" },
   { id: "warnings", label: "Early warnings" },
   { id: "actions", label: "Actions" },
@@ -139,6 +140,17 @@ export function Dashboard({
     document.getElementById(section)?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
+  /*
+    One date for the whole page.
+
+    Every panel's window ends here — the month's profit & loss, the balances taken on its
+    last day, the year of customer billing behind it, the thirteen weeks after it. The
+    month picker in the toolbar moves this date, and each panel says how far back it
+    looks from it, which is what makes a single control legible across sections that
+    cannot all cover the same span.
+  */
+  const asAt = periodEnd(report.period);
+
   const hovered: HealthDimension | null =
     axis === null ? null : (health.dimensions[axis] ?? null);
   const story = hovered ? dimensionStory(hovered, report, series, detail) : null;
@@ -146,7 +158,18 @@ export function Dashboard({
   return (
     <div className="no-print flex gap-6">
       {/* ------------------------------------------------------------- nav */}
-      <nav className="sticky top-4 hidden h-fit w-[180px] shrink-0 lg:block">
+      {/*
+        The contents list scrolls in its own right rather than scrolling the document
+        behind it.
+
+        `self-start` is the load-bearing part. This is a flex row, and a flex item stretches
+        to the height of the row by default — which here is the height of the whole
+        dashboard, capped by the max-height. Stretched, the element is always taller than
+        its own contents, so it never has anything to scroll and the rule below did
+        nothing. Sized to its content, it scrolls exactly when the list is longer than the
+        window.
+      */}
+      <nav className="avilo-scroll sticky top-4 hidden max-h-[calc(100vh-2rem)] w-[180px] shrink-0 self-start overflow-y-auto overscroll-contain pb-2 pr-1 lg:block">
         <p className="mb-2 px-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-faint">
           On this page
         </p>
@@ -223,8 +246,8 @@ export function Dashboard({
                 onHover={setAxis}
                 active={axis}
               />
-              <p className="mt-1 text-center text-[11px] text-ink-faint">
-                Hover a point for what happened on that dimension.
+              <p className="text-center text-[11px] text-ink-faint">
+                Hover a label for what happened on that dimension.
               </p>
             </div>
 
@@ -232,81 +255,73 @@ export function Dashboard({
               {story && hovered ? (
                 <DimensionPanel dimension={hovered} story={story} />
               ) : (
-                /*
-                  The five-beat story as a brief, not a stack of headed cards: it reads as
-                  something a person wrote, which is the whole point of it being here
-                  rather than in a list of metrics.
-                */
-                <div className="space-y-2.5">
-                  {beats.map((beat) => (
-                    <p
-                      key={beat.id}
-                      className="text-[12.5px] leading-relaxed text-ink-muted"
-                    >
-                      <span className="font-medium text-ink">{beat.headline}.</span>{" "}
-                      {beat.body.join(" ")}
-                      {beat.links[0] ? (
-                        <button
-                          onClick={() => go(beat.links[0]!.section)}
-                          className="ml-1 inline-flex items-center gap-0.5 align-baseline text-[11.5px] font-medium text-accent hover:underline"
-                        >
-                          {beat.links[0].phrase}
-                          <ArrowRight size={10} />
-                        </button>
-                      ) : null}
-                    </p>
-                  ))}
-                </div>
+                <Brief beats={beats} onGo={go} />
               )}
             </div>
           </div>
         </section>
 
         {/* --- analysis */}
-        <GrowthSection
-          series={series}
-          detail={detail}
-          priorDetail={priorDetail}
-          periodLabel={report.periodLabel}
-        />
-        <GrowthQualitySection detail={detail} priorDetail={priorDetail} />
+        <GrowthSection clientId={clientId} series={series} asAt={asAt} />
+        <GrowthQualitySection detail={detail} priorDetail={priorDetail} asAt={asAt} />
         <ProfitabilitySection report={report} series={series} detail={detail} />
         <CashSection report={report} series={series} />
-        <CustomersSection detail={detail} onOpenCustomer={setCustomer} />
-        <AgingSection
-          id="receivables"
-          title="Money owed to you"
-          subtitle="Receivables by age, and who to chase first"
-          report={report}
-          prefix="ar"
-          rows={detail["ar_customer"] ?? []}
-          entityNoun="Customer"
-          reportName="A/R Ageing Summary"
-        />
-        <AgingSection
-          id="payables"
-          title="Money you owe"
-          subtitle="Payables by age, and what is holding up supplier goodwill"
-          report={report}
-          prefix="ap"
-          rows={detail["ap_vendor"] ?? []}
-          entityNoun="Vendor"
-          reportName="A/P Ageing Summary"
-        />
-        <ReferralsSection detail={detail} />
+        <CustomersSection detail={detail} onOpenCustomer={setCustomer} asAt={asAt} />
+        {/*
+          The two sides of working capital, side by side. They are read against each other
+          — what is owed to you against what you owe — and a page that puts one below the
+          other makes the comparison a scroll rather than a glance.
+        */}
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <AgingSection
+            id="receivables"
+            title="Money owed to you"
+            subtitle="Receivables by age, and who to chase first"
+            report={report}
+            prefix="ar"
+            rows={detail["ar_customer"] ?? []}
+            entityNoun="Customer"
+            reportName="A/R Ageing Summary"
+            compact
+          />
+          <AgingSection
+            id="payables"
+            title="Money you owe"
+            subtitle="Payables by age, and what is holding up supplier goodwill"
+            report={report}
+            prefix="ap"
+            rows={detail["ap_vendor"] ?? []}
+            entityNoun="Vendor"
+            reportName="A/P Ageing Summary"
+            compact
+          />
+        </div>
+        <ReferralsSection detail={detail} asAt={asAt} />
 
         {/* --- tools: the sections that answer a question rather than report one */}
-        <ForecastSection report={report} series={series} detail={detail} />
-        <CollectionsPlanner report={report} detail={detail} />
-        <GoalSeek report={report} series={series} />
+        <ForecastSection
+          report={report}
+          series={series}
+          detail={detail}
+          planner={(onCollected) => (
+            <CollectionsPlanner
+              report={report}
+              detail={detail}
+              embedded
+              onCollected={onCollected}
+            />
+          )}
+        />
+        <GoalSeek report={report} series={series} asAt={asAt} />
 
         {/* --- what to do */}
-        <WarningsSection warnings={warnings} onGo={go} />
+        <WarningsSection warnings={warnings} onGo={go} asAt={asAt} />
         <ActionsTable
           actions={actions}
           clientId={clientId}
           period={report.period}
           onGo={go}
+          asAt={asAt}
         />
       </div>
 
@@ -331,14 +346,57 @@ export function Dashboard({
   );
 }
 
+/* ------------------------------------------------------------------ brief */
+
+/**
+ * The month in five parts, written as prose rather than assembled as cards.
+ *
+ * The beats are the same five the engine produces — what happened, why, where the risk
+ * is, what happens next, what to do — but a reader does not want five headed fragments
+ * where a paragraph would do. They run together into two paragraphs: the month, then its
+ * consequences. The only interruption is the link out to the section that carries the
+ * working, and that sits at the end of the sentence it belongs to rather than in a row of
+ * buttons underneath.
+ */
+function Brief({ beats, onGo }: { beats: Beat[]; onGo: (section: string) => void }) {
+  const paragraphs: Beat[][] = [
+    beats.filter((beat) => beat.id === "what" || beat.id === "why"),
+    beats.filter((beat) => beat.id === "risk" || beat.id === "next" || beat.id === "act"),
+  ].filter((group) => group.length > 0);
+
+  return (
+    <div className="space-y-3">
+      {paragraphs.map((group, index) => (
+        <p key={index} className="text-[12.5px] leading-[1.65] text-ink-muted">
+          {group.map((beat) => (
+            <span key={beat.id}>
+              {beat.body.join(" ")}{" "}
+              {beat.links[0] ? (
+                <button
+                  onClick={() => onGo(beat.links[0]!.section)}
+                  className="mr-1 inline-flex items-center gap-0.5 align-baseline text-[11.5px] font-medium text-accent hover:underline"
+                >
+                  {beat.links[0].phrase}
+                  <ArrowRight size={10} />
+                </button>
+              ) : null}
+            </span>
+          ))}
+        </p>
+      ))}
+    </div>
+  );
+}
+
 /* ------------------------------------------------------------------ radar */
 
 /**
  * One health dimension as a radar axis: name, then its reading and quarterly movement.
  *
- * The caption is the second line of the axis label, which is what puts the score under
- * the name without a layer of absolutely-positioned HTML floating over a canvas that
- * reflows whenever the panel resizes.
+ * The 0–100 score is deliberately absent from the caption. It is a derived index, and
+ * printing it beside the measurement it was derived from invites the reader to compare
+ * two numbers that say the same thing. The score belongs with the explanation of how it
+ * was arrived at, which is the panel that opens when the reading is hovered.
  */
 function toAxis(dimension: HealthDimension): RadarAxis {
   const direction = dimensionDirection(dimension);
@@ -358,10 +416,7 @@ function toAxis(dimension: HealthDimension): RadarAxis {
   return {
     label: dimension.label,
     score: dimension.score,
-    caption:
-      dimension.score === null
-        ? "not scored"
-        : `${Math.round(dimension.score)} · ${reading}${change}`,
+    caption: dimension.score === null ? "not scored" : `${reading}${change}`,
     color: scoreColor(dimension.score),
   };
 }

@@ -10,7 +10,7 @@
  * print stylesheet scales canvases to the page and a fixed pixel width would run off it.
  */
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import Chart, { type ChartConfiguration, type ChartType } from "chart.js/auto";
 
 import { moneyFull } from "../../lib/format.js";
@@ -203,17 +203,27 @@ export function Sparkline({
 
 export interface RadarAxis {
   label: string;
-  /** 0–100. Null draws at zero and is greyed. */
+  /** 0–100. Null draws at zero and is greyed. Not printed — it belongs to the panel. */
   score: number | null;
-  /** Second line under the label — the measured value and its movement. */
+  /** The measured value and its movement, shown under the name on the plot label. */
   caption: string;
   /** Label colour, which is how the score is banded at a glance. */
   color: string;
 }
 
+/**
+ * The five dimensions as a shape, with a live reading on each of its own labels.
+ *
+ * The labels are HTML positioned over the canvas rather than text drawn inside it. A
+ * canvas point label cannot take a hover handler, a focus ring, two type sizes or a
+ * colour per line, and this one has to do all four — it carries the name, the reading and
+ * the quarterly movement, and hovering it is what swaps the panel beside the chart. The
+ * positions come from the radial scale itself, so they sit exactly where Chart.js would
+ * have drawn its own labels and follow the shape when the panel resizes.
+ */
 export function Radar({
   axes,
-  height = 300,
+  height = 320,
   onHover,
   active,
 }: {
@@ -221,64 +231,98 @@ export function Radar({
   height?: number;
   /** Fires with the axis index under the pointer, or null on leave. */
   onHover?: (index: number | null) => void;
-  /** Index to draw enlarged, so the panel beside the chart and the chart agree. */
+  /** Index to draw enlarged, so the label and the shape agree about what is being read. */
   active?: number | null;
 }) {
-  const ref = useChart({
-    type: "radar",
-    data: {
-      // Two lines per point: the dimension, then its reading. Chart.js renders an array
-      // of strings as stacked lines, which is what puts the score under the label
-      // without a second layer of absolutely-positioned HTML over the canvas.
-      labels: axes.map((axis) => [axis.label, axis.caption]),
-      datasets: [
-        {
-          data: axes.map((axis) => axis.score ?? 0),
-          backgroundColor: "rgba(21,112,239,0.14)",
-          borderColor: "#1570ef",
-          borderWidth: 2,
-          pointBackgroundColor: axes.map((axis) =>
-            axis.score === null ? "#d0d5dd" : axis.color,
-          ),
-          pointBorderColor: "#fff",
-          pointBorderWidth: 1.5,
-          pointRadius: axes.map((_, index) => (index === active ? 7 : 4)),
-          pointHoverRadius: 8,
-        },
-      ],
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-        legend: { display: false },
-        // The panel beside the chart says everything a tooltip would, in more detail
-        // and without covering the shape being read.
-        tooltip: { enabled: false },
-      },
-      onHover: (_event, elements) => {
-        onHover?.(elements.length > 0 ? (elements[0]?.index ?? null) : null);
-      },
-      scales: {
-        r: {
-          min: 0,
-          max: 100,
-          angleLines: { color: GRID },
-          grid: { color: GRID },
-          pointLabels: {
-            font: (context) =>
-              // The caption is the second line of each label; it gets the smaller size.
-              context.index === undefined
-                ? { size: 11 }
-                : { size: 11, weight: 500 },
-            color: (context) => axes[context.index]?.color ?? "#475467",
-            padding: 8,
+  const canvas = useRef<HTMLCanvasElement>(null);
+  const [points, setPoints] = useState<{ x: number; y: number }[]>([]);
+
+  // Serialised rather than by reference: `axes` is rebuilt on every render of the page
+  // above, and an effect keyed on the array itself would tear the chart down and put it
+  // back up sixty times a second.
+  const signature = JSON.stringify(axes);
+
+  useEffect(() => {
+    const element = canvas.current;
+    if (!element) return;
+
+    const chart = new Chart(element, {
+      type: "radar",
+      data: {
+        labels: axes.map((axis) => axis.label),
+        datasets: [
+          {
+            data: axes.map((axis) => axis.score ?? 0),
+            backgroundColor: "rgba(21,112,239,0.14)",
+            borderColor: "#1570ef",
+            borderWidth: 2,
+            pointBackgroundColor: axes.map((axis) =>
+              axis.score === null ? "#d0d5dd" : axis.color,
+            ),
+            pointBorderColor: "#fff",
+            pointBorderWidth: 1.5,
+            pointRadius: axes.map((_, index) => (index === active ? 7 : 4)),
+            pointHoverRadius: 8,
           },
-          ticks: { display: false, stepSize: 25 },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        // Room for the labels that are about to be placed around the shape.
+        layout: { padding: { top: 30, bottom: 30, left: 74, right: 74 } },
+        plugins: {
+          legend: { display: false },
+          // The labels and the panel beside the chart say everything a tooltip would,
+          // without covering the shape being read.
+          tooltip: { enabled: false },
+        },
+        scales: {
+          r: {
+            min: 0,
+            max: 100,
+            angleLines: { color: GRID },
+            grid: { color: GRID },
+            // Drawn as HTML instead — see the note on this component.
+            pointLabels: { display: false },
+            ticks: { display: false, stepSize: 25 },
+          },
         },
       },
-    },
-  });
+    });
+
+    const place = () => {
+      const scale = chart.scales["r"] as unknown as
+        | { drawingArea: number; getPointPosition: (i: number, d: number) => { x: number; y: number } }
+        | undefined;
+      if (!scale?.getPointPosition) return;
+      const next = axes.map((_, index) => {
+        const position = scale.getPointPosition(index, scale.drawingArea + 16);
+        return { x: Math.round(position.x), y: Math.round(position.y) };
+      });
+      setPoints((current) =>
+        current.length === next.length &&
+        current.every((point, i) => point.x === next[i]!.x && point.y === next[i]!.y)
+          ? current
+          : next,
+      );
+    };
+
+    place();
+    const frame = element.parentElement;
+    const observer = frame
+      ? new ResizeObserver(() => {
+          chart.resize();
+          place();
+        })
+      : null;
+    if (frame && observer) observer.observe(frame);
+
+    return () => {
+      observer?.disconnect();
+      chart.destroy();
+    };
+  }, [signature, height, active]);
 
   return (
     <div
@@ -286,9 +330,52 @@ export function Radar({
       style={{ height }}
       onMouseLeave={() => onHover?.(null)}
     >
-      <canvas ref={ref} />
+      <canvas ref={canvas} />
+
+      {points.map((point, index) => {
+        const axis = axes[index];
+        if (!axis) return null;
+        return (
+          <button
+            key={axis.label}
+            type="button"
+            onMouseEnter={() => onHover?.(index)}
+            onFocus={() => onHover?.(index)}
+            onClick={() => onHover?.(index)}
+            aria-pressed={index === active}
+            style={{ left: point.x, top: point.y }}
+            className={`absolute w-[124px] -translate-x-1/2 -translate-y-1/2 rounded-lg px-1 py-0.5 text-center transition-colors ${
+              index === active ? "bg-line-soft" : "hover:bg-line-soft/70"
+            }`}
+          >
+            <span className="block truncate text-[11px] font-medium text-ink">
+              {axis.label}
+            </span>
+            <span
+              className="num block text-[11px] font-semibold"
+              style={{ color: axis.score === null ? "#98a2b3" : axis.color }}
+            >
+              {axis.caption}
+            </span>
+          </button>
+        );
+      })}
     </div>
   );
+}
+
+/**
+ * A lighter step of a colour, for the segments of one measure.
+ *
+ * Segments of a single total are not five unrelated things — they are parts of one — so
+ * they are drawn as steps of that measure's own colour rather than pulled from a
+ * categorical palette. Mixing towards white keeps the hue and reads as one family.
+ */
+export function tint(hex: string, ratio: number): string {
+  const value = hex.replace("#", "");
+  const channel = (index: number) => parseInt(value.slice(index, index + 2), 16);
+  const mix = (component: number) => Math.round(component + (255 - component) * ratio);
+  return `rgb(${mix(channel(0))}, ${mix(channel(2))}, ${mix(channel(4))})`;
 }
 
 /* ------------------------------------------------------------ grouped bars */
@@ -305,11 +392,36 @@ export function GroupedBars({
   datasets,
   height = 260,
   currency = true,
+  onLegendClick,
+  stacked = false,
+  showLegend,
 }: {
   labels: string[];
-  datasets: { label: string; values: (number | null)[]; color: string }[];
+  datasets: {
+    label: string;
+    values: (number | null)[];
+    color: string;
+    /**
+     * Kept in the legend but off the plot.
+     *
+     * This is how a selection isolates: the measure that was not picked stops being drawn
+     * rather than being drawn faintly, so the axis rescales to what is actually being
+     * read. Its legend entry stays — struck through, in Chart.js's own idiom — which is
+     * what keeps it one click away and keeps multi-select reachable.
+     */
+    hidden?: boolean;
+  }[];
   height?: number;
   currency?: boolean;
+  /**
+   * Makes the legend the selector. Chart.js's own legend click hides a dataset, which is
+   * the opposite of what the growth section wants — there, a click picks a measure out.
+   */
+  onLegendClick?: (label: string) => void;
+  /** Segments of one total, stacked into a single bar per period. */
+  stacked?: boolean;
+  /** Defaults to showing a legend for more than one dataset. */
+  showLegend?: boolean;
 }) {
   const ref = useChart({
     type: "bar",
@@ -321,6 +433,7 @@ export function GroupedBars({
         backgroundColor: set.color,
         borderRadius: 3,
         borderSkipped: false as const,
+        hidden: set.hidden ?? false,
       })),
     },
     options: {
@@ -329,9 +442,12 @@ export function GroupedBars({
       interaction: { mode: "index", intersect: false },
       plugins: {
         legend: {
-          display: datasets.length > 1,
+          display: showLegend ?? datasets.length > 1,
           position: "bottom",
           labels: { boxWidth: 10, boxHeight: 10, font: { size: 11 }, padding: 12 },
+          onClick: onLegendClick
+            ? (_event, item) => onLegendClick(String(item.text))
+            : undefined,
         },
         tooltip: {
           // Every selected series for that month in one card, plus each one's share of
@@ -340,21 +456,29 @@ export function GroupedBars({
             label: (context) => {
               const value = context.parsed.y;
               if (value === null) return `${context.dataset.label}: —`;
-              const total = context.chart.data.datasets.reduce((sum, set) => {
+              // Only what is actually plotted counts towards the share — a hidden
+              // measure is not part of the comparison the reader is looking at.
+              const total = context.chart.data.datasets.reduce((sum, set, index) => {
+                if (!context.chart.isDatasetVisible(index)) return sum;
                 const point = (set.data as (number | null)[])[context.dataIndex];
                 return sum + Math.abs(point ?? 0);
               }, 0);
               const share = total === 0 ? 0 : (Math.abs(value) / total) * 100;
               return `${context.dataset.label}: ${
                 currency ? moneyFull(value) : `${value.toFixed(1)}%`
-              }${datasets.length > 1 ? `  (${share.toFixed(0)}% of selection)` : ""}`;
+              }${
+                datasets.length > 1
+                  ? `  (${share.toFixed(0)}% of ${stacked ? "the month" : "selection"})`
+                  : ""
+              }`;
             },
           },
         },
       },
       scales: {
-        x: { grid: { display: false }, ticks: AXIS },
+        x: { stacked, grid: { display: false }, ticks: AXIS },
         y: {
+          stacked,
           grace: "8%",
           grid: { color: GRID },
           border: { display: false },
@@ -479,6 +603,8 @@ export function TrendLine({
   datasets,
   height = 230,
   currency = true,
+  onLegendClick,
+  showLegend,
 }: {
   labels: string[];
   datasets: {
@@ -490,6 +616,16 @@ export function TrendLine({
   }[];
   height?: number;
   currency?: boolean;
+  /** See `GroupedBars` — a click picks the measure out rather than hiding it. */
+  onLegendClick?: (label: string) => void;
+  /**
+   * Defaults to showing a legend for more than one series.
+   *
+   * Set false where the section carries its own legend. Two legends for one chart is
+   * bad enough; a canvas legend whose click strikes a series out, sitting above an HTML
+   * legend whose click selects one, is two controls that disagree.
+   */
+  showLegend?: boolean;
 }) {
   const ref = useChart({
     type: "line",
@@ -514,9 +650,12 @@ export function TrendLine({
       interaction: { mode: "index", intersect: false },
       plugins: {
         legend: {
-          display: datasets.length > 1,
+          display: showLegend ?? datasets.length > 1,
           position: "bottom",
           labels: { boxWidth: 10, boxHeight: 10, font: { size: 11 }, padding: 12 },
+          onClick: onLegendClick
+            ? (_event, item) => onLegendClick(String(item.text))
+            : undefined,
         },
       },
       scales: {

@@ -28,7 +28,6 @@ const COLUMNS: ColumnSpec[] = [
   { id: "grossMarginPct", label: "Gross margin", kind: "number", format: "percent", editable: true, width: 130 },
   { id: "noiMarginPct", label: "NOI margin", kind: "number", format: "percent", editable: true, width: 120 },
   { id: "daysCashOnHand", label: "Days cash", kind: "number", editable: true, width: 110 },
-  { id: "owner", label: "Owner", kind: "text", editable: true, width: 140 },
   // Stored on every client and, until now, typeable nowhere. Present here so a client
   // added from this table can be filled in without leaving it.
   { id: "legalName", label: "Legal name", kind: "text", editable: true, width: 180 },
@@ -324,18 +323,6 @@ export function ClientsPage() {
             <span className="text-ink-faint">—</span>
           ),
       },
-      owner: {
-        value: (row) => row.owner ?? "",
-        editValue: (row) => row.owner ?? "",
-        onEdit: (row, next) => patch(row, "owner", next),
-        tip: () => "Double-click to assign an owner",
-        render: (row) =>
-          row.owner ? (
-            <span className="text-ink-muted">{row.owner}</span>
-          ) : (
-            <span className="text-ink-faint">—</span>
-          ),
-      },
       data: {
         value: (row) =>
           !row.latestPeriod
@@ -371,7 +358,7 @@ export function ClientsPage() {
     if (!rows) return [];
     const searched = search.trim()
       ? rows.filter((row) =>
-          [row.name, row.stage, row.owner ?? ""]
+          [row.name, row.stage]
             .join(" ")
             .toLowerCase()
             .includes(search.trim().toLowerCase()),
@@ -456,8 +443,6 @@ export function ClientsPage() {
         search={search}
         onSearchChange={setSearch}
         searchPlaceholder="Search clients…"
-        onAdd={addClient}
-        addLabel="Add Client"
         filterOpen={openFilter}
         onFilterOpenChange={setOpenFilter}
         viewMode={viewMode}
@@ -508,7 +493,6 @@ export function ClientsPage() {
               { id: "grossMarginPct", label: "Gross margin" },
               { id: "noiMarginPct", label: "NOI margin" },
               { id: "daysCashOnHand", label: "Days cash" },
-              { id: "owner", label: "Owner" },
               { id: "data", label: "Data" },
             ]}
             onAddRow={addClient}

@@ -6,9 +6,10 @@
  * what the picture shows, derived from the same numbers that drew it.
  */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { ArrowRight, ChevronRight } from "lucide-react";
 
+import { api } from "../../lib/trpc.js";
 import { moneyFull, percent } from "../../lib/format.js";
 import { Tip } from "../components/Tooltip.js";
 import type { DetailByKind, DetailRow, PeriodReport, SeriesPoint } from "../types.js";
@@ -21,6 +22,7 @@ import {
   money,
   movement,
   movements,
+  periodEnd,
   trailingMean,
   trendPct,
   type Action,
@@ -34,6 +36,7 @@ import {
   Gauge,
   GroupedBars,
   Pareto,
+  tint,
   TrendLine,
   Waterfall,
 } from "./charts.js";
@@ -42,110 +45,260 @@ import { Finding, NeedsData, Panel, SeverityChip } from "./parts.js";
 /* -------------------------------------------------------- series explorer */
 
 /**
- * Every series the trend chart can draw, and what a breakdown of it looks like.
+ * The two measures the section plots, and what decomposes each of them.
  *
- * `breakdown` names the detail rows that decompose the series for the selected month.
- * Not every series has one — operating income is an arithmetic result rather than a sum
- * of lines — and the section says so rather than showing an empty strip.
+ * `breakdown` names the kind of detail row that adds up to the measure. `components`
+ * covers the measures that are arithmetic rather than a sum of ledger lines.
+ *
+ * Operating income needed care here. Its inputs are revenue, cost of sales and overhead,
+ * but those do not *stack* into it — revenue is not a part of profit, and a bar drawn
+ * from all three would total something that is not a figure at all. What does stack is
+ * the month's revenue split into where it went: cost of sales, overhead, and whatever
+ * survived as operating income on top. Same three numbers, an arithmetic that holds.
  */
 const SERIES = [
-  { id: "pl.revenue", label: "Revenue", color: "#1570ef", breakdown: "pl_income" },
-  { id: "pl.cogs", label: "Cost of sales", color: "#f79009", breakdown: null },
-  { id: "pl.overhead", label: "Overhead", color: "#e8734a", breakdown: "pl_expense" },
-  { id: "gross_profit", label: "Gross profit", color: "#12b76a", breakdown: null },
-  { id: "net_operating_income", label: "Operating income", color: "#7a5af8", breakdown: null },
+  {
+    id: "pl.revenue",
+    label: "Revenue",
+    color: "#1570ef",
+    breakdown: "pl_income",
+    components: null,
+    componentNote: null,
+  },
+  {
+    id: "net_operating_income",
+    label: "Operating income",
+    color: "#7a5af8",
+    breakdown: null,
+    components: [
+      { id: "pl.cogs", label: "Cost of sales" },
+      { id: "pl.overhead", label: "Overhead" },
+      { id: "net_operating_income", label: "Operating income" },
+    ],
+    componentNote:
+      "Each bar is the month's revenue, split into what it cost to deliver, what it cost to run the business, and what was left as operating income on top. Hover a bar for the amounts and each part's share.",
+  },
 ] as const;
 
 type SeriesId = (typeof SERIES)[number]["id"];
 
+/** At most this many named segments; the rest are summed into one. */
+const MAX_SEGMENTS = 6;
+
+/**
+ * The colour of one segment.
+ *
+ * Line detail is ranked largest first, so the ramp runs dark to light and the biggest
+ * line is the strongest. A computed measure is stacked with the measure itself on top,
+ * so the ramp runs the other way and the figure the reader picked keeps full colour.
+ */
+function segmentColor(base: string, index: number, count: number, subjectLast: boolean) {
+  const step = index / Math.max(1, count - 1);
+  return tint(base, (subjectLast ? 1 - step : step) * 0.72);
+}
+
 export function GrowthSection({
+  clientId,
   series,
-  detail,
-  priorDetail,
-  periodLabel,
+  asAt,
 }: {
+  clientId: string;
   series: SeriesPoint[];
-  detail: DetailByKind;
-  priorDetail: DetailByKind;
-  periodLabel: string;
+  /** The date every window on the page ends on. */
+  asAt: string;
 }) {
   /**
-   * Which series are picked out. Empty is the resting state, not a filter that has
-   * removed everything — the chart shows all of them, as a trend.
+   * Which measures are picked out. Empty is the resting state, not a filter that has
+   * removed everything — the chart shows both, as a trend.
    */
   const [selected, setSelected] = useState<SeriesId[]>([]);
+  /** Line detail for every month, fetched only when a measure that has some is picked. */
+  const [lines, setLines] = useState<Record<string, DetailRow[]> | null>(null);
+  const [loadingLines, setLoadingLines] = useState(false);
+
   const labels = series.map((point) => point.periodLabel);
   const revenue = movement(series, "pl.revenue");
   const slope = trendPct(series, "pl.revenue", 6);
+
+  const chosen = SERIES.filter((entry) => selected.includes(entry.id));
+  const isolated = chosen.length === 1 ? chosen[0]! : null;
+  const kind = isolated?.breakdown ?? null;
+
+  /*
+    The month-by-month line detail behind the isolated measure. Fetched here rather than
+    handed down from the page: nothing else on the dashboard needs it, and a page that
+    loaded every line of every month up front would pay for a chart most sessions never
+    open.
+  */
+  useEffect(() => {
+    if (!kind) {
+      setLines(null);
+      return;
+    }
+    let live = true;
+    setLoadingLines(true);
+    void api.report.detailSeries
+      .query({ clientId, kind })
+      .then((result) => {
+        if (live) setLines(result);
+      })
+      .finally(() => {
+        if (live) setLoadingLines(false);
+      });
+    return () => {
+      live = false;
+    };
+  }, [clientId, kind]);
 
   const toggle = (id: SeriesId) =>
     setSelected((current) =>
       current.includes(id) ? current.filter((x) => x !== id) : [...current, id],
     );
 
-  const chosen = SERIES.filter((entry) => selected.includes(entry.id));
+  /**
+   * The isolated measure as its parts, one stacked dataset per part.
+   *
+   * Two sources, one shape. A measure with imported line detail is stacked from those
+   * lines; a computed one is stacked from the totals it is computed from. Either way the
+   * segments are drawn inside the bars themselves, so the composition is read off the
+   * same shape as the level rather than off a second picture below it.
+   */
+  const segments = useMemo(() => {
+    if (!isolated) return null;
 
-  /*
-    The composition of a single selected series for the month on screen, with each line's
-    movement against last month. This is what replaced the standalone revenue waterfall:
-    the same decomposition, reached by selecting the series it decomposes rather than
-    printed unconditionally further down the page.
-  */
-  const composition = (() => {
-    if (chosen.length !== 1) return null;
-    const entry = chosen[0]!;
-    if (!entry.breakdown) {
-      return { entry, rows: [], unavailable: `${entry.label} is a computed result, not a sum of lines — there is nothing to break down.` };
+    if (isolated.components) {
+      const parts = isolated.components.map((component) => ({
+        label: component.label,
+        values: series.map((point) => {
+          const value = point.values[component.id];
+          if (value === null || value === undefined) return null;
+          // The costs are magnitudes; the measure itself keeps its sign, so a month that
+          // lost money stacks below the axis instead of being drawn as profit.
+          return component.id === isolated.id ? value : Math.abs(value);
+        }),
+      }));
+      return parts.some((part) => part.values.some((v) => v !== null))
+        ? { parts, months: series.length, note: null }
+        : { parts: [], months: 0, note: `The totals behind ${isolated.label.toLowerCase()} have not been imported.` };
     }
-    const rows = (detail[entry.breakdown] ?? []).filter((row) => Math.abs(row.value) > 0);
-    if (rows.length === 0) {
-      return { entry, rows: [], unavailable: `No line detail was imported for ${entry.label.toLowerCase()} this period.` };
+
+    if (!lines) return null;
+
+    // Rank the lines by what they add up to across every month, so the same line keeps
+    // the same colour from month to month and the small ones collapse together.
+    const totals = new Map<string, number>();
+    for (const rows of Object.values(lines)) {
+      for (const row of rows) {
+        const label = row.label.trim();
+        totals.set(label, (totals.get(label) ?? 0) + Math.abs(row.value));
+      }
     }
-    const priorRows = new Map(
-      (priorDetail[entry.breakdown] ?? []).map((row) => [row.label, row.value]),
-    );
-    const total = rows.reduce((sum, row) => sum + Math.abs(row.value), 0);
-    return {
-      entry,
-      unavailable: null,
-      rows: rows
-        .map((row) => ({
-          label: row.label.trim(),
-          value: Math.abs(row.value),
-          share: (Math.abs(row.value) / total) * 100,
-          change: Math.abs(row.value) - Math.abs(priorRows.get(row.label) ?? 0),
-          isNew: !priorRows.has(row.label),
-        }))
-        .sort((a, b) => b.value - a.value),
+    const ranked = [...totals.entries()]
+      .filter(([, total]) => total > 0)
+      .sort((a, b) => b[1] - a[1])
+      .map(([label]) => label);
+
+    const monthsWithDetail = series.filter(
+      (point) => (lines[point.period] ?? []).length > 0,
+    ).length;
+
+    if (ranked.length === 0 || monthsWithDetail === 0) {
+      return {
+        parts: [],
+        months: 0,
+        note: `No line detail has been imported for ${isolated.label.toLowerCase()} in any month.`,
+      };
+    }
+
+    const named = ranked.slice(0, MAX_SEGMENTS);
+    const rest = ranked.slice(MAX_SEGMENTS);
+
+    const sumFor = (period: string, want: string[]) => {
+      const rows = lines[period] ?? [];
+      // Null, not zero, where the month carries no detail: an unimported month is not a
+      // month in which nothing was billed.
+      if (rows.length === 0) return null;
+      return rows
+        .filter((row) => want.includes(row.label.trim()))
+        .reduce((sum, row) => sum + Math.abs(row.value), 0);
     };
-  })();
+
+    const parts = named.map((label) => ({
+      label,
+      values: series.map((point) => sumFor(point.period, [label])),
+    }));
+    if (rest.length > 0) {
+      parts.push({
+        label: `${rest.length} smaller line${rest.length === 1 ? "" : "s"}`,
+        values: series.map((point) => sumFor(point.period, rest)),
+      });
+    }
+
+    return {
+      parts,
+      months: monthsWithDetail,
+      note:
+        monthsWithDetail < series.length
+          ? `${monthsWithDetail} of ${series.length} months carry line detail; the rest were imported as a total only.`
+          : null,
+    };
+  }, [isolated, lines, series]);
+
+  const showSegments = Boolean(isolated && segments && segments.parts.length > 0);
 
   return (
     <Panel
       id="growth"
       title="Growth and its quality"
-      subtitle="Click a measure to isolate it. Pick more than one to compare them month by month."
+      subtitle="Revenue and operating income, month by month"
+      basis={`12 months to ${asAt}`}
       summary={
         revenue.direction === "unknown"
           ? "Only one month imported — no movement to describe yet."
           : `Revenue ${revenue.direction === "flat" ? "held level" : `moved ${money(revenue.change)}`} on the month${slope === null ? "" : `, ${Math.abs(slope) < 1 ? "flat" : slope > 0 ? "rising" : "falling"} over six`}.`
       }
     >
+      {/*
+        One chart, three states. Nothing picked draws both measures as a trend; one picked
+        draws that measure alone, stacked into the lines it is made of; both picked draws
+        them side by side to compare. The legend below is the control for all three, and
+        it is HTML rather than the canvas's own legend — Chart.js's legend click hides a
+        dataset and strikes it through, which reads as "you turned that off" when the
+        intent is "show me this one".
+      */}
       {chosen.length === 0 ? (
         <TrendLine
           labels={labels}
-          datasets={SERIES.filter((entry) =>
-            ["pl.revenue", "net_operating_income"].includes(entry.id),
-          ).map((entry) => ({
+          showLegend={false}
+          datasets={SERIES.map((entry) => ({
             label: entry.label,
             values: series.map((p) => p.values[entry.id] ?? null),
             color: entry.color,
             fill: entry.id === "pl.revenue",
           }))}
         />
+      ) : showSegments ? (
+        <GroupedBars
+          labels={labels}
+          stacked
+          showLegend={false}
+          datasets={segments!.parts.map((part, index) => ({
+            label: part.label,
+            values: part.values,
+            // Steps of the measure's own colour: these are parts of one total, not
+            // competing categories.
+            color: segmentColor(
+              isolated!.color,
+              index,
+              segments!.parts.length,
+              Boolean(isolated!.components),
+            ),
+          }))}
+        />
       ) : (
         <GroupedBars
           labels={labels}
+          showLegend={false}
           datasets={chosen.map((entry) => ({
             label: entry.label,
             values: series.map((p) => p.values[entry.id] ?? null),
@@ -154,12 +307,8 @@ export function GrowthSection({
         />
       )}
 
-      {/*
-        The selector, below the chart where a legend would be — because it *is* the
-        legend, with the click doing something. Selecting is highlighting rather than
-        filtering: an unselected measure is dimmed, never hidden from the list.
-      */}
-      <div className="mt-3 flex flex-wrap items-center gap-1.5">
+      {/* --- the legend, which is also the selector */}
+      <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1.5">
         {SERIES.map((entry) => {
           const on = selected.includes(entry.id);
           const present = series.some((p) => p.values[entry.id] !== null);
@@ -167,33 +316,33 @@ export function GrowthSection({
             <Tip
               key={entry.id}
               content={
-                present
-                  ? on
-                    ? `Showing ${entry.label} as bars. Click to put it back in the trend.`
-                    : `Isolate ${entry.label}${entry.breakdown ? " and see what it is made of" : ""}.`
-                  : `${entry.label} has not been imported for any month yet.`
+                !present
+                  ? `${entry.label} has not been imported for any month yet.`
+                  : on
+                    ? `Showing ${entry.label.toLowerCase()}. Click to put it back in the trend.`
+                    : `Show ${entry.label.toLowerCase()} on its own, broken into what it is made of.`
               }
             >
               <button
                 onClick={() => present && toggle(entry.id)}
                 disabled={!present}
                 aria-pressed={on}
-                className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[12px] font-medium transition-all disabled:opacity-40 ${
+                className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11.5px] font-medium transition-all disabled:opacity-40 ${
                   on
-                    ? "border-transparent text-white shadow-[0_1px_2px_rgba(16,24,40,0.12)]"
-                    : "border-line bg-surface text-ink-muted hover:border-ink-faint hover:text-ink"
+                    ? "border-ink/15 bg-line-soft text-ink"
+                    : "border-transparent text-ink-muted hover:bg-line-soft/70 hover:text-ink"
                 }`}
-                style={on ? { background: entry.color } : undefined}
               >
                 <span
-                  className="h-2 w-2 rounded-full"
-                  style={{ background: on ? "#fff" : entry.color }}
+                  className="h-2.5 w-2.5 rounded-full"
+                  style={{ background: entry.color, opacity: on ? 1 : 0.45 }}
                 />
                 {entry.label}
               </button>
             </Tip>
           );
         })}
+
         {selected.length > 0 ? (
           <button
             onClick={() => setSelected([])}
@@ -204,18 +353,54 @@ export function GrowthSection({
         ) : null}
       </div>
 
-      {composition ? (
-        <div className="mt-4">
-          <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.06em] text-ink-faint">
-            {composition.entry.label} — what it is made of, {periodLabel}
-          </p>
-          {composition.unavailable ? (
-            <p className="text-[12px] text-ink-faint">{composition.unavailable}</p>
+      {/* --- what the segments are, when the bars carry them */}
+      {isolated ? (
+        <div className="mt-2">
+          {loadingLines ? (
+            <p className="text-[11.5px] text-ink-faint">Reading the line detail…</p>
+          ) : showSegments ? (
+            <>
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                {segments!.parts.map((part, index) => (
+                  <span
+                    key={part.label}
+                    className="inline-flex items-center gap-1.5 text-[11px] text-ink-muted"
+                  >
+                    <span
+                      className="h-2 w-2 rounded-[3px]"
+                      style={{
+                        background: segmentColor(
+                          isolated.color,
+                          index,
+                          segments!.parts.length,
+                          Boolean(isolated.components),
+                        ),
+                      }}
+                    />
+                    {part.label}
+                  </span>
+                ))}
+              </div>
+              <p className="mt-1 text-[11px] leading-relaxed text-ink-faint">
+                {isolated.componentNote ??
+                  `Each bar is ${isolated.label.toLowerCase()} for that month, stacked into the lines it is made of. Hover a bar for the amounts and each line's share.`}
+                {segments!.note ? ` ${segments!.note}` : ""}
+              </p>
+            </>
           ) : (
-            <Composition rows={composition.rows} color={composition.entry.color} />
+            <p className="text-[11.5px] text-ink-faint">
+              {segments?.note ??
+                `No line detail is available for ${isolated.label.toLowerCase()}, so the bars show the total only.`}
+            </p>
           )}
         </div>
-      ) : null}
+      ) : (
+        <p className="mt-2 text-[11.5px] text-ink-faint">
+          {selected.length === 0
+            ? "Click a measure to show it on its own, broken into what it is made of. Pick both to compare them month by month."
+            : "Both measures, side by side. Drop one to see the other broken into its parts."}
+        </p>
+      )}
 
       <Finding>
         {revenue.direction === "unknown" ? (
@@ -236,75 +421,6 @@ export function GrowthSection({
         )}
       </Finding>
     </Panel>
-  );
-}
-
-/**
- * A single stacked bar of the lines that make up a measure, with the detail on hover.
- *
- * One bar rather than a table because the question is proportion — which line *is* this
- * month — and a table of five numbers makes the reader do the division. The hover carries
- * the arithmetic the bar cannot: the amount, the share, and what it did since last month.
- */
-function Composition({
-  rows,
-  color,
-}: {
-  rows: { label: string; value: number; share: number; change: number; isNew: boolean }[];
-  color: string;
-}) {
-  const [hover, setHover] = useState<string | null>(null);
-  const active = rows.find((row) => row.label === hover) ?? null;
-
-  return (
-    <div>
-      <div className="flex h-7 w-full overflow-hidden rounded-lg border border-line">
-        {rows.map((row, index) => (
-          <button
-            key={row.label}
-            onMouseEnter={() => setHover(row.label)}
-            onMouseLeave={() => setHover(null)}
-            aria-label={`${row.label}: ${moneyFull(row.value)}`}
-            className="h-full border-r border-white/70 transition-opacity last:border-r-0"
-            style={{
-              width: `${row.share}%`,
-              background: color,
-              // Successive segments step down in weight so adjacent lines stay
-              // distinguishable without five arbitrary colours.
-              opacity: hover === null ? 1 - index * 0.13 : hover === row.label ? 1 : 0.25,
-            }}
-          />
-        ))}
-      </div>
-
-      <div className="mt-2 min-h-[34px]">
-        {active ? (
-          <p className="text-[12.5px] text-ink">
-            <span className="font-medium">{active.label}</span> — {moneyFull(active.value)},{" "}
-            {active.share.toFixed(1)}% of the total.{" "}
-            {active.isNew ? (
-              <span className="text-positive">New this month.</span>
-            ) : Math.abs(active.change) < 1 ? (
-              <span className="text-ink-muted">Unchanged on last month.</span>
-            ) : (
-              <span className={active.change > 0 ? "text-positive" : "text-flag"}>
-                {active.change > 0 ? "Up" : "Down"} {moneyFull(Math.abs(active.change))} on
-                last month.
-              </span>
-            )}
-          </p>
-        ) : (
-          <p className="flex flex-wrap gap-x-3 gap-y-1 text-[11.5px] text-ink-faint">
-            {rows.slice(0, 6).map((row) => (
-              <span key={row.label}>
-                {row.label} {row.share.toFixed(0)}%
-              </span>
-            ))}
-            <span className="italic">Hover a segment for the detail.</span>
-          </p>
-        )}
-      </div>
-    </div>
   );
 }
 
@@ -340,6 +456,7 @@ export function ProfitabilitySection({
       id="profitability"
       title="Profitability"
       subtitle="What is kept from what is billed"
+      basis={`Month to ${periodEnd(report.period)}`}
       summary={
         grossTrend === null
           ? "Six months of history are needed before a direction can be called."
@@ -484,6 +601,7 @@ export function CashSection({
       id="cash"
       title="Profit into cash"
       subtitle="What the month earned against what it banked"
+      basis={`Month to ${periodEnd(report.period)}`}
       summary={
         conversion === null
           ? "Needs a second month of ageing data before profit can be traced into cash."
@@ -583,9 +701,11 @@ export function CashSection({
 export function CustomersSection({
   detail,
   onOpenCustomer,
+  asAt,
 }: {
   detail: DetailByKind;
   onOpenCustomer: (label: string) => void;
+  asAt: string;
 }) {
   const sales = detail["customer_sales"] ?? [];
   const receivable = detail["ar_customer"] ?? [];
@@ -593,7 +713,7 @@ export function CustomersSection({
 
   if (conc.rows.length === 0) {
     return (
-      <Panel id="customers" title="Customer economics" subtitle="Who the business runs on">
+      <Panel id="customers" title="Customer economics" subtitle="Who the business runs on" basis={`12 months to ${asAt}`}>
         <NeedsData what="No customer revenue imported" upload="a Sales by Customer export" />
       </Panel>
     );
@@ -624,6 +744,7 @@ export function CustomersSection({
       id="customers"
       title="Customer economics"
       subtitle="Who the business runs on, and how exposed that makes it"
+      basis={`12 months to ${asAt}`}
       summary={`${conc.rows[0]?.label} is ${conc.topShare?.toFixed(0)}% of revenue; ${conc.customersTo80} customer${conc.customersTo80 === 1 ? "" : "s"} make up 80%.`}
       badge={
         conc.topShare !== null && conc.topShare > 30 ? (
@@ -710,6 +831,7 @@ export function AgingSection({
   rows,
   entityNoun,
   reportName,
+  compact = false,
 }: {
   id: string;
   title: string;
@@ -719,13 +841,16 @@ export function AgingSection({
   rows: DetailRow[];
   entityNoun: string;
   reportName: string;
+  /** Half-width, beside its opposite number — the ring goes above the list, not beside it. */
+  compact?: boolean;
 }) {
   const distribution = agingDistribution(report, prefix);
   const priority = collectionPriority(rows);
+  const asAtLabel = `As at ${periodEnd(report.period)}`;
 
   if (distribution.slices.length === 0 && priority.length === 0) {
     return (
-      <Panel id={id} title={title} subtitle={subtitle}>
+      <Panel id={id} title={title} subtitle={subtitle} basis={asAtLabel}>
         <NeedsData what={`No ${entityNoun.toLowerCase()} balances imported`} upload={`an ${reportName}`} />
       </Panel>
     );
@@ -736,6 +861,7 @@ export function AgingSection({
       id={id}
       title={title}
       subtitle={subtitle}
+      basis={asAtLabel}
       summary={
         distribution.overdueShare === null
           ? `${money(distribution.total)} outstanding.`
@@ -747,7 +873,11 @@ export function AgingSection({
         ) : null
       }
     >
-      <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
+      <div
+        className={`grid grid-cols-1 gap-5 ${
+          compact ? "" : "lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]"
+        }`}
+      >
         <div>
           {distribution.slices.length > 0 ? (
             <Donut
@@ -813,13 +943,19 @@ export function AgingSection({
 
 /* ------------------------------------------------------------ referrals */
 
-export function ReferralsSection({ detail }: { detail: DetailByKind }) {
+export function ReferralsSection({
+  detail,
+  asAt,
+}: {
+  detail: DetailByKind;
+  asAt: string;
+}) {
   const rows = (detail["referral_partner"] ?? []).filter((row) => row.value > 0);
   const [open, setOpen] = useState<string | null>(null);
 
   if (rows.length === 0) {
     return (
-      <Panel id="referrals" title="Referral to cash" subtitle="Where the work comes from">
+      <Panel id="referrals" title="Referral to cash" subtitle="Where the work comes from" basis={`90 days to ${asAt}`}>
         <NeedsData what="No referral data imported" upload="a Referral report" />
       </Panel>
     );
@@ -832,7 +968,8 @@ export function ReferralsSection({ detail }: { detail: DetailByKind }) {
     <Panel
       id="referrals"
       title="Referral to cash"
-      subtitle="Where the work comes from — last ninety days"
+      subtitle="Where the work comes from"
+      basis={`90 days to ${asAt}`}
       summary={`${sorted[0]?.label} is ${(((sorted[0]?.value ?? 0) / total) * 100).toFixed(0)}% of ${money(total)} referred across ${sorted.length} source${sorted.length === 1 ? "" : "s"}.`}
     >
       <div className="space-y-1.5">
@@ -938,11 +1075,21 @@ export function ForecastSection({
   report,
   series,
   detail,
+  planner,
 }: {
   report: PeriodReport;
   series: SeriesPoint[];
   detail: DetailByKind;
+  /**
+   * The collections planner, rendered inside this panel.
+   *
+   * Chasing an invoice is not a separate subject from the thirteen-week projection — it
+   * is the fastest lever on it. The parent passes the planner in and is told what the
+   * ticked accounts release, so the projection can draw the same money arriving.
+   */
+  planner?: (onCollected: (amount: number) => void) => ReactNode;
 }) {
+  const [collected, setCollected] = useState(0);
   const [assumptions, setAssumptions] = useState<ForecastAssumptions>({
     revenueChangePct: 0,
     costChangePct: 0,
@@ -956,7 +1103,12 @@ export function ForecastSection({
 
   if (base.unavailable) {
     return (
-      <Panel id="forecast" title="Thirteen weeks ahead" subtitle="Cash, projected">
+      <Panel
+        id="forecast"
+        title="Thirteen weeks ahead"
+        subtitle="Cash, projected"
+        basis={`13 weeks from ${periodEnd(report.period)}`}
+      >
         <NeedsData what={base.unavailable} upload="a Balance Sheet and Profit & Loss" />
       </Panel>
     );
@@ -967,6 +1119,7 @@ export function ForecastSection({
       id="forecast"
       title="Thirteen weeks ahead"
       subtitle="Cash on the current run rate, and what would break it"
+      basis={`13 weeks from ${periodEnd(report.period)}`}
       summary={
         base.breachWeek === null
           ? `Stays positive, with a low point of ${money(base.low)}.`
@@ -983,6 +1136,23 @@ export function ForecastSection({
             color: base.breachWeek === null ? "#1570ef" : "#d92d20",
             fill: true,
           },
+          /*
+            The second line only exists once something has been ticked below. It is the
+            same projection with the collected money arriving in week two — soon, but not
+            instantly, because a call made today is not cash in the account tomorrow.
+          */
+          ...(collected > 0
+            ? [
+                {
+                  label: "With the collections below",
+                  values: base.weeks.map((week, index) =>
+                    week.cash === null ? null : index >= 1 ? week.cash + collected : week.cash,
+                  ),
+                  color: "#12b76a",
+                  dashed: true,
+                },
+              ]
+            : []),
         ]}
         height={220}
       />
@@ -1064,6 +1234,19 @@ export function ForecastSection({
         </div>
       </div>
 
+      {planner ? (
+        <div className="mt-6 border-t border-line-soft pt-4">
+          <p className="text-[12.5px] font-semibold text-ink">
+            What would collecting change?
+          </p>
+          <p className="mb-3 mt-0.5 text-[11.5px] text-ink-muted">
+            Tick the accounts you expect to collect. The projection above gains a second
+            line with that money arriving in week two.
+          </p>
+          {planner(setCollected)}
+        </div>
+      ) : null}
+
       <Finding>
         {base.breachWeek === null ? (
           <>
@@ -1124,15 +1307,18 @@ function Slider({
 export function WarningsSection({
   warnings,
   onGo,
+  asAt,
 }: {
   warnings: Warning[];
   onGo: (section: string) => void;
+  asAt: string;
 }) {
   return (
     <Panel
       id="warnings"
       title="Early warning centre"
       subtitle="Everything the data says is worth looking at, ranked"
+      basis={`Month to ${asAt}`}
       summary={
         warnings.length === 0
           ? "Nothing outside its benchmark, and no structural pattern present."

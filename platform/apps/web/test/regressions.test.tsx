@@ -23,6 +23,8 @@ import {
   toggleHidden,
 } from "../src/app/report/layout.js";
 import { visibleColumns, defaultViewConfig, type ColumnSpec } from "@avilo/tables";
+import { NeedsData } from "../src/app/dashboard/parts.js";
+import { UploadProvider } from "../src/app/components/upload-context.js";
 
 // `globals: false` keeps the vitest API explicit, which also means testing-library's
 // automatic teardown is never registered — without this each render stacks on the last
@@ -344,5 +346,32 @@ describe("report layout survives sections coming and going", () => {
 
     // Already at the top: a no-op, not a wrap to the bottom.
     expect(moveSection(base, first, -1).order).toEqual(base.order);
+  });
+});
+
+describe("an empty section is a way in, not a dead end", () => {
+  /**
+   * Every "needs data" block names the file that would fill it in, and for most of the
+   * build that was all it did. The reader was told what to import and then left to find
+   * the importer themselves — an instruction with no button attached.
+   */
+  it("opens the importer when the page provides one", async () => {
+    let opened = 0;
+    render(
+      <UploadProvider onUpload={() => (opened += 1)}>
+        <NeedsData what="Growth is a comparison" upload="last month's export" />
+      </UploadProvider>,
+    );
+
+    await userEvent.click(screen.getByRole("button"));
+    expect(opened).toBe(1);
+  });
+
+  it("stays plain text where there is no importer to open", () => {
+    render(<NeedsData what="No customer revenue imported" upload="a Sales export" />);
+    // Not a button that does nothing: outside a provider there is nothing to open, and a
+    // control that swallows a click is worse than a sentence.
+    expect(screen.queryByRole("button")).toBeNull();
+    expect(screen.getByText("No customer revenue imported")).toBeTruthy();
   });
 });

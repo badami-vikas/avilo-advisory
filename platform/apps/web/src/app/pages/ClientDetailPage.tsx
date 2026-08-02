@@ -16,8 +16,10 @@ import {
 import { ReportView } from "../components/ReportView.js";
 import { RawDataView } from "../components/RawDataView.js";
 import { StickyNotes } from "../components/StickyNotes.js";
+import { Tip } from "../components/Tooltip.js";
 import { Dashboard } from "../dashboard/Dashboard.js";
 import { UploadDialog } from "../components/UploadDialog.js";
+import { UploadProvider } from "../components/upload-context.js";
 import type {
   ClientRecord,
   DetailByKind,
@@ -410,6 +412,9 @@ export function ClientDetailPage() {
     ) : null;
 
   return (
+    // Any "needs data" block anywhere below can open this page's importer, rather than
+    // naming a file and leaving the reader to find the toolbar.
+    <UploadProvider onUpload={() => setUploading(true)}>
     <div className="space-y-4">
       {/* ------------------------------------------------------ page header */}
       {/* Line one: who this is. */}
@@ -440,11 +445,32 @@ export function ClientDetailPage() {
         you are looking at something is a different kind of act from changing it.
       */}
       <div className="no-print flex flex-wrap items-center gap-2 pl-1">
+        {/*
+          Named, not bare.
+
+          A dropdown reading "Oct 2024" beside a page that also shows a twelve-month
+          customer list and an ageing report invites the reading that everything on screen
+          is October. It is not, and cannot be: a profit & loss is a month, a balance is a
+          date, and a customer ranking is a year. The label says which one this control
+          moves, and the tooltip says what it leaves alone. Every panel whose figures are
+          not the selected month carries its own basis chip.
+        */}
+        {periods.length > 0 ? (
+          <Tip content="Sets the date every figure on the page is anchored to. Nothing here can cover the same span — a profit & loss is a month, a balance is a day, a customer ranking is a year — so each panel states how far back it looks and they all end on this month\u2019s last day.">
+            <label
+              htmlFor="reporting-month"
+              className="text-[12px] text-ink-faint"
+            >
+              Month
+            </label>
+          </Tip>
+        ) : null}
         {periods.length > 0 ? (
           <select
+            id="reporting-month"
             value={period ?? ""}
             onChange={(event) => setPeriod(event.target.value)}
-            aria-label="Period"
+            aria-label="Reporting month"
             className="h-9 rounded-lg border border-line bg-surface px-2.5 text-[13px] text-ink outline-none focus:border-accent"
           >
             {periods.map((p) => (
@@ -555,6 +581,7 @@ export function ClientDetailPage() {
         />
       ) : null}
     </div>
+    </UploadProvider>
   );
 }
 

@@ -108,16 +108,6 @@ export function StickyNotes({
         <span className="text-[11.5px] text-ink-faint">
           {notes.length === 0 ? "Nothing noted yet" : `${notes.length} on the board`}
         </span>
-        <Tip content="Add a note. Notes stay with the client, never appear in the exported report.">
-          <button
-            onClick={() => void add()}
-            aria-label="Add sticky note"
-            className="ml-auto inline-flex h-7 items-center gap-1 rounded-lg border border-line bg-surface px-2.5 text-[12px] font-medium text-ink-muted transition-colors hover:bg-line-soft hover:text-ink"
-          >
-            <Plus size={13} />
-            Add note
-          </button>
-        </Tip>
       </div>
 
       {legacyNote ? (
@@ -149,14 +139,23 @@ export function StickyNotes({
           />
         ))}
 
-        {loaded && notes.length === 0 ? (
-          <button
-            onClick={() => void add()}
-            className="flex h-[132px] w-[210px] flex-col items-center justify-center gap-1.5 rounded-xl border border-dashed border-line bg-surface/60 text-[12.5px] text-ink-faint transition-colors hover:border-ink-faint hover:text-ink-muted"
-          >
-            <Plus size={16} />
-            Add the first note
-          </button>
+        {/*
+          The only way to add a note, and it lives on the board rather than in the header.
+          A button above the cards and an identical card below it were two controls for
+          one action; the card is the one that belongs where the notes are, so it stays
+          and stops being an empty state — it is now simply the last card.
+        */}
+        {loaded ? (
+          <Tip content="Notes stay with the client and never appear in the exported report.">
+            <button
+              onClick={() => void add()}
+              aria-label="Add sticky note"
+              className="flex h-[132px] w-[210px] flex-col items-center justify-center gap-1.5 rounded-xl border border-dashed border-line bg-surface/60 text-[12.5px] text-ink-faint transition-colors hover:border-ink-faint hover:text-ink-muted"
+            >
+              <Plus size={16} />
+              {notes.length === 0 ? "Add the first note" : "Add a note"}
+            </button>
+          </Tip>
         ) : null}
       </div>
     </section>

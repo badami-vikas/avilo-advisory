@@ -22,6 +22,7 @@ import {
   movement,
   movements,
   narrative,
+  periodEnd,
   trendPct,
   warnings,
 } from "../src/app/dashboard/insights.js";
@@ -509,5 +510,22 @@ describe("dimensionDirection", () => {
     expect(dimensionDirection({ ...base, inverted: false, quarterChange: 8 })).toBe(
       "better",
     );
+  });
+});
+
+describe("periodEnd", () => {
+  /**
+   * Every basis chip on the dashboard ends on this date, so a wrong one would put five
+   * panels on five different anchors — the exact confusion the chips exist to remove.
+   */
+  it("gives the last day of the month, not the first of the next", () => {
+    expect(periodEnd("2024-10")).toBe("31 Oct 2024");
+    expect(periodEnd("2024-02")).toBe("29 Feb 2024");
+    expect(periodEnd("2023-02")).toBe("28 Feb 2023");
+    expect(periodEnd("2024-12")).toBe("31 Dec 2024");
+  });
+
+  it("hands back anything it cannot parse rather than inventing a date", () => {
+    expect(periodEnd("not-a-period")).toBe("not-a-period");
   });
 });

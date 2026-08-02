@@ -236,6 +236,38 @@ const reportRouter = router({
       return byKind;
     }),
 
+  /**
+   * One kind of detail row for every period, keyed by period.
+   *
+   * The per-period `detail` query answers "what is this month made of". This answers
+   * "what has every month been made of", which is what lets the growth chart draw its
+   * bars as the lines that compose them rather than as a single total with the
+   * composition printed underneath. One query rather than twelve: the rows for a client
+   * and a kind are a few hundred at most, and twelve round trips to draw one chart is a
+   * waterfall the user watches.
+   */
+  detailSeries: procedure
+    .input(z.object({ clientId: z.string(), kind: z.string() }))
+    .query(({ input }) => {
+      const db = getDb();
+      const rows = db
+        .select()
+        .from(schema.detailRows)
+        .where(
+          and(
+            eq(schema.detailRows.clientId, input.clientId),
+            eq(schema.detailRows.kind, input.kind),
+          ),
+        )
+        .all();
+
+      const byPeriod: Record<string, typeof rows> = {};
+      for (const row of rows) {
+        (byPeriod[row.period] ??= []).push(row);
+      }
+      return byPeriod;
+    }),
+
   /** Default export range: current financial year to date, per the client's FY start. */
   defaultExportRange: procedure
     .input(z.object({ clientId: z.string() }))

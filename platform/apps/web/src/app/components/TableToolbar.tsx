@@ -48,8 +48,6 @@ export function TableToolbar({
   search,
   onSearchChange,
   searchPlaceholder,
-  onAdd,
-  addLabel,
   filterOpen,
   onFilterOpenChange,
   viewMode = "table",
@@ -62,8 +60,6 @@ export function TableToolbar({
   search: string;
   onSearchChange: (next: string) => void;
   searchPlaceholder: string;
-  onAdd: () => void;
-  addLabel: string;
   /** Controlled, so a column's context menu can open the builder it just added to. */
   filterOpen?: boolean;
   onFilterOpenChange?: (open: boolean) => void;
@@ -482,16 +478,6 @@ export function TableToolbar({
           </Popover.Portal>
         </Popover.Root>
 
-        {/*
-          Column visibility. This is the only way back from "Hide column" in a header's
-          context menu, so it lists every column — including the hidden ones, which is
-          the whole point — rather than only what is currently on screen.
-        */}
-        <Button variant="primary" onClick={onAdd} aria-label={addLabel}>
-          <Plus size={15} />
-          {hideLabels ? null : addLabel}
-        </Button>
-
         {/* ------------------------------------------------ overflow (3 dots) */}
         <DropdownMenu.Root>
           <DropdownMenu.Trigger asChild>
@@ -523,6 +509,51 @@ export function TableToolbar({
                 lets the list stay open across several toggles, which is how anyone
                 actually uses it.
               */}
+              {/*
+                The "add" half of the visibility pair.
+
+                It lists only what is hidden. Offering to add a column already on the
+                table would be an instruction that does nothing, and the toggle list
+                under View options below already covers the other direction.
+              */}
+              <DropdownMenu.Sub>
+                <DropdownMenu.SubTrigger className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-[12.5px] text-ink outline-none data-[highlighted]:bg-line-soft">
+                  <Plus size={13} className="text-ink-muted" />
+                  Add column
+                  {hiddenCount > 0 ? (
+                    <span className="ml-auto text-[11.5px] text-ink-faint">
+                      {hiddenCount} available
+                    </span>
+                  ) : null}
+                </DropdownMenu.SubTrigger>
+                <DropdownMenu.Portal>
+                  <DropdownMenu.SubContent
+                    sideOffset={2}
+                    className="z-50 max-h-[340px] min-w-[220px] overflow-y-auto rounded-lg border border-line bg-surface p-1 shadow-lg"
+                  >
+                    {hiddenCount === 0 ? (
+                      <p className="px-2 py-2 text-[12px] text-ink-muted">
+                        Every column is on the table. Hide one from its header menu to
+                        bring it back here.
+                      </p>
+                    ) : (
+                      columns
+                        .filter((column) => hidden.includes(column.id))
+                        .map((column) => (
+                          <DropdownMenu.Item
+                            key={column.id}
+                            onSelect={() => toggleColumn(column.id)}
+                            className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-[12.5px] text-ink outline-none data-[highlighted]:bg-line-soft"
+                          >
+                            <Plus size={13} className="text-ink-muted" />
+                            {column.label}
+                          </DropdownMenu.Item>
+                        ))
+                    )}
+                  </DropdownMenu.SubContent>
+                </DropdownMenu.Portal>
+              </DropdownMenu.Sub>
+
               <DropdownMenu.Sub>
                 <DropdownMenu.SubTrigger className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-[12.5px] text-ink outline-none data-[highlighted]:bg-line-soft">
                   <Eye size={13} className="text-ink-muted" />

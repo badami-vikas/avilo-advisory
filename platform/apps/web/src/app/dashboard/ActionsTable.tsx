@@ -75,11 +75,13 @@ export function ActionsTable({
   clientId,
   period,
   onGo,
+  asAt,
 }: {
   actions: Action[];
   clientId: string;
   period: string;
   onGo: (section: string) => void;
+  asAt: string;
 }) {
   const [assignments, setAssignments] = useState<Record<string, AssignmentRow>>({});
   const [editing, setEditing] = useState<string | null>(null);
@@ -122,6 +124,7 @@ export function ActionsTable({
       id="actions"
       title="Recommended actions"
       subtitle="Generated from this month's conditions. Assign an owner and a date to make them real."
+      basis={`Month to ${asAt}`}
       summary={
         actions.length === 0
           ? "Nothing in this month's data calls for an intervention."

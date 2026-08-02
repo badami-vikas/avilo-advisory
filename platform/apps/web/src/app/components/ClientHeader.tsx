@@ -18,11 +18,6 @@ import type { ClientRecord } from "../types.js";
 
 export const CLIENT_STAGES = ["Onboarding", "Active", "Review", "Dormant"];
 
-const MONTHS = [
-  "January", "February", "March", "April", "May", "June",
-  "July", "August", "September", "October", "November", "December",
-];
-
 type Field = {
   id: string;
   label: string;
@@ -55,23 +50,15 @@ const FIELDS: Field[] = [
     value: (c) => c.industry ?? "",
     placeholder: "Add industry",
   },
-  {
-    id: "owner",
-    label: "Owner",
-    value: (c) => c.owner ?? "",
-    placeholder: "Assign an owner",
-  },
-  {
-    id: "fiscalYearStartMonth",
-    label: "FY starts",
-    value: (c) => MONTHS[c.fiscalYearStartMonth - 1] ?? "January",
-    edit: (c) => MONTHS[c.fiscalYearStartMonth - 1] ?? "January",
-    options: MONTHS,
-    // Stored as a 1-based month number, shown as a name. The export dialog's
-    // financial-year default reads this, so a string here would silently break it.
-    parse: (raw) => MONTHS.indexOf(raw) + 1,
-    placeholder: "January",
-  },
+  /*
+    No `owner` or `fiscalYearStartMonth` here.
+
+    Both were permanent chips for facts that are set once and then never looked at again,
+    sitting on the line the eye crosses on the way to the numbers. Owner is a column on
+    the client list, where it is actually used — to filter and sort. The financial-year
+    start is still stored and still drives the export dialog's default range; it simply no
+    longer occupies a slot in the header of every visit.
+  */
   /*
     No `notes` field here.
 
