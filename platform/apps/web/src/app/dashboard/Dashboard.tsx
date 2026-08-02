@@ -11,7 +11,7 @@
  * is made in `insights.ts` rather than in a component.
  */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, ArrowRight, Info } from "lucide-react";
 
 import { moneyFull, percent } from "../../lib/format.js";
@@ -136,6 +136,42 @@ export function Dashboard({
     [report, series, detail, health, baseForecast, warnings, actions],
   );
 
+  /*
+    The contents list, sized to what is actually on screen.
+
+    `max-height: 100vh` is the right cap once the list has pinned itself to the top, and
+    the wrong one before that: the list starts several hundred pixels down the page,
+    under the client header and the toolbar, so a cap measured from the top of the window
+    leaves it hanging off the bottom of the screen with no way to reach the last items.
+    Its own contents fit inside the cap, so nothing scrolled — the list was clipped by the
+    viewport rather than by itself.
+
+    Measuring gives the honest number: whatever vertical space the list actually has from
+    where it currently sits. It scrolls exactly when it runs out of that.
+  */
+  const navRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const element = navRef.current;
+    if (!element) return;
+    /*
+      Measured straight out of the scroll handler rather than deferred to an animation
+      frame. It is one read and one write on one element, which is cheap; and a frame
+      callback does not run at all in a backgrounded window, which would leave the list
+      sized for wherever the page happened to be when it was last visible.
+    */
+    const measure = () => {
+      const top = element.getBoundingClientRect().top;
+      element.style.maxHeight = `${Math.max(160, window.innerHeight - top - 12)}px`;
+    };
+    measure();
+    window.addEventListener("scroll", measure, { passive: true });
+    window.addEventListener("resize", measure);
+    return () => {
+      window.removeEventListener("scroll", measure);
+      window.removeEventListener("resize", measure);
+    };
+  }, []);
+
   const go = (section: string) => {
     document.getElementById(section)?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
@@ -169,7 +205,10 @@ export function Dashboard({
         nothing. Sized to its content, it scrolls exactly when the list is longer than the
         window.
       */}
-      <nav className="avilo-scroll sticky top-4 hidden max-h-[calc(100vh-2rem)] w-[180px] shrink-0 self-start overflow-y-auto overscroll-contain pb-2 pr-1 lg:block">
+      <nav
+        ref={navRef}
+        className="avilo-scroll sticky top-4 hidden w-[180px] shrink-0 self-start overflow-y-auto pb-2 pr-1 lg:block"
+      >
         <p className="mb-2 px-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-faint">
           On this page
         </p>

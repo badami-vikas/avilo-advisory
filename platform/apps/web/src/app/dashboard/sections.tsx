@@ -35,6 +35,7 @@ import {
   Donut,
   Gauge,
   GroupedBars,
+  Legend,
   Pareto,
   tint,
   TrendLine,
@@ -307,51 +308,21 @@ export function GrowthSection({
         />
       )}
 
-      {/* --- the legend, which is also the selector */}
-      <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1.5">
-        {SERIES.map((entry) => {
-          const on = selected.includes(entry.id);
-          const present = series.some((p) => p.values[entry.id] !== null);
-          return (
-            <Tip
-              key={entry.id}
-              content={
-                !present
-                  ? `${entry.label} has not been imported for any month yet.`
-                  : on
-                    ? `Showing ${entry.label.toLowerCase()}. Click to put it back in the trend.`
-                    : `Show ${entry.label.toLowerCase()} on its own, broken into what it is made of.`
-              }
-            >
-              <button
-                onClick={() => present && toggle(entry.id)}
-                disabled={!present}
-                aria-pressed={on}
-                className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11.5px] font-medium transition-all disabled:opacity-40 ${
-                  on
-                    ? "border-ink/15 bg-line-soft text-ink"
-                    : "border-transparent text-ink-muted hover:bg-line-soft/70 hover:text-ink"
-                }`}
-              >
-                <span
-                  className="h-2.5 w-2.5 rounded-full"
-                  style={{ background: entry.color, opacity: on ? 1 : 0.45 }}
-                />
-                {entry.label}
-              </button>
-            </Tip>
-          );
-        })}
-
-        {selected.length > 0 ? (
-          <button
-            onClick={() => setSelected([])}
-            className="ml-1 text-[11.5px] text-ink-faint underline-offset-2 hover:text-ink hover:underline"
-          >
-            Back to the trend
-          </button>
-        ) : null}
-      </div>
+      {/* --- the same legend every chart on the page has, driving this one's selection */}
+      <Legend
+        items={SERIES.map((entry) => ({
+          label: entry.label,
+          color: entry.color,
+          present: series.some((p) => p.values[entry.id] !== null),
+          tip: `Show ${entry.label.toLowerCase()} on its own, broken into what it is made of.`,
+        }))}
+        selected={chosen.map((entry) => entry.label)}
+        onToggle={(label) => {
+          const entry = SERIES.find((candidate) => candidate.label === label);
+          if (entry) toggle(entry.id);
+        }}
+        onClear={() => setSelected([])}
+      />
 
       {/* --- what the segments are, when the bars carry them */}
       {isolated ? (

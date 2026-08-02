@@ -14,6 +14,7 @@ import { useEffect, useRef, useState } from "react";
 import Chart, { type ChartConfiguration, type ChartType } from "chart.js/auto";
 
 import { moneyFull } from "../../lib/format.js";
+import { Tip } from "../components/Tooltip.js";
 
 const AXIS = { font: { size: 10.5 }, color: "#667085" } as const;
 const GRID = "#f2f4f7";
@@ -85,6 +86,8 @@ export function Donut({
   centerValue: string;
   height?: number;
 }) {
+  const selection = useLegendSelection();
+
   const ref = useChart({
     type: "doughnut",
     data: {
@@ -92,7 +95,12 @@ export function Donut({
       datasets: [
         {
           data: slices.map((s) => s.value),
-          backgroundColor: slices.map((s) => s.color),
+          // A ring is one whole, so a picked bucket is drawn out of the others rather
+          // than drawn alone — remove a slice and the remaining ring stops being a share
+          // of anything.
+          backgroundColor: slices.map((s) =>
+            selection.isDrawn(s.label) ? s.color : `${s.color}2e`,
+          ),
           borderColor: "#fff",
           borderWidth: 2,
         },
@@ -103,10 +111,8 @@ export function Donut({
       maintainAspectRatio: false,
       cutout: "68%",
       plugins: {
-        legend: {
-          position: "right",
-          labels: { boxWidth: 9, boxHeight: 9, font: { size: 11 }, padding: 10 },
-        },
+        // Never the canvas legend — see `Legend`.
+        legend: { display: false },
         tooltip: {
           callbacks: {
             label: (context) => {
@@ -121,13 +127,14 @@ export function Donut({
   });
 
   return (
+    <div>
     <Frame height={height}>
       <canvas ref={ref} />
       {/*
         The total sits in the hole rather than beside the chart. A ring with a number in
         it answers both "how much" and "how is it split" without moving the eye.
       */}
-      <div className="pointer-events-none absolute inset-y-0 left-0 flex w-[62%] flex-col items-center justify-center">
+      <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
         <span className="text-[10px] font-semibold uppercase tracking-[0.07em] text-ink-faint">
           {centerLabel}
         </span>
@@ -136,6 +143,17 @@ export function Donut({
         </span>
       </div>
     </Frame>
+      <Legend
+        items={slices.map((slice) => ({
+          label: slice.label,
+          color: slice.color,
+          tip: `Pick ${slice.label.toLowerCase()} out of the ring.`,
+        }))}
+        selected={selection.selected}
+        onToggle={selection.toggle}
+        onClear={selection.clear}
+      />
+    </div>
   );
 }
 
@@ -378,6 +396,109 @@ export function tint(hex: string, ratio: number): string {
   return `rgb(${mix(channel(0))}, ${mix(channel(2))}, ${mix(channel(4))})`;
 }
 
+/* ---------------------------------------------------------------- legend */
+
+export interface LegendItem {
+  label: string;
+  color: string;
+  /** Explains the measure. Shown on hover, like every other term on the page. */
+  tip?: string;
+  /** False where a measure has no imported data — listed, but not selectable. */
+  present?: boolean;
+}
+
+/**
+ * One legend for every chart on the dashboard, and clicking it selects.
+ *
+ * Chart.js's own legend hides a series and strikes its label through. That is a fine
+ * default for a chart in isolation and the wrong verb here: on a page whose whole idiom
+ * is "show me this one", a click that crosses something out reads as switching it off.
+ * Two charts side by side, one selecting and one hiding, is worse than either.
+ *
+ * So no chart on this page draws its own legend. This is drawn in HTML below the canvas,
+ * it says what it does on hover, it is reachable by keyboard, and it means the same thing
+ * everywhere: nothing picked shows everything; picking isolates; picking again puts it
+ * back.
+ */
+export function Legend({
+  items,
+  selected,
+  onToggle,
+  onClear,
+}: {
+  items: LegendItem[];
+  selected: string[];
+  onToggle: (label: string) => void;
+  onClear: () => void;
+}) {
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1.5">
+      {items.map((item) => {
+        const on = selected.includes(item.label);
+        const available = item.present ?? true;
+        return (
+          <Tip
+            key={item.label}
+            content={
+              !available
+                ? `${item.label} has not been imported.`
+                : on
+                  ? `Showing ${item.label.toLowerCase()} on its own. Click to put the rest back.`
+                  : (item.tip ?? `Show ${item.label.toLowerCase()} on its own.`)
+            }
+          >
+            <button
+              type="button"
+              onClick={() => available && onToggle(item.label)}
+              disabled={!available}
+              aria-pressed={on}
+              className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11.5px] font-medium transition-all disabled:opacity-40 ${
+                on
+                  ? "border-ink/15 bg-line-soft text-ink"
+                  : "border-transparent text-ink-muted hover:bg-line-soft/70 hover:text-ink"
+              }`}
+            >
+              <span
+                className="h-2.5 w-2.5 rounded-full"
+                style={{ background: item.color, opacity: on || selected.length === 0 ? 1 : 0.4 }}
+              />
+              {item.label}
+            </button>
+          </Tip>
+        );
+      })}
+      {selected.length > 0 ? (
+        <button
+          type="button"
+          onClick={onClear}
+          className="ml-1 text-[11.5px] text-ink-faint underline-offset-2 hover:text-ink hover:underline"
+        >
+          Show all
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * The selection behind a legend.
+ *
+ * Held per chart rather than per page: two charts on the same screen answer different
+ * questions, and a selection that leapt between them would be a filter nobody asked for.
+ */
+export function useLegendSelection() {
+  const [selected, setSelected] = useState<string[]>([]);
+  const toggle = (label: string) =>
+    setSelected((current) =>
+      current.includes(label) ? current.filter((x) => x !== label) : [...current, label],
+    );
+  const clear = () => setSelected([]);
+  // Nothing selected means everything is drawn — an empty selection is the resting
+  // state, never a filter that has removed all of them.
+  const isDrawn = (label: string) => selected.length === 0 || selected.includes(label);
+  return { selected, toggle, clear, isDrawn };
+}
+
 /* ------------------------------------------------------------ grouped bars */
 
 /**
@@ -392,7 +513,6 @@ export function GroupedBars({
   datasets,
   height = 260,
   currency = true,
-  onLegendClick,
   stacked = false,
   showLegend,
 }: {
@@ -413,16 +533,17 @@ export function GroupedBars({
   }[];
   height?: number;
   currency?: boolean;
-  /**
-   * Makes the legend the selector. Chart.js's own legend click hides a dataset, which is
-   * the opposite of what the growth section wants — there, a click picks a measure out.
-   */
-  onLegendClick?: (label: string) => void;
   /** Segments of one total, stacked into a single bar per period. */
   stacked?: boolean;
   /** Defaults to showing a legend for more than one dataset. */
   showLegend?: boolean;
 }) {
+  const selection = useLegendSelection();
+  // The caller drives it when it passes explicit visibility — the growth explorer, whose
+  // selection also decides what the bars are broken into.
+  const driven = datasets.some((set) => set.hidden !== undefined) || showLegend === false;
+  const withLegend = !driven && datasets.length > 1;
+
   const ref = useChart({
     type: "bar",
     data: {
@@ -433,7 +554,7 @@ export function GroupedBars({
         backgroundColor: set.color,
         borderRadius: 3,
         borderSkipped: false as const,
-        hidden: set.hidden ?? false,
+        hidden: set.hidden ?? (withLegend ? !selection.isDrawn(set.label) : false),
       })),
     },
     options: {
@@ -441,14 +562,8 @@ export function GroupedBars({
       maintainAspectRatio: false,
       interaction: { mode: "index", intersect: false },
       plugins: {
-        legend: {
-          display: showLegend ?? datasets.length > 1,
-          position: "bottom",
-          labels: { boxWidth: 10, boxHeight: 10, font: { size: 11 }, padding: 12 },
-          onClick: onLegendClick
-            ? (_event, item) => onLegendClick(String(item.text))
-            : undefined,
-        },
+        // Never the canvas legend — see `Legend`.
+        legend: { display: false },
         tooltip: {
           // Every selected series for that month in one card, plus each one's share of
           // the group — reading a grouped bar chart by eye is exactly what this saves.
@@ -496,9 +611,19 @@ export function GroupedBars({
   });
 
   return (
-    <Frame height={height}>
-      <canvas ref={ref} />
-    </Frame>
+    <div>
+      <Frame height={height}>
+        <canvas ref={ref} />
+      </Frame>
+      {withLegend ? (
+        <Legend
+          items={datasets.map((set) => ({ label: set.label, color: set.color }))}
+          selected={selection.selected}
+          onToggle={selection.toggle}
+          onClear={selection.clear}
+        />
+      ) : null}
+    </div>
   );
 }
 
@@ -603,7 +728,6 @@ export function TrendLine({
   datasets,
   height = 230,
   currency = true,
-  onLegendClick,
   showLegend,
 }: {
   labels: string[];
@@ -616,17 +740,16 @@ export function TrendLine({
   }[];
   height?: number;
   currency?: boolean;
-  /** See `GroupedBars` — a click picks the measure out rather than hiding it. */
-  onLegendClick?: (label: string) => void;
   /**
-   * Defaults to showing a legend for more than one series.
+   * Defaults to a legend for more than one series.
    *
-   * Set false where the section carries its own legend. Two legends for one chart is
-   * bad enough; a canvas legend whose click strikes a series out, sitting above an HTML
-   * legend whose click selects one, is two controls that disagree.
+   * Set false where the section carries its own — the growth explorer drives its
+   * selection from outside because a breakdown depends on it.
    */
   showLegend?: boolean;
 }) {
+  const selection = useLegendSelection();
+  const withLegend = (showLegend ?? datasets.length > 1) && datasets.length > 1;
   const ref = useChart({
     type: "line",
     data: {
@@ -642,6 +765,9 @@ export function TrendLine({
         pointRadius: 2.5,
         tension: 0.3,
         spanGaps: true,
+        // Selection isolates: an unpicked series stops being drawn so the axis rescales
+        // to what is being read, and its legend entry stays one click away.
+        hidden: withLegend ? !selection.isDrawn(set.label) : false,
       })),
     },
     options: {
@@ -649,14 +775,8 @@ export function TrendLine({
       maintainAspectRatio: false,
       interaction: { mode: "index", intersect: false },
       plugins: {
-        legend: {
-          display: showLegend ?? datasets.length > 1,
-          position: "bottom",
-          labels: { boxWidth: 10, boxHeight: 10, font: { size: 11 }, padding: 12 },
-          onClick: onLegendClick
-            ? (_event, item) => onLegendClick(String(item.text))
-            : undefined,
-        },
+        // Never the canvas legend — see `Legend`.
+        legend: { display: false },
       },
       scales: {
         x: { grid: { display: false }, ticks: AXIS },
@@ -678,9 +798,19 @@ export function TrendLine({
   });
 
   return (
-    <Frame height={height}>
-      <canvas ref={ref} />
-    </Frame>
+    <div>
+      <Frame height={height}>
+        <canvas ref={ref} />
+      </Frame>
+      {withLegend ? (
+        <Legend
+          items={datasets.map((set) => ({ label: set.label, color: set.color }))}
+          selected={selection.selected}
+          onToggle={selection.toggle}
+          onClear={selection.clear}
+        />
+      ) : null}
+    </div>
   );
 }
 
@@ -850,6 +980,8 @@ export function Pareto({
   cumulative: number[];
   height?: number;
 }) {
+  const selection = useLegendSelection();
+
   const ref = useChart({
     // A mixed chart still needs a base type; the per-dataset `type` overrides it.
     type: "bar",
@@ -864,6 +996,7 @@ export function Pareto({
           borderRadius: 3,
           yAxisID: "y",
           order: 2,
+          hidden: !selection.isDrawn("Revenue"),
         },
         {
           type: "line" as const,
@@ -876,6 +1009,7 @@ export function Pareto({
           tension: 0.25,
           yAxisID: "y1",
           order: 1,
+          hidden: !selection.isDrawn("Cumulative share"),
         },
       ],
     },
@@ -884,10 +1018,8 @@ export function Pareto({
       maintainAspectRatio: false,
       interaction: { mode: "index", intersect: false },
       plugins: {
-        legend: {
-          position: "bottom",
-          labels: { boxWidth: 10, boxHeight: 10, font: { size: 11 }, padding: 12 },
-        },
+        // Never the canvas legend — see `Legend`.
+        legend: { display: false },
       },
       scales: {
         x: { grid: { display: false }, ticks: { ...AXIS, maxRotation: 40 } },
@@ -915,8 +1047,23 @@ export function Pareto({
   });
 
   return (
-    <Frame height={height}>
-      <canvas ref={ref} />
-    </Frame>
+    <div>
+      <Frame height={height}>
+        <canvas ref={ref} />
+      </Frame>
+      <Legend
+        items={[
+          { label: "Revenue", color: "#b2ddff", tip: "Show the bars on their own." },
+          {
+            label: "Cumulative share",
+            color: "#1570ef",
+            tip: "Show the concentration line on its own.",
+          },
+        ]}
+        selected={selection.selected}
+        onToggle={selection.toggle}
+        onClear={selection.clear}
+      />
+    </div>
   );
 }
