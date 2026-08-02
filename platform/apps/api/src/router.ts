@@ -759,9 +759,77 @@ const stickyNotesRouter = router({
   }),
 });
 
+/* ----------------------------------------------------------- action states */
+
+/**
+ * The human half of a recommended action.
+ *
+ * The action itself is derived on every render and is never stored — a saved
+ * recommendation would outlive the condition that produced it. Only the assignment is
+ * persisted, keyed by the action's stable id.
+ */
+const actionsRouter = router({
+  list: procedure
+    .input(z.object({ clientId: z.string(), period: periodSchema }))
+    .query(({ input }) => {
+      const db = getDb();
+      return db
+        .select()
+        .from(schema.actionStates)
+        .where(
+          and(
+            eq(schema.actionStates.clientId, input.clientId),
+            eq(schema.actionStates.period, input.period),
+          ),
+        )
+        .all();
+    }),
+
+  set: procedure
+    .input(
+      z.object({
+        clientId: z.string(),
+        period: periodSchema,
+        actionId: z.string().min(1),
+        owner: z.string().max(120).nullable().optional(),
+        dueDate: z.string().max(40).nullable().optional(),
+        status: z
+          .enum(["not_started", "in_progress", "done", "dropped"])
+          .optional(),
+      }),
+    )
+    .mutation(({ input }) => {
+      const db = getDb();
+      requireClient(input.clientId);
+      const { clientId, period, actionId, ...patch } = input;
+      db.insert(schema.actionStates)
+        .values({
+          clientId,
+          period,
+          actionId,
+          owner: patch.owner ?? null,
+          dueDate: patch.dueDate ?? null,
+          status: patch.status ?? "not_started",
+          updatedAt: nowIso(),
+        })
+        .onConflictDoUpdate({
+          target: [
+            schema.actionStates.clientId,
+            schema.actionStates.period,
+            schema.actionStates.actionId,
+          ],
+          // Only the fields actually sent: setting an owner must not clear a due date.
+          set: { ...patch, updatedAt: nowIso() },
+        })
+        .run();
+      return { ok: true };
+    }),
+});
+
 export const appRouter = router({
   views: viewsRouter,
   stickyNotes: stickyNotesRouter,
+  actions: actionsRouter,
   clients: clientsRouter,
   report: reportRouter,
   accounts: accountsRouter,

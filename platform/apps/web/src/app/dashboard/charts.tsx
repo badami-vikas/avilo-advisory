@@ -139,45 +139,233 @@ export function Donut({
   );
 }
 
+/* --------------------------------------------------------------- sparkline */
+
+/**
+ * A twelve-month shape, in the space of a word.
+ *
+ * Hand-drawn SVG rather than a Chart.js instance: there are seven of these in the header
+ * strip alone, and seven canvases with their own animation loops to draw seven polylines
+ * is a waste of a frame budget that the rest of the page needs.
+ */
+export function Sparkline({
+  values,
+  tone = "#1570ef",
+  width = 92,
+  height = 26,
+}: {
+  values: (number | null)[];
+  tone?: string;
+  width?: number;
+  height?: number;
+}) {
+  const points = values.filter((v): v is number => v !== null && v !== undefined);
+  if (points.length < 2) {
+    return <div style={{ width, height }} aria-hidden />;
+  }
+
+  const min = Math.min(...points);
+  const max = Math.max(...points);
+  // A flat series has no range to scale against; draw it down the middle rather than
+  // dividing by zero and sending every point to NaN.
+  const span = max - min || 1;
+  const step = width / (points.length - 1);
+
+  const path = points
+    .map((value, index) => {
+      const x = index * step;
+      const y = height - ((value - min) / span) * height;
+      return `${index === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join(" ");
+
+  return (
+    <svg
+      width={width}
+      height={height}
+      viewBox={`0 0 ${width} ${height}`}
+      // Decorative: every sparkline sits beside the number and the delta it summarises.
+      aria-hidden
+      style={{ overflow: "visible" }}
+    >
+      <path
+        d={`${path} L${width},${height} L0,${height} Z`}
+        fill={tone}
+        opacity={0.08}
+        stroke="none"
+      />
+      <path d={path} fill="none" stroke={tone} strokeWidth={1.5} strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 /* ----------------------------------------------------------------- radar */
 
+export interface RadarAxis {
+  label: string;
+  /** 0–100. Null draws at zero and is greyed. */
+  score: number | null;
+  /** Second line under the label — the measured value and its movement. */
+  caption: string;
+  /** Label colour, which is how the score is banded at a glance. */
+  color: string;
+}
+
 export function Radar({
-  labels,
-  values,
-  height = 260,
+  axes,
+  height = 300,
+  onHover,
+  active,
 }: {
-  labels: string[];
-  /** 0–100 per axis. Nulls are drawn at zero and named in the caller's legend. */
-  values: (number | null)[];
+  axes: RadarAxis[];
   height?: number;
+  /** Fires with the axis index under the pointer, or null on leave. */
+  onHover?: (index: number | null) => void;
+  /** Index to draw enlarged, so the panel beside the chart and the chart agree. */
+  active?: number | null;
 }) {
   const ref = useChart({
     type: "radar",
     data: {
-      labels,
+      // Two lines per point: the dimension, then its reading. Chart.js renders an array
+      // of strings as stacked lines, which is what puts the score under the label
+      // without a second layer of absolutely-positioned HTML over the canvas.
+      labels: axes.map((axis) => [axis.label, axis.caption]),
       datasets: [
         {
-          data: values.map((v) => v ?? 0),
+          data: axes.map((axis) => axis.score ?? 0),
           backgroundColor: "rgba(21,112,239,0.14)",
           borderColor: "#1570ef",
           borderWidth: 2,
-          pointBackgroundColor: values.map((v) => (v === null ? "#d0d5dd" : "#1570ef")),
-          pointRadius: 3.5,
+          pointBackgroundColor: axes.map((axis) =>
+            axis.score === null ? "#d0d5dd" : axis.color,
+          ),
+          pointBorderColor: "#fff",
+          pointBorderWidth: 1.5,
+          pointRadius: axes.map((_, index) => (index === active ? 7 : 4)),
+          pointHoverRadius: 8,
         },
       ],
     },
     options: {
       responsive: true,
       maintainAspectRatio: false,
-      plugins: { legend: { display: false } },
+      plugins: {
+        legend: { display: false },
+        // The panel beside the chart says everything a tooltip would, in more detail
+        // and without covering the shape being read.
+        tooltip: { enabled: false },
+      },
+      onHover: (_event, elements) => {
+        onHover?.(elements.length > 0 ? (elements[0]?.index ?? null) : null);
+      },
       scales: {
         r: {
           min: 0,
           max: 100,
           angleLines: { color: GRID },
           grid: { color: GRID },
-          pointLabels: { font: { size: 11 }, color: "#475467" },
+          pointLabels: {
+            font: (context) =>
+              // The caption is the second line of each label; it gets the smaller size.
+              context.index === undefined
+                ? { size: 11 }
+                : { size: 11, weight: 500 },
+            color: (context) => axes[context.index]?.color ?? "#475467",
+            padding: 8,
+          },
           ticks: { display: false, stepSize: 25 },
+        },
+      },
+    },
+  });
+
+  return (
+    <div
+      className="chart-frame relative w-full"
+      style={{ height }}
+      onMouseLeave={() => onHover?.(null)}
+    >
+      <canvas ref={ref} />
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------ grouped bars */
+
+/**
+ * Selected series as bars, month by month.
+ *
+ * The counterpart to `TrendLine`: lines are for shape over time, bars are for reading a
+ * value off a specific month and comparing two of them side by side. Which one the
+ * section shows is driven by whether the advisor has selected anything.
+ */
+export function GroupedBars({
+  labels,
+  datasets,
+  height = 260,
+  currency = true,
+}: {
+  labels: string[];
+  datasets: { label: string; values: (number | null)[]; color: string }[];
+  height?: number;
+  currency?: boolean;
+}) {
+  const ref = useChart({
+    type: "bar",
+    data: {
+      labels,
+      datasets: datasets.map((set) => ({
+        label: set.label,
+        data: set.values,
+        backgroundColor: set.color,
+        borderRadius: 3,
+        borderSkipped: false as const,
+      })),
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: "index", intersect: false },
+      plugins: {
+        legend: {
+          display: datasets.length > 1,
+          position: "bottom",
+          labels: { boxWidth: 10, boxHeight: 10, font: { size: 11 }, padding: 12 },
+        },
+        tooltip: {
+          // Every selected series for that month in one card, plus each one's share of
+          // the group — reading a grouped bar chart by eye is exactly what this saves.
+          callbacks: {
+            label: (context) => {
+              const value = context.parsed.y;
+              if (value === null) return `${context.dataset.label}: —`;
+              const total = context.chart.data.datasets.reduce((sum, set) => {
+                const point = (set.data as (number | null)[])[context.dataIndex];
+                return sum + Math.abs(point ?? 0);
+              }, 0);
+              const share = total === 0 ? 0 : (Math.abs(value) / total) * 100;
+              return `${context.dataset.label}: ${
+                currency ? moneyFull(value) : `${value.toFixed(1)}%`
+              }${datasets.length > 1 ? `  (${share.toFixed(0)}% of selection)` : ""}`;
+            },
+          },
+        },
+      },
+      scales: {
+        x: { grid: { display: false }, ticks: AXIS },
+        y: {
+          grace: "8%",
+          grid: { color: GRID },
+          border: { display: false },
+          ticks: {
+            ...AXIS,
+            callback: (value) => {
+              if (typeof value !== "number") return String(value);
+              if (!currency) return `${value}%`;
+              return Math.abs(value) >= 1000 ? `${Math.round(value / 1000)}K` : String(value);
+            },
+          },
         },
       },
     },

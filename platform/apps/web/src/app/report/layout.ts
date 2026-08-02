@@ -7,14 +7,18 @@
  * an advisor drop a section from a client-facing PDF without losing it from the working
  * page they use to produce that PDF.
  *
- * The distinction is deliberate and load-bearing:
+ * Two values, both editorial:
  *
- *   - `order`          — shared. Reordering is an editorial decision about the report,
- *                        and a screen that disagreed with the paper about what comes
- *                        after what would make the print preview useless.
- *   - `excludedFromPrint` — print only. A hidden section still renders on the element
- *                        page, marked, because the advisor still needs to read it, still
- *                        needs to edit the figures in it, and needs a way to put it back.
+ *   - `order`  — what comes after what. Dragged directly on the report.
+ *   - `hidden` — sections taken out of it. They leave the page and land in a tray
+ *                underneath, from which they can be dragged back.
+ *
+ * `hidden` used to be `excludedFromPrint`, and a hidden section still rendered on screen
+ * with a note explaining that it would not print. That was a compromise to keep the
+ * figures reachable for editing, and it is no longer needed: Raw data is its own view now
+ * and edits every figure whether or not its section is in the report. Hiding a section
+ * hides it, which is what the word means. Layouts written under the old key are read as
+ * the new one — see `normalizeLayout`.
  *
  * Nothing is ever deleted. "Removing" a section adds its id to a list; restoring removes
  * it again. A section the layout has never heard of — one added by a later version —
@@ -143,8 +147,8 @@ export const DEFAULT_ORDER: ReportSectionId[] = REPORT_SECTIONS.map((s) => s.id)
 
 export interface ReportLayout {
   order: ReportSectionId[];
-  /** Rendered on screen, dropped from the PDF. */
-  excludedFromPrint: ReportSectionId[];
+  /** Taken out of the report. Lives in the tray beneath it until dragged back. */
+  hidden: ReportSectionId[];
   /**
    * Print each chart's underlying figures as a table beneath it.
    *
@@ -169,7 +173,7 @@ export interface ReportLayout {
 export function defaultLayout(): ReportLayout {
   return {
     order: [...DEFAULT_ORDER],
-    excludedFromPrint: [],
+    hidden: [],
     includeChartTables: false,
     showLegalName: false,
   };
@@ -184,7 +188,9 @@ export function defaultLayout(): ReportLayout {
  * intersecting with the registry and then appending whatever is missing, in default
  * order, so a new section arrives where it was designed to sit.
  */
-export function normalizeLayout(stored: Partial<ReportLayout> | null): ReportLayout {
+export function normalizeLayout(
+  stored: (Partial<ReportLayout> & { excludedFromPrint?: string[] }) | null,
+): ReportLayout {
   const known = new Set<string>(DEFAULT_ORDER);
   const seen = new Set<ReportSectionId>();
 
@@ -198,32 +204,53 @@ export function normalizeLayout(stored: Partial<ReportLayout> | null): ReportLay
     if (!seen.has(id)) order.push(id);
   }
 
-  const excludedFromPrint = (stored?.excludedFromPrint ?? []).filter(
+  // `excludedFromPrint` is the old name for the same list. Read it so a layout saved by
+  // an earlier build keeps the advisor's choices instead of silently restoring every
+  // section they had removed.
+  const hidden = (stored?.hidden ?? stored?.excludedFromPrint ?? []).filter(
     (id): id is ReportSectionId => known.has(id),
   );
 
   return {
     order,
-    excludedFromPrint: [...new Set(excludedFromPrint)],
+    hidden: [...new Set(hidden)],
     includeChartTables: stored?.includeChartTables === true,
     showLegalName: stored?.showLegalName === true,
   };
 }
 
-export function isExcluded(layout: ReportLayout, id: ReportSectionId): boolean {
-  return layout.excludedFromPrint.includes(id);
+export function isHidden(layout: ReportLayout, id: ReportSectionId): boolean {
+  return layout.hidden.includes(id);
 }
 
-export function toggleExcluded(
-  layout: ReportLayout,
-  id: ReportSectionId,
-): ReportLayout {
+export function toggleHidden(layout: ReportLayout, id: ReportSectionId): ReportLayout {
   return {
     ...layout,
-    excludedFromPrint: isExcluded(layout, id)
-      ? layout.excludedFromPrint.filter((x) => x !== id)
-      : [...layout.excludedFromPrint, id],
+    hidden: isHidden(layout, id)
+      ? layout.hidden.filter((x) => x !== id)
+      : [...layout.hidden, id],
   };
+}
+
+/**
+ * Drop `id` immediately before `beforeId`, or at the end when that is null.
+ *
+ * What a drag actually means, as opposed to `moveSection`'s one-step nudge. Written as a
+ * remove-then-insert on a copy so the index arithmetic cannot go wrong when the section
+ * is moving forwards — splicing it out first is what makes the target index correct in
+ * both directions.
+ */
+export function reorderSection(
+  layout: ReportLayout,
+  id: ReportSectionId,
+  beforeId: ReportSectionId | null,
+): ReportLayout {
+  if (id === beforeId) return layout;
+  const order = layout.order.filter((x) => x !== id);
+  const target = beforeId === null ? order.length : order.indexOf(beforeId);
+  if (target === -1) return layout;
+  order.splice(target, 0, id);
+  return { ...layout, order };
 }
 
 /** Move a section one place up or down. A no-op at either end rather than a wrap. */

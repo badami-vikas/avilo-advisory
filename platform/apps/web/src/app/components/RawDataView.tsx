@@ -4,9 +4,7 @@ import { AlertTriangle, FileSpreadsheet, Globe, RotateCcw } from "lucide-react";
 import { Block } from "./ui.js";
 import { Tip } from "./Tooltip.js";
 import { InlineEditor } from "./DataTable.js";
-import { ReportFormatPanel } from "./ReportFormatPanel.js";
 import { byUnit, moneyFull } from "../../lib/format.js";
-import type { ReportLayout } from "../report/layout.js";
 import type { FormulaRow, PeriodReport } from "../types.js";
 
 /**
@@ -24,8 +22,6 @@ export function RawDataView({
   onSetMetricValue,
   onSetFormula,
   onClearOverride,
-  layout,
-  onLayoutChange,
 }: {
   report: PeriodReport;
   formulas: FormulaRow[];
@@ -33,9 +29,13 @@ export function RawDataView({
   onSetMetricValue: (metricId: string, raw: string) => Promise<void>;
   onSetFormula: (formulaId: string, expression: string) => Promise<void>;
   onClearOverride: (accountId: string) => void;
-  /** The exported report's shape — edited here, alongside the data it presents. */
-  layout: ReportLayout;
-  onLayoutChange: (next: ReportLayout) => void;
+  /*
+    No report-layout editing here.
+
+    It used to live at the bottom of this view, which put an editorial decision about the
+    document among tables of figures — two different jobs on one screen. The report is
+    now arranged on the report itself, by dragging.
+  */
 }) {
   const [editing, setEditing] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -362,9 +362,6 @@ export function RawDataView({
           </table>
         </div>
       </Block>
-
-      {/* ---------------------------------------------------- Report format */}
-      <ReportFormatPanel layout={layout} onChange={onLayoutChange} />
     </div>
   );
 }

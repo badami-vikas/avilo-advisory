@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router";
-import { Download, FileText, Table2, Upload, X } from "lucide-react";
+import { Download, Upload, X } from "lucide-react";
 import { formatPeriod } from "@avilo/module";
 
 import { api } from "../../lib/trpc.js";
@@ -55,11 +55,12 @@ const CHART_IDS = [
  * them. Report is the document that will be exported, shown on an actual A4 sheet.
  * Dashboard is the analysis: the same numbers, asked what they mean.
  */
-type ViewMode = "standard" | "report" | "dashboard";
+type ViewMode = "standard" | "report" | "raw" | "dashboard";
 
 const VIEWS: { id: ViewMode; label: string; hint: string }[] = [
   { id: "standard", label: "Standard view", hint: "Working surface — every figure editable" },
   { id: "report", label: "Report view", hint: "The document, exactly as it will export" },
+  { id: "raw", label: "Raw data", hint: "Every account and formula, in tables" },
   { id: "dashboard", label: "Interactive dashboard", hint: "What the numbers mean, and what to do" },
 ];
 
@@ -81,8 +82,6 @@ export function ClientDetailPage() {
   );
   const [formulas, setFormulas] = useState<FormulaRow[]>([]);
   const [note, setNote] = useState("");
-  const [mode, setMode] = useState<"report" | "raw">("report");
-
   /**
    * The view lives in the URL.
    *
@@ -405,6 +404,7 @@ export function ClientDetailPage() {
         onSetFormula={setFormula}
         onSetSeriesValue={setOverrideIn}
         layout={layout}
+        onLayoutChange={(next) => void saveLayout(next)}
         paper={paper}
       />
     ) : null;
@@ -440,36 +440,6 @@ export function ClientDetailPage() {
         you are looking at something is a different kind of act from changing it.
       */}
       <div className="no-print flex flex-wrap items-center gap-2 pl-1">
-        {/*
-          Report / Raw data governs what the Standard view shows. In the Report and
-          Dashboard views there is nothing for it to switch, so it steps aside rather than
-          sitting there inert.
-        */}
-        {view === "standard" ? (
-          <div className="inline-flex rounded-lg border border-line bg-surface p-0.5">
-            <button
-              onClick={() => setMode("report")}
-              aria-pressed={mode === "report"}
-              className={`inline-flex h-8 items-center gap-1.5 rounded-md px-3 text-[13px] font-medium transition-colors ${
-                mode === "report" ? "bg-ink text-white" : "text-ink-muted hover:text-ink"
-              }`}
-            >
-              <FileText size={14} />
-              Report
-            </button>
-            <button
-              onClick={() => setMode("raw")}
-              aria-pressed={mode === "raw"}
-              className={`inline-flex h-8 items-center gap-1.5 rounded-md px-3 text-[13px] font-medium transition-colors ${
-                mode === "raw" ? "bg-ink text-white" : "text-ink-muted hover:text-ink"
-              }`}
-            >
-              <Table2 size={14} />
-              Raw data
-            </button>
-          </div>
-        ) : null}
-
         {periods.length > 0 ? (
           <select
             value={period ?? ""}
@@ -532,6 +502,7 @@ export function ClientDetailPage() {
         <Spinner label="Building report…" />
       ) : view === "dashboard" ? (
         <Dashboard
+          clientId={clientId}
           clientName={client.name}
           report={report}
           series={series}
@@ -545,9 +516,7 @@ export function ClientDetailPage() {
         <div className="paper-frame">
           {renderReport(true)}
         </div>
-      ) : mode === "report" ? (
-        renderReport(false)
-      ) : (
+      ) : view === "raw" ? (
         <RawDataView
           report={report}
           formulas={formulas}
@@ -555,9 +524,9 @@ export function ClientDetailPage() {
           onSetMetricValue={(id, raw) => setOverride("metric", id, raw)}
           onSetFormula={setFormula}
           onClearOverride={clearOverride}
-          layout={layout}
-          onLayoutChange={(next) => void saveLayout(next)}
         />
+      ) : (
+        renderReport(false)
       )}
 
       {/* ---------------------------------------------------------- dialogs */}

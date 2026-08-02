@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { AlertTriangle, EyeOff } from "lucide-react";
+import { AlertTriangle, EyeOff, GripVertical, Plus } from "lucide-react";
 
 import { Block } from "./ui.js";
 import { Tip } from "./Tooltip.js";
@@ -15,7 +15,10 @@ import {
 import { formatPeriodLong } from "@avilo/module";
 import { byUnit, money } from "../../lib/format.js";
 import {
-  isExcluded,
+  isHidden,
+  reorderSection,
+  sectionMeta,
+  toggleHidden,
   type ReportLayout,
   type ReportSectionId,
 } from "../report/layout.js";
@@ -163,6 +166,7 @@ export function ReportView({
   onSetFormula,
   onSetSeriesValue,
   layout,
+  onLayoutChange,
   paper = false,
 }: {
   clientName: string;
@@ -189,8 +193,13 @@ export function ReportView({
     targetId: string,
     raw: string,
   ) => Promise<void>;
-  /** Which sections run in what order, and which of them reach the PDF. */
+  /** Which sections run in what order, and which of them are in the report at all. */
   layout: ReportLayout;
+  /**
+   * Persist a layout change. Absent ⇒ the report is not editable — dragging and hiding
+   * disappear, which is what a read-only embed of this component should get.
+   */
+  onLayoutChange?: (next: ReportLayout) => void;
   /**
    * Render as the document rather than as dashboard cards — see the `.paper` block in
    * app.css. The Report view sets this; the Standard view does not.
@@ -199,6 +208,13 @@ export function ReportView({
 }) {
   const [editing, setEditing] = useState<string | null>(null);
   const root = useRef<HTMLDivElement>(null);
+
+  /** Which section is being dragged, and what it is currently hovering over. */
+  const [dragging, setDragging] = useState<ReportSectionId | null>(null);
+  const [dropTarget, setDropTarget] = useState<ReportSectionId | "__end__" | null>(null);
+
+  const commit = (next: ReportLayout) => onLayoutChange?.(next);
+  const visible = layout.order.filter((id) => !isHidden(layout, id));
 
   /**
    * Printing always produces the document, from whichever view is on screen.
@@ -720,32 +736,48 @@ export function ReportView({
   };
 
   return (
-    <div ref={root} className={paper ? "paper space-y-4" : "space-y-4"}>
+    /*
+      `group/report` is what reveals each section's drag handle on hover. Named rather
+      than bare, because the sections themselves contain groups and an unnamed one would
+      make every card in the report show the handle.
+    */
+    <div
+      ref={root}
+      className={`group/report ${paper ? "paper space-y-4" : "space-y-4"}`}
+    >
       {/*
         Document-only masthead, matching the reference report: practice, then client, then
         what the document is. On paper this is the only thing identifying the PDF once it
         has left the application.
       */}
+      {/*
+        Two columns: who produced it on the left, who it is about on the right.
+
+        The practice is the constant across every report the client receives, so it leads
+        and carries the brand colour; the subject changes every month and every client, so
+        it sits opposite where the eye lands last. Stacking all four lines down the left
+        made the masthead four deep and pushed the first section down the page.
+      */}
       <div className="print-only print-masthead">
-        {/*
-          Practice and client on one line, as in the reference. Stacking them made the
-          masthead four lines deep and pushed the first section down the page.
-        */}
-        <p className="print-titleline">
-          <span className="print-practice">Avilo Advisory</span>
-          <span className="print-client">
-            {clientName}
-            {layout.showLegalName && legalName ? (
-              <span className="print-legal"> ({legalName})</span>
+        <div className="print-masthead-row">
+          <div>
+            <p className="print-practice">Avilo Advisory</p>
+            <p className="print-kicker">Monthly business snapshot</p>
+          </div>
+          <div className="print-subject">
+            <p className="print-client">
+              {clientName}
+              {layout.showLegalName && legalName ? (
+                <span className="print-legal"> ({legalName})</span>
+              ) : null}
+            </p>
+            {/* "October 2024", not "Oct 2024": this is a cover, not a table cell. */}
+            <p className="print-period">{formatPeriodLong(report.period)}</p>
+            {rangeLabel ? (
+              <p className="print-kicker">Trend data covers {rangeLabel}</p>
             ) : null}
-          </span>
-        </p>
-        {/* "October 2024", not "Oct 2024": this is a cover, not a table cell. */}
-        <p className="print-period">{formatPeriodLong(report.period)}</p>
-        <p className="print-kicker">Monthly business snapshot</p>
-        {rangeLabel ? (
-          <p className="print-kicker">Trend data covers {rangeLabel}</p>
-        ) : null}
+          </div>
+        </div>
       </div>
 
       {report.missingRequired.length > 0 ? (
@@ -768,25 +800,212 @@ export function ReportView({
         </Tip>
       ) : null}
 
-      {/*
-        Sections in stored order.
-
-        A section excluded from the PDF still renders here — the advisor reads it, edits
-        figures in it, and needs somewhere to put it back from. `data-print-excluded` is
-        what drops it on paper, resolved in CSS because @page only exists inside the
-        browser's print engine.
-      */}
-      {layout.order.map((id) => (
-        <div key={id} data-print-excluded={isExcluded(layout, id) ? "true" : undefined}>
-          {isExcluded(layout, id) ? (
-            <p className="no-print mb-1 flex items-center gap-1.5 text-[11px] font-medium text-ink-faint">
-              <EyeOff size={11} />
-              Not in the exported report — restore it under Raw data › Report format
-            </p>
+      {/* Sections in stored order, draggable when the report is editable. */}
+      {visible.map((id) => (
+        <div
+          key={id}
+          draggable={Boolean(onLayoutChange)}
+          onDragStart={(event) => {
+            setDragging(id);
+            event.dataTransfer.effectAllowed = "move";
+            // Firefox refuses to start a drag without payload on the transfer.
+            event.dataTransfer.setData("text/plain", id);
+          }}
+          onDragEnd={() => {
+            setDragging(null);
+            setDropTarget(null);
+          }}
+          onDragOver={(event) => {
+            if (!dragging || dragging === id) return;
+            event.preventDefault();
+            setDropTarget(id);
+          }}
+          onDrop={(event) => {
+            event.preventDefault();
+            if (dragging) commit(reorderSection(layout, dragging, id));
+            setDragging(null);
+            setDropTarget(null);
+          }}
+          className={`relative ${dragging === id ? "opacity-40" : ""} ${
+            dropTarget === id ? "before:absolute before:-top-1.5 before:left-0 before:right-0 before:h-0.5 before:rounded-full before:bg-accent" : ""
+          }`}
+        >
+          {onLayoutChange ? (
+            /*
+              The controls hover over the section rather than sitting above it: an
+              editing affordance that took a row of vertical space on every section
+              would change the shape of the page it is meant to be previewing.
+            */
+            <div className="no-print absolute -left-8 top-2 z-10 flex flex-col gap-1 opacity-0 transition-opacity group-hover/report:opacity-100">
+              <Tip content="Drag to move this section">
+                <span className="grid h-6 w-6 cursor-grab place-items-center rounded-md border border-line bg-surface text-ink-faint hover:text-ink active:cursor-grabbing">
+                  <GripVertical size={13} />
+                </span>
+              </Tip>
+              <Tip content="Take this section out of the report">
+                <button
+                  onClick={() => commit(toggleHidden(layout, id))}
+                  aria-label={`Hide ${sectionMeta(id).label}`}
+                  className="grid h-6 w-6 place-items-center rounded-md border border-line bg-surface text-ink-faint hover:text-flag"
+                >
+                  <EyeOff size={12} />
+                </button>
+              </Tip>
+            </div>
           ) : null}
           {sections[id]}
         </div>
       ))}
+
+      {/*
+        The tail drop zone.
+
+        Without it there is no way to drag a section to the very end — every other target
+        drops *before* something, and the last position has nothing after it.
+      */}
+      {onLayoutChange && dragging ? (
+        <div
+          onDragOver={(event) => {
+            event.preventDefault();
+            setDropTarget("__end__");
+          }}
+          onDrop={(event) => {
+            event.preventDefault();
+            if (dragging) commit(reorderSection(layout, dragging, null));
+            setDragging(null);
+            setDropTarget(null);
+          }}
+          className={`no-print rounded-lg border border-dashed py-3 text-center text-[11.5px] ${
+            dropTarget === "__end__"
+              ? "border-accent bg-accent-soft text-accent"
+              : "border-line text-ink-faint"
+          }`}
+        >
+          Drop here to move to the end
+        </div>
+      ) : null}
+
+      {onLayoutChange ? (
+        <HiddenTray
+          layout={layout}
+          onChange={commit}
+          dragging={dragging}
+          onDropHide={(id) => {
+            commit(toggleHidden(layout, id));
+            setDragging(null);
+            setDropTarget(null);
+          }}
+        />
+      ) : null}
     </div>
+  );
+}
+
+/**
+ * Sections taken out of the report, and the two options that apply to the whole document.
+ *
+ * Below the report rather than in a side panel, because that is where a removed thing
+ * goes: out of the flow, still on the page, one gesture from coming back. It replaces the
+ * Report-format panel that used to live inside Raw data, where an editorial decision about
+ * the document sat oddly among tables of figures.
+ */
+function HiddenTray({
+  layout,
+  onChange,
+  dragging,
+  onDropHide,
+}: {
+  layout: ReportLayout;
+  onChange: (next: ReportLayout) => void;
+  dragging: ReportSectionId | null;
+  onDropHide: (id: ReportSectionId) => void;
+}) {
+  const [over, setOver] = useState(false);
+
+  return (
+    <section
+      onDragOver={(event) => {
+        if (!dragging) return;
+        event.preventDefault();
+        setOver(true);
+      }}
+      onDragLeave={() => setOver(false)}
+      onDrop={(event) => {
+        event.preventDefault();
+        setOver(false);
+        if (dragging) onDropHide(dragging);
+      }}
+      className={`no-print mt-6 rounded-xl border border-dashed px-4 py-3.5 transition-colors ${
+        over ? "border-accent bg-accent-soft/60" : "border-line bg-canvas"
+      }`}
+    >
+      <div className="flex flex-wrap items-baseline gap-x-2">
+        <h2 className="text-[11px] font-semibold uppercase tracking-[0.07em] text-ink-faint">
+          Not in this report
+        </h2>
+        <p className="text-[11.5px] text-ink-muted">
+          {layout.hidden.length === 0
+            ? "Drag a section here to take it out — nothing is deleted."
+            : "Click one to put it back."}
+        </p>
+      </div>
+
+      {layout.hidden.length > 0 ? (
+        <div className="mt-2.5 flex flex-wrap gap-2">
+          {layout.hidden.map((id) => (
+            <Tip key={id} content={sectionMeta(id).hint}>
+              <button
+                onClick={() => onChange(toggleHidden(layout, id))}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-surface px-2.5 py-1.5 text-[12px] font-medium text-ink-muted transition-colors hover:border-accent hover:text-accent"
+              >
+                <Plus size={12} />
+                {sectionMeta(id).label}
+              </button>
+            </Tip>
+          ))}
+        </div>
+      ) : null}
+
+      <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1.5 border-t border-line pt-2.5">
+        <Toggle
+          checked={layout.showLegalName}
+          onChange={(showLegalName) => onChange({ ...layout, showLegalName })}
+          label="Show the registered entity name"
+          hint="Prints in brackets after the trading name. Worth turning on for anything going to a bank, an auditor or a lender."
+        />
+        <Toggle
+          checked={layout.includeChartTables}
+          onChange={(includeChartTables) => onChange({ ...layout, includeChartTables })}
+          label="Print the figures behind each chart"
+          hint="Adds the underlying table beneath every chart. Roughly doubles the length of the document."
+        />
+      </div>
+    </section>
+  );
+}
+
+function Toggle({
+  checked,
+  onChange,
+  label,
+  hint,
+}: {
+  checked: boolean;
+  onChange: (next: boolean) => void;
+  label: string;
+  hint: string;
+}) {
+  return (
+    <Tip content={hint}>
+      <label className="inline-flex cursor-pointer items-center gap-1.5 text-[12px] text-ink-muted">
+        <input
+          type="checkbox"
+          checked={checked}
+          onChange={(event) => onChange(event.target.checked)}
+          className="h-3.5 w-3.5 accent-[#1570ef]"
+        />
+        {label}
+      </label>
+    </Tip>
   );
 }

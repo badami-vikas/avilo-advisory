@@ -16,10 +16,11 @@ import { parseFigure } from "../src/lib/format.js";
 import {
   DEFAULT_ORDER,
   defaultLayout,
-  isExcluded,
+  isHidden,
   moveSection,
   normalizeLayout,
-  toggleExcluded,
+  reorderSection,
+  toggleHidden,
 } from "../src/app/report/layout.js";
 import { visibleColumns, defaultViewConfig, type ColumnSpec } from "@avilo/tables";
 
@@ -279,25 +280,58 @@ describe("report layout survives sections coming and going", () => {
   it("drops ids the registry no longer has, and de-duplicates", () => {
     const stored = {
       order: ["key-insights", "a-section-that-was-deleted", "key-insights", "flags"],
-      excludedFromPrint: ["gone-too", "flags", "flags"],
+      hidden: ["gone-too", "flags", "flags"],
     };
     const layout = normalizeLayout(stored as never);
 
     expect(layout.order.filter((id) => id === "key-insights")).toHaveLength(1);
     expect(layout.order).not.toContain("a-section-that-was-deleted");
-    expect(layout.excludedFromPrint).toEqual(["flags"]);
+    expect(layout.hidden).toEqual(["flags"]);
   });
 
-  it("round-trips an exclusion and restores it", () => {
-    const base = defaultLayout();
-    const hidden = toggleExcluded(base, "top-customers");
+  /**
+   * `hidden` was called `excludedFromPrint`. Every layout an advisor has already saved
+   * uses the old key, and reading it as absent would silently restore every section they
+   * had taken out — a client-facing document quietly growing sections back.
+   */
+  it("reads a layout written under the old key", () => {
+    const layout = normalizeLayout({
+      order: [...DEFAULT_ORDER],
+      excludedFromPrint: ["top-customers"],
+    } as never);
 
-    expect(isExcluded(hidden, "top-customers")).toBe(true);
-    // Still in the order — excluded from the PDF is not removed from the page.
+    expect(layout.hidden).toEqual(["top-customers"]);
+  });
+
+  it("round-trips hiding a section and restoring it", () => {
+    const base = defaultLayout();
+    const hidden = toggleHidden(base, "top-customers");
+
+    expect(isHidden(hidden, "top-customers")).toBe(true);
+    // Still in the order — hidden is not deleted, and restoring must put it back where
+    // it was rather than at the end.
     expect(hidden.order).toContain("top-customers");
-    expect(isExcluded(toggleExcluded(hidden, "top-customers"), "top-customers")).toBe(
-      false,
-    );
+    expect(isHidden(toggleHidden(hidden, "top-customers"), "top-customers")).toBe(false);
+  });
+
+  /**
+   * What a drag means. The forward case is the one that breaks: splice the section out
+   * first and the target index shifts, so a naive insert lands one place short.
+   */
+  it("drops a section immediately before its target, in both directions", () => {
+    const base = defaultLayout();
+    const [first, second, third] = base.order as [string, string, string];
+
+    const back = reorderSection(base, third as never, first as never);
+    expect(back.order.slice(0, 3)).toEqual([third, first, second]);
+
+    const forward = reorderSection(base, first as never, third as never);
+    expect(forward.order.slice(0, 2)).toEqual([second, first]);
+
+    // A null target means the end.
+    expect(reorderSection(base, first as never, null).order.at(-1)).toBe(first);
+    // Length is never allowed to change: nothing is deleted by moving it.
+    expect(back.order).toHaveLength(base.order.length);
   });
 
   it("moves a section without losing it, and refuses to move past either end", () => {

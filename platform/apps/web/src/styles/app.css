@@ -18,6 +18,8 @@
   --color-flag-soft: #fef3f2;
   --color-positive: #067647;
   --color-warn: #b54708;
+  /* The practice's own colour. Used for the report masthead and nothing else. */
+  --color-brand: #2c7a5d;
 
   --font-sans: ui-sans-serif, -apple-system, "Segoe UI", Roboto, Helvetica, Arial,
     sans-serif;
@@ -131,34 +133,45 @@ body {
   margin-top: 11px;
 }
 
-/* The masthead, and only in the document. */
+/* ------------------------------------------------------------- masthead */
+/*
+  Two columns: the practice on the left, the subject on the right.
+
+  The practice is the one constant across every report a client ever receives, so it leads
+  and carries the brand colour. The client and the month change every time, so they sit
+  opposite, right-aligned, where the eye finishes the line.
+*/
 .paper .print-masthead {
   margin-bottom: 14px;
-  padding-bottom: 8px;
-  border-bottom: 2px solid #101828;
+  padding-bottom: 9px;
+  border-bottom: 1px solid #d0d5dd;
 }
 
-/* Practice and client on one baseline, as in the reference. */
-.paper .print-titleline {
+.paper .print-masthead-row {
   display: flex;
-  align-items: baseline;
-  gap: 10px;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.paper .print-subject {
+  text-align: right;
 }
 
 .paper .print-practice {
-  font-size: 8pt;
+  font-size: 16pt;
   font-weight: 600;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: #475467;
-  white-space: nowrap;
+  letter-spacing: -0.01em;
+  color: var(--color-brand);
+  line-height: 1.15;
 }
 
 .paper .print-client {
-  font-size: 17pt;
+  font-size: 16pt;
   font-weight: 600;
   letter-spacing: -0.01em;
   color: #101828;
+  line-height: 1.15;
 }
 
 .paper .print-legal {
@@ -168,13 +181,13 @@ body {
 }
 
 .paper .print-period {
-  font-size: 11pt;
-  color: #101828;
+  font-size: 10.5pt;
+  color: #344054;
 }
 
 .paper .print-kicker {
-  font-size: 8.5pt;
-  color: #667085;
+  font-size: 9.5pt;
+  color: #475467;
 }
 
 /* A card that is a button must not look like one in a document. */
@@ -199,17 +212,6 @@ body {
 .paper .chart-toggle,
 .paper nav,
 .paper [role="dialog"] {
-  display: none !important;
-}
-
-/*
-  Sections the advisor left out of this client's report.
-
-  Separate from `data-print-empty`, which is about a section having no data. This one is a
-  deliberate editorial choice, it is per client, and it is reversible from Raw data ›
-  Report format — so the section still renders in the Standard view, marked.
-*/
-.paper [data-print-excluded="true"] {
   display: none !important;
 }
 

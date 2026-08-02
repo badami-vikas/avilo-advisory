@@ -27,18 +27,30 @@ export function Panel({
   id,
   title,
   subtitle,
+  summary,
   actions,
   children,
   defaultOpen = true,
+  lead,
   /** Shown in the header when the section has a finding worth surfacing collapsed. */
   badge,
 }: {
   id: string;
   title: string;
+  /** What the section measures. Shown while it is open. */
   subtitle?: string;
+  /**
+   * What the section *found*, in one line. Shown when it is collapsed.
+   *
+   * A collapsed section repeating its own definition tells the reader nothing they did
+   * not know from the title. The finding is the reason to open it — or the reason not to.
+   */
+  summary?: string;
   actions?: ReactNode;
   children: ReactNode;
   defaultOpen?: boolean;
+  /** A small visual immediately left of the badge — a gauge, a swatch. */
+  lead?: ReactNode;
   badge?: ReactNode;
 }) {
   const [open, setOpen] = useState(defaultOpen);
@@ -60,12 +72,24 @@ export function Panel({
         >
           <ChevronDown size={15} />
         </button>
-        <div className="min-w-0 flex-1">
+        <button
+          onClick={() => setOpen((value) => !value)}
+          className="min-w-0 flex-1 text-left"
+        >
           <h2 className="text-[13.5px] font-semibold tracking-tight text-ink">{title}</h2>
-          {subtitle ? (
+          {open ? (
+            subtitle ? (
+              <p className="mt-0.5 text-[11.5px] text-ink-muted">{subtitle}</p>
+            ) : null
+          ) : summary ? (
+            <p className="mt-0.5 text-[11.5px] leading-relaxed text-ink-muted">
+              {summary}
+            </p>
+          ) : subtitle ? (
             <p className="mt-0.5 text-[11.5px] text-ink-muted">{subtitle}</p>
           ) : null}
-        </div>
+        </button>
+        {lead ? <div className="shrink-0">{lead}</div> : null}
         {badge ? <div className="shrink-0">{badge}</div> : null}
         {actions ? <div className="shrink-0">{actions}</div> : null}
       </header>

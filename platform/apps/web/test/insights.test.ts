@@ -12,6 +12,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   agingDistribution,
+  dimensionDirection,
+  dimensionStory,
+  growthQuality,
   collectionPriority,
   concentration,
   forecast,
@@ -404,5 +407,107 @@ describe("narrative", () => {
       [],
     );
     expect(beats.find((beat) => beat.id === "risk")?.tone).toBe("positive");
+  });
+});
+
+/* --------------------------------------------------------- growth quality */
+
+describe("growthQuality", () => {
+  const current = {
+    customer_sales: [
+      detailRow({ label: "Rising", value: 600 }),
+      detailRow({ label: "Falling", value: 400 }),
+    ],
+    ar_customer: [detailRow({ label: "Falling", value: 300, bucket: "91_plus" })],
+  } as DetailByKind;
+
+  it("measures growth against the prior snapshot and flags payment risk", () => {
+    const prior = {
+      customer_sales: [
+        detailRow({ label: "Rising", value: 400 }),
+        detailRow({ label: "Falling", value: 500 }),
+      ],
+    } as DetailByKind;
+
+    const { points, comparable } = growthQuality(current, prior);
+    expect(comparable).toBe(true);
+
+    const rising = points.find((p) => p.label === "Rising")!;
+    expect(rising.growthPct).toBeCloseTo(50);
+    expect(rising.share).toBeCloseTo(60);
+    expect(rising.risk).toBe("low");
+
+    // Most of their balance is over ninety days old, so their revenue is not yet cash.
+    expect(points.find((p) => p.label === "Falling")?.risk).toBe("high");
+  });
+
+  /**
+   * A Sales by Customer export is a rolling twelve-month snapshot. With only one of them
+   * there is nothing to compare, and reporting every customer as flat would be a lie
+   * dressed as a measurement.
+   */
+  it("reports that nothing is comparable when there is only one snapshot", () => {
+    const { comparable } = growthQuality(current, {} as DetailByKind);
+    expect(comparable).toBe(false);
+  });
+});
+
+/* ----------------------------------------------------- dimension briefing */
+
+describe("dimensionStory", () => {
+  const series = [
+    point("2024-07", { noi_margin_pct: 12, "pl.revenue": 100 }),
+    point("2024-08", { noi_margin_pct: 14, "pl.revenue": 110 }),
+    point("2024-09", { noi_margin_pct: 16, "pl.revenue": 120 }),
+    point("2024-10", { noi_margin_pct: 18, "pl.revenue": 130 }),
+  ];
+
+  it("answers all three questions for a scored dimension", () => {
+    const report = makeReport({
+      accounts: { "pl.revenue": 130 },
+      metrics: { noi_margin_pct: 18 },
+    });
+    const health = healthScore(report, series, {});
+    const profitability = health.dimensions.find((d) => d.id === "profitability")!;
+    const story = dimensionStory(profitability, report, series, {} as DetailByKind);
+
+    expect(story.happened).toContain("18.0%");
+    expect(story.weakened).toBeTruthy();
+    expect(story.attention).toBeTruthy();
+  });
+
+  /** A dimension with no inputs must say what is missing, not invent a concern. */
+  it("says what is missing rather than manufacturing a finding", () => {
+    const report = makeReport({});
+    const health = healthScore(report, [], {});
+    const collection = health.dimensions.find((d) => d.id === "collection")!;
+    const story = dimensionStory(collection, report, [], {} as DetailByKind);
+
+    expect(story.happened).toMatch(/ageing/i);
+    expect(story.attention).toMatch(/import/i);
+  });
+});
+
+describe("dimensionDirection", () => {
+  /**
+   * Collection days is inverted: fewer is better. A dimension that read a fall as a
+   * deterioration would colour the radar backwards on the one axis where it matters most.
+   */
+  it("reads a fall in an inverted dimension as an improvement", () => {
+    const base = {
+      id: "collection" as const,
+      label: "Collection",
+      score: 60,
+      value: 30,
+      unit: "days",
+      basis: "",
+      inverted: true,
+    };
+    expect(dimensionDirection({ ...base, quarterChange: -8 })).toBe("better");
+    expect(dimensionDirection({ ...base, quarterChange: 8 })).toBe("worse");
+    expect(dimensionDirection({ ...base, quarterChange: null })).toBe("unknown");
+    expect(dimensionDirection({ ...base, inverted: false, quarterChange: 8 })).toBe(
+      "better",
+    );
   });
 });

@@ -33,6 +33,9 @@ export interface Movement {
 
 const FLAT_BAND_PCT = 1.5;
 
+/** Three readings back — "last quarter", for the health dimensions. */
+export const QUARTER = 3;
+
 export function movement(series: SeriesPoint[], id: string): Movement {
   const points = series.filter((p) => p.values[id] !== null && p.values[id] !== undefined);
   const current = points.at(-1)?.values[id] ?? null;
@@ -86,6 +89,24 @@ export function trendPct(series: SeriesPoint[], id: string, n: number): number |
   return (num / den / Math.abs(meanY)) * 100;
 }
 
+/**
+ * A reading `back` periods before the latest one, skipping gaps.
+ *
+ * Used for quarter-on-quarter comparison. Counting back through *present* readings rather
+ * than through calendar months is deliberate: a client who skipped an import should be
+ * compared with the last three months they actually have, not with a hole.
+ */
+export function valueAt(
+  series: SeriesPoint[],
+  id: string,
+  back: number,
+): number | null {
+  const values = series
+    .map((p) => p.values[id])
+    .filter((v): v is number => v !== null && v !== undefined);
+  return values.at(-1 - back) ?? null;
+}
+
 /* ------------------------------------------------------------ health score */
 
 export type Dimension =
@@ -107,6 +128,24 @@ export interface HealthDimension {
   basis: string;
   /** Why it could not be scored. Set only when `score` is null. */
   missing?: string;
+  /**
+   * Change in the measured value against the same figure a quarter ago, in the
+   * dimension's own unit. Null where there is no comparable reading — which is the
+   * honest answer for the two dimensions with no month-by-month history.
+   */
+  quarterChange: number | null;
+  /** True when a rise in `value` is a deterioration — collection days, say. */
+  inverted: boolean;
+}
+
+/** Which way a dimension moved, once inversion is taken into account. */
+export function dimensionDirection(
+  dimension: HealthDimension,
+): "better" | "worse" | "flat" | "unknown" {
+  if (dimension.quarterChange === null) return "unknown";
+  if (Math.abs(dimension.quarterChange) < 0.05) return "flat";
+  const rose = dimension.quarterChange > 0;
+  return rose === dimension.inverted ? "worse" : "better";
 }
 
 export interface HealthScore {
@@ -144,6 +183,13 @@ export function healthScore(
 
   const dimensions: HealthDimension[] = [];
 
+  /** The same figure a quarter ago, or null when the history does not reach. */
+  const quarterAgo = (id: string, current: number | null): number | null => {
+    if (current === null) return null;
+    const then = valueAt(series, id, QUARTER);
+    return then === null ? null : current - then;
+  };
+
   const noi = value("noi_margin_pct");
   dimensions.push({
     id: "profitability",
@@ -152,6 +198,8 @@ export function healthScore(
     value: noi,
     unit: "percent",
     basis: "Net operating income margin, scored from 0% up to 20%.",
+    quarterChange: quarterAgo("noi_margin_pct", noi),
+    inverted: false,
     ...(noi === null ? { missing: "Needs revenue, cost of sales and overhead." } : {}),
   });
 
@@ -163,6 +211,8 @@ export function healthScore(
     value: cash,
     unit: "days",
     basis: "Days of cash on hand, scored from none up to 90 days of runway.",
+    quarterChange: quarterAgo("days_cash_on_hand", cash),
+    inverted: false,
     ...(cash === null ? { missing: "Needs a balance sheet with a cash total." } : {}),
   });
 
@@ -175,6 +225,8 @@ export function healthScore(
     value: dso,
     unit: "days",
     basis: "Days sales outstanding, scored from 60 days down to 15.",
+    quarterChange: quarterAgo("dso", dso),
+    inverted: true,
     ...(dso === null ? { missing: "Needs an A/R ageing report for this period." } : {}),
   });
 
@@ -198,6 +250,10 @@ export function healthScore(
     value: growthPct,
     unit: "percent",
     basis: "Last three months of revenue against the three before, scored from −20% to +20%.",
+    // Already a quarter-on-quarter measure — comparing it with itself a quarter ago
+    // would be a second derivative, which is not something anyone acts on.
+    quarterChange: null,
+    inverted: false,
     ...(growthPct === null
       ? { missing: "Needs at least six months of profit & loss history." }
       : {}),
@@ -212,6 +268,10 @@ export function healthScore(
     value: conc.topShare,
     unit: "percent",
     basis: "Share of revenue held by the largest customer, scored from 60% down to 10%.",
+    // The Sales by Customer export is a rolling twelve-month snapshot, so there is no
+    // month-by-month history of it to compare against.
+    quarterChange: null,
+    inverted: true,
     ...(conc.topShare === null
       ? { missing: "Needs a Sales by Customer export." }
       : {}),
@@ -680,6 +740,10 @@ export interface Action {
   /** What it is worth, when that can be quantified. */
   impact: string | null;
   effort: "low" | "medium" | "high";
+  /** How soon it stops being cheap to fix. Drives the default due date. */
+  urgency: "high" | "medium" | "low";
+  /** Days from the period end, used until someone sets a real date. */
+  dueInDays: number;
   section: string;
 }
 
@@ -715,6 +779,8 @@ export function actions(
       why: `Invoices are settling in ${Math.round(dso)} days. Every day above 30 is a day's revenue sitting in a customer's account rather than yours.`,
       impact: `Frees about ${money(freed)} of cash, once.`,
       effort: "medium",
+      urgency: "high",
+      dueInDays: 30,
       section: "receivables",
     });
   }
@@ -730,6 +796,8 @@ export function actions(
       why: `${priority.map((row) => row.label).join(", ")} are more than sixty days late. Balances past sixty days are materially less likely to be collected in full.`,
       impact: `${money(sum)} outstanding.`,
       effort: "low",
+      urgency: "high",
+      dueInDays: 14,
       section: "receivables",
     });
   }
@@ -742,6 +810,8 @@ export function actions(
       why: `${conc.rows[0]?.label} is ${conc.topShare.toFixed(0)}% of revenue. Losing them would take out roughly ${money((conc.total * conc.topShare) / 100)} of annual billing.`,
       impact: null,
       effort: "high",
+      urgency: "medium",
+      dueInDays: 90,
       section: "customers",
     });
   }
@@ -757,6 +827,8 @@ export function actions(
       impact:
         revenue !== null ? `One point of gross margin is ${money(revenue * 0.01)} a month.` : null,
       effort: "medium",
+      urgency: "medium",
+      dueInDays: 45,
       section: "profitability",
     });
   }
@@ -768,6 +840,8 @@ export function actions(
       why: "The thirteen-week projection goes negative on current assumptions. The levers are collection speed, payment timing and discretionary spend, in that order.",
       impact: null,
       effort: "high",
+      urgency: "high",
+      dueInDays: 7,
       section: "forecast",
     });
   }
@@ -781,11 +855,206 @@ export function actions(
       why: `Referral partners produced ${money(referrals.reduce((sum, row) => sum + row.value, 0))} over the last ninety days, and ${top?.label} led it.`,
       impact: null,
       effort: "low",
+      urgency: "low",
+      dueInDays: 60,
       section: "referrals",
     });
   }
 
   return out;
+}
+
+/* ------------------------------------------------- per-dimension briefing */
+
+export interface DimensionStory {
+  happened: string;
+  weakened: string;
+  attention: string;
+}
+
+/**
+ * One dimension of the health score, in three sentences.
+ *
+ * Shown when the advisor hovers a point on the radar. The three questions are fixed —
+ * what happened, what weakened, what needs attention — but each answer is measured, and a
+ * dimension with nothing wrong says so rather than manufacturing a concern.
+ */
+export function dimensionStory(
+  dimension: HealthDimension,
+  report: PeriodReport,
+  series: SeriesPoint[],
+  detail: DetailByKind,
+): DimensionStory {
+  const account = (id: string) =>
+    report.accounts.find((a) => a.accountId === id)?.value ?? null;
+  const direction = dimensionDirection(dimension);
+  const moved =
+    dimension.quarterChange === null
+      ? "There is no reading from a quarter ago to compare against."
+      : direction === "flat"
+        ? "It has barely moved since last quarter."
+        : `${direction === "better" ? "Improved" : "Deteriorated"} by ${Math.abs(dimension.quarterChange).toFixed(1)}${dimension.unit === "percent" ? " points" : dimension.unit === "days" ? " days" : ""} since last quarter.`;
+
+  if (dimension.missing) {
+    return {
+      happened: dimension.missing,
+      weakened: "Nothing can be assessed until that import arrives.",
+      attention: `Import the missing report, then this dimension scores automatically.`,
+    };
+  }
+
+  switch (dimension.id) {
+    case "profitability": {
+      const gross = movement(series, "gross_margin_pct");
+      const expenses = [...(detail["pl_expense"] ?? [])].sort(
+        (a, b) => Math.abs(b.value) - Math.abs(a.value),
+      );
+      const revenue = account("pl.revenue");
+      return {
+        happened: `Operating margin is ${dimension.value?.toFixed(1)}%. ${moved}`,
+        weakened:
+          gross.change !== null && gross.change < -0.3
+            ? `Gross margin fell ${Math.abs(gross.change).toFixed(1)} points on the month, so the pressure is in delivery cost rather than overhead.`
+            : expenses[0]
+              ? `Nothing is eroding sharply. The largest single cost line is ${expenses[0].label.trim()} at ${money(Math.abs(expenses[0].value))}.`
+              : "Nothing is eroding sharply.",
+        attention:
+          revenue === null
+            ? "Watch the trend rather than the month."
+            : `One point of margin is ${money(revenue * 0.01)} a month — that is the size of the prize on any pricing or cost decision.`,
+      };
+    }
+
+    case "liquidity": {
+      const cashMove = movement(series, "bs.cash");
+      return {
+        happened: `${Math.round(dimension.value ?? 0)} days of cash at the current rate of spend. ${moved}`,
+        weakened:
+          cashMove.change !== null && cashMove.change < 0
+            ? `The balance fell ${money(Math.abs(cashMove.change))} on the month.`
+            : "The balance is not falling.",
+        attention:
+          (dimension.value ?? 0) < 30
+            ? "Under thirty days of runway leaves no room for a slow-paying month."
+            : "Runway is comfortable; the thirteen-week projection is the thing to watch, not the balance.",
+      };
+    }
+
+    case "collection": {
+      const overdue = agingDistribution(report, "ar");
+      const worst = collectionPriority(detail["ar_customer"] ?? [], 1)[0];
+      return {
+        happened: `Invoices are settling in ${Math.round(dimension.value ?? 0)} days. ${moved}`,
+        weakened:
+          overdue.overdueShare === null
+            ? "No ageing detail was imported for this period."
+            : `${overdue.overdueShare.toFixed(0)}% of ${money(overdue.total)} is more than thirty days past due.`,
+        attention: worst
+          ? `${worst.label} is the first call — ${money(worst.value)}, ${worst.reason.toLowerCase()}`
+          : "Nothing is materially overdue.",
+      };
+    }
+
+    case "growth": {
+      const revenue = movement(series, "pl.revenue");
+      const slope = trendPct(series, "pl.revenue", 6);
+      return {
+        happened: `The last quarter ran ${dimension.value === null ? "—" : `${dimension.value >= 0 ? "+" : ""}${dimension.value.toFixed(1)}%`} against the quarter before.`,
+        weakened:
+          slope === null
+            ? "Six months of history are needed before a trend can be called."
+            : Math.abs(slope) < 1
+              ? "Over six months the line is flat — this is a steady business, not a growing one."
+              : `Over six months revenue is ${slope > 0 ? "rising" : "falling"} about ${Math.abs(slope).toFixed(1)}% a month.`,
+        attention:
+          revenue.direction === "down"
+            ? "This month was down on last. One month is not a trend, but two would be."
+            : "Growth without margin is volume. Check the profitability axis alongside this one.",
+      };
+    }
+
+    case "concentration": {
+      const conc = concentration(detail["customer_sales"] ?? []);
+      const top = conc.rows[0];
+      return {
+        happened: top
+          ? `${top.label} is ${top.share.toFixed(1)}% of the last twelve months' billings.`
+          : "No customer revenue has been imported.",
+        weakened:
+          conc.customersTo80 === null
+            ? "Nothing to assess."
+            : `${conc.customersTo80} customer${conc.customersTo80 === 1 ? "" : "s"} make up 80% of revenue.`,
+        attention:
+          (conc.topShare ?? 0) > 30 && top
+            ? `Losing ${top.label} would take out roughly ${money((conc.total * top.share) / 100)} of annual billing.`
+            : "The book is spread widely enough that no single loss would be structural.",
+      };
+    }
+  }
+}
+
+/* -------------------------------------------------------- growth quality */
+
+export interface GrowthQualityPoint {
+  label: string;
+  /** Change in trailing-twelve-month billings against the prior snapshot, %. */
+  growthPct: number | null;
+  /** Share of total billings. */
+  share: number;
+  revenue: number;
+  /** Outstanding balance as a share of what they bill — the exposure axis. */
+  exposurePct: number;
+  risk: "low" | "medium" | "high";
+}
+
+/**
+ * Every customer positioned by how they are moving and how much they are owed.
+ *
+ * The reference for this chart plots growth against *gross margin per customer*, which
+ * the source exports do not carry — a Sales by Customer report has revenue and nothing
+ * about the cost of serving it. Rather than invent a margin, the vertical axis is the
+ * share of revenue the customer represents, which answers the question the quadrant
+ * labels actually ask: does this movement matter?
+ *
+ * Payment risk is real and comes from the ageing report.
+ */
+export function growthQuality(
+  detail: DetailByKind,
+  priorDetail: DetailByKind,
+): { points: GrowthQualityPoint[]; comparable: boolean } {
+  const current = detail["customer_sales"] ?? [];
+  const prior = priorDetail["customer_sales"] ?? [];
+  const owed = new Map((detail["ar_customer"] ?? []).map((row) => [row.label, row]));
+  const before = new Map(prior.map((row) => [row.label, row.value]));
+
+  const total = current.reduce((sum, row) => sum + Math.max(0, row.value), 0);
+  if (total === 0) return { points: [], comparable: false };
+
+  const points = current
+    .filter((row) => row.value > 0)
+    .map((row) => {
+      const was = before.get(row.label);
+      const balance = owed.get(row.label);
+      const exposurePct = balance ? (balance.value / row.value) * 100 : 0;
+      const bucket = balance?.bucket ?? null;
+      return {
+        label: row.label,
+        growthPct:
+          was === undefined || was === 0 ? null : ((row.value - was) / Math.abs(was)) * 100,
+        share: (row.value / total) * 100,
+        revenue: row.value,
+        exposurePct,
+        risk:
+          bucket === "91_plus" || bucket === "61_90"
+            ? ("high" as const)
+            : bucket === "31_60"
+              ? ("medium" as const)
+              : ("low" as const),
+      };
+    })
+    .sort((a, b) => b.revenue - a.revenue);
+
+  return { points, comparable: points.some((p) => p.growthPct !== null) };
 }
 
 /* ------------------------------------------------------------- narrative */

@@ -32,127 +32,31 @@ import {
   BubbleMatrix,
   Donut,
   Gauge,
+  GroupedBars,
   Pareto,
-  Radar,
   TrendLine,
   Waterfall,
 } from "./charts.js";
 import { Finding, NeedsData, Panel, SeverityChip } from "./parts.js";
 
-/* ----------------------------------------------------------------- health */
+/* -------------------------------------------------------- series explorer */
 
-export function HealthSection({ health }: { health: HealthScore }) {
-  const scored = health.dimensions.filter((d) => d.score !== null);
+/**
+ * Every series the trend chart can draw, and what a breakdown of it looks like.
+ *
+ * `breakdown` names the detail rows that decompose the series for the selected month.
+ * Not every series has one — operating income is an arithmetic result rather than a sum
+ * of lines — and the section says so rather than showing an empty strip.
+ */
+const SERIES = [
+  { id: "pl.revenue", label: "Revenue", color: "#1570ef", breakdown: "pl_income" },
+  { id: "pl.cogs", label: "Cost of sales", color: "#f79009", breakdown: null },
+  { id: "pl.overhead", label: "Overhead", color: "#e8734a", breakdown: "pl_expense" },
+  { id: "gross_profit", label: "Gross profit", color: "#12b76a", breakdown: null },
+  { id: "net_operating_income", label: "Operating income", color: "#7a5af8", breakdown: null },
+] as const;
 
-  return (
-    <Panel
-      id="health"
-      title="Financial health"
-      subtitle="Five dimensions, each scored against a stated band"
-      badge={
-        health.overall !== null ? (
-          <span className="num text-[12.5px] font-semibold text-ink">
-            {Math.round(health.overall)}/100
-          </span>
-        ) : null
-      }
-    >
-      {scored.length === 0 ? (
-        <NeedsData
-          what="Nothing can be scored yet"
-          upload="a Profit & Loss and a Balance Sheet"
-        />
-      ) : (
-        <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
-          <div>
-            <Radarish health={health} />
-          </div>
-          <div className="divide-y divide-line-soft">
-            {health.dimensions.map((dimension) => (
-              <div key={dimension.id} className="flex items-start gap-3 py-2.5">
-                <div className="min-w-0 flex-1">
-                  <p className="text-[12.5px] font-medium text-ink">{dimension.label}</p>
-                  <p className="mt-0.5 text-[11.5px] leading-relaxed text-ink-muted">
-                    {dimension.missing ?? dimension.basis}
-                  </p>
-                </div>
-                <div className="w-24 shrink-0 text-right">
-                  {dimension.score === null ? (
-                    <span className="text-[12px] text-ink-faint">Not scored</span>
-                  ) : (
-                    <>
-                      <span className="num text-[14px] font-semibold text-ink">
-                        {Math.round(dimension.score)}
-                      </span>
-                      <span className="num block text-[11px] text-ink-faint">
-                        {dimension.unit === "percent"
-                          ? percent(dimension.value)
-                          : dimension.unit === "days"
-                            ? `${Math.round(dimension.value ?? 0)} days`
-                            : moneyFull(dimension.value)}
-                      </span>
-                    </>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {health.overall !== null ? (
-        <Finding>
-          Scored {Math.round(health.overall)} out of 100 across {health.scored} of five
-          dimensions
-          {health.scored < 5
-            ? " — the unscored ones are waiting on imports rather than failing"
-            : ""}
-          . The weakest is{" "}
-          <strong>
-            {
-              [...scored].sort((a, b) => (a.score ?? 0) - (b.score ?? 0))[0]
-                ?.label
-            }
-          </strong>
-          , the strongest{" "}
-          <strong>
-            {[...scored].sort((a, b) => (b.score ?? 0) - (a.score ?? 0))[0]?.label}
-          </strong>
-          .
-        </Finding>
-      ) : null}
-    </Panel>
-  );
-}
-
-/** The radar plus its own gauge, kept together so the section body stays readable. */
-function Radarish({ health }: { health: HealthScore }) {
-  return (
-    <div>
-      <Radar
-        labels={health.dimensions.map((d) => d.label)}
-        values={health.dimensions.map((d) => d.score)}
-      />
-      {health.overall !== null ? (
-        <Gauge
-          value={health.overall}
-          label="Overall"
-          display={`${Math.round(health.overall)}`}
-          tone={
-            health.band === "strong"
-              ? "#12b76a"
-              : health.band === "steady"
-                ? "#1570ef"
-                : "#d92d20"
-          }
-          height={120}
-        />
-      ) : null}
-    </div>
-  );
-}
-
-/* ----------------------------------------------------------------- growth */
+type SeriesId = (typeof SERIES)[number]["id"];
 
 export function GrowthSection({
   series,
@@ -165,49 +69,151 @@ export function GrowthSection({
   priorDetail: DetailByKind;
   periodLabel: string;
 }) {
+  /**
+   * Which series are picked out. Empty is the resting state, not a filter that has
+   * removed everything — the chart shows all of them, as a trend.
+   */
+  const [selected, setSelected] = useState<SeriesId[]>([]);
   const labels = series.map((point) => point.periodLabel);
   const revenue = movement(series, "pl.revenue");
   const slope = trendPct(series, "pl.revenue", 6);
 
-  const bridge = useMemo(
-    () => movements(detail["pl_income"] ?? [], priorDetail["pl_income"] ?? [], 6),
-    [detail, priorDetail],
-  );
+  const toggle = (id: SeriesId) =>
+    setSelected((current) =>
+      current.includes(id) ? current.filter((x) => x !== id) : [...current, id],
+    );
+
+  const chosen = SERIES.filter((entry) => selected.includes(entry.id));
+
+  /*
+    The composition of a single selected series for the month on screen, with each line's
+    movement against last month. This is what replaced the standalone revenue waterfall:
+    the same decomposition, reached by selecting the series it decomposes rather than
+    printed unconditionally further down the page.
+  */
+  const composition = (() => {
+    if (chosen.length !== 1) return null;
+    const entry = chosen[0]!;
+    if (!entry.breakdown) {
+      return { entry, rows: [], unavailable: `${entry.label} is a computed result, not a sum of lines — there is nothing to break down.` };
+    }
+    const rows = (detail[entry.breakdown] ?? []).filter((row) => Math.abs(row.value) > 0);
+    if (rows.length === 0) {
+      return { entry, rows: [], unavailable: `No line detail was imported for ${entry.label.toLowerCase()} this period.` };
+    }
+    const priorRows = new Map(
+      (priorDetail[entry.breakdown] ?? []).map((row) => [row.label, row.value]),
+    );
+    const total = rows.reduce((sum, row) => sum + Math.abs(row.value), 0);
+    return {
+      entry,
+      unavailable: null,
+      rows: rows
+        .map((row) => ({
+          label: row.label.trim(),
+          value: Math.abs(row.value),
+          share: (Math.abs(row.value) / total) * 100,
+          change: Math.abs(row.value) - Math.abs(priorRows.get(row.label) ?? 0),
+          isNew: !priorRows.has(row.label),
+        }))
+        .sort((a, b) => b.value - a.value),
+    };
+  })();
 
   return (
     <Panel
       id="growth"
       title="Growth and its quality"
-      subtitle="Where the top line went, and which lines moved it"
+      subtitle="Click a measure to isolate it. Pick more than one to compare them month by month."
+      summary={
+        revenue.direction === "unknown"
+          ? "Only one month imported — no movement to describe yet."
+          : `Revenue ${revenue.direction === "flat" ? "held level" : `moved ${money(revenue.change)}`} on the month${slope === null ? "" : `, ${Math.abs(slope) < 1 ? "flat" : slope > 0 ? "rising" : "falling"} over six`}.`
+      }
     >
-      <TrendLine
-        labels={labels}
-        datasets={[
-          {
-            label: "Revenue",
-            values: series.map((p) => p.values["pl.revenue"] ?? null),
-            color: "#1570ef",
-            fill: true,
-          },
-          {
-            label: "Net operating income",
-            values: series.map((p) => p.values["net_operating_income"] ?? null),
-            color: "#12b76a",
-          },
-        ]}
-      />
+      {chosen.length === 0 ? (
+        <TrendLine
+          labels={labels}
+          datasets={SERIES.filter((entry) =>
+            ["pl.revenue", "net_operating_income"].includes(entry.id),
+          ).map((entry) => ({
+            label: entry.label,
+            values: series.map((p) => p.values[entry.id] ?? null),
+            color: entry.color,
+            fill: entry.id === "pl.revenue",
+          }))}
+        />
+      ) : (
+        <GroupedBars
+          labels={labels}
+          datasets={chosen.map((entry) => ({
+            label: entry.label,
+            values: series.map((p) => p.values[entry.id] ?? null),
+            color: entry.color,
+          }))}
+        />
+      )}
 
-      {bridge.rows.length > 0 && revenue.previous !== null ? (
-        <div className="mt-5">
+      {/*
+        The selector, below the chart where a legend would be — because it *is* the
+        legend, with the click doing something. Selecting is highlighting rather than
+        filtering: an unselected measure is dimmed, never hidden from the list.
+      */}
+      <div className="mt-3 flex flex-wrap items-center gap-1.5">
+        {SERIES.map((entry) => {
+          const on = selected.includes(entry.id);
+          const present = series.some((p) => p.values[entry.id] !== null);
+          return (
+            <Tip
+              key={entry.id}
+              content={
+                present
+                  ? on
+                    ? `Showing ${entry.label} as bars. Click to put it back in the trend.`
+                    : `Isolate ${entry.label}${entry.breakdown ? " and see what it is made of" : ""}.`
+                  : `${entry.label} has not been imported for any month yet.`
+              }
+            >
+              <button
+                onClick={() => present && toggle(entry.id)}
+                disabled={!present}
+                aria-pressed={on}
+                className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[12px] font-medium transition-all disabled:opacity-40 ${
+                  on
+                    ? "border-transparent text-white shadow-[0_1px_2px_rgba(16,24,40,0.12)]"
+                    : "border-line bg-surface text-ink-muted hover:border-ink-faint hover:text-ink"
+                }`}
+                style={on ? { background: entry.color } : undefined}
+              >
+                <span
+                  className="h-2 w-2 rounded-full"
+                  style={{ background: on ? "#fff" : entry.color }}
+                />
+                {entry.label}
+              </button>
+            </Tip>
+          );
+        })}
+        {selected.length > 0 ? (
+          <button
+            onClick={() => setSelected([])}
+            className="ml-1 text-[11.5px] text-ink-faint underline-offset-2 hover:text-ink hover:underline"
+          >
+            Back to the trend
+          </button>
+        ) : null}
+      </div>
+
+      {composition ? (
+        <div className="mt-4">
           <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.06em] text-ink-faint">
-            What moved revenue, line by line
+            {composition.entry.label} — what it is made of, {periodLabel}
           </p>
-          <Waterfall
-            opening={revenue.previous}
-            openingLabel="Last month"
-            steps={bridge.rows.map((row) => ({ label: row.label.trim(), change: row.change }))}
-            closingLabel={periodLabel}
-          />
+          {composition.unavailable ? (
+            <p className="text-[12px] text-ink-faint">{composition.unavailable}</p>
+          ) : (
+            <Composition rows={composition.rows} color={composition.entry.color} />
+          )}
         </div>
       ) : null}
 
@@ -218,11 +224,7 @@ export function GrowthSection({
           <>
             Revenue {revenue.direction === "flat" ? "was effectively level" : `moved ${money(revenue.change)}`}
             {revenue.changePct !== null ? ` (${revenue.changePct.toFixed(1)}%)` : ""} on the
-            month
-            {bridge.rows[0]
-              ? `, and ${bridge.rows[0].label.trim()} accounts for the largest single part of it at ${money(bridge.rows[0].change)}`
-              : ""}
-            .{" "}
+            month.{" "}
             {slope === null
               ? "Six months of history are needed before a trend can be called."
               : `Over six months the line is ${
@@ -234,6 +236,75 @@ export function GrowthSection({
         )}
       </Finding>
     </Panel>
+  );
+}
+
+/**
+ * A single stacked bar of the lines that make up a measure, with the detail on hover.
+ *
+ * One bar rather than a table because the question is proportion — which line *is* this
+ * month — and a table of five numbers makes the reader do the division. The hover carries
+ * the arithmetic the bar cannot: the amount, the share, and what it did since last month.
+ */
+function Composition({
+  rows,
+  color,
+}: {
+  rows: { label: string; value: number; share: number; change: number; isNew: boolean }[];
+  color: string;
+}) {
+  const [hover, setHover] = useState<string | null>(null);
+  const active = rows.find((row) => row.label === hover) ?? null;
+
+  return (
+    <div>
+      <div className="flex h-7 w-full overflow-hidden rounded-lg border border-line">
+        {rows.map((row, index) => (
+          <button
+            key={row.label}
+            onMouseEnter={() => setHover(row.label)}
+            onMouseLeave={() => setHover(null)}
+            aria-label={`${row.label}: ${moneyFull(row.value)}`}
+            className="h-full border-r border-white/70 transition-opacity last:border-r-0"
+            style={{
+              width: `${row.share}%`,
+              background: color,
+              // Successive segments step down in weight so adjacent lines stay
+              // distinguishable without five arbitrary colours.
+              opacity: hover === null ? 1 - index * 0.13 : hover === row.label ? 1 : 0.25,
+            }}
+          />
+        ))}
+      </div>
+
+      <div className="mt-2 min-h-[34px]">
+        {active ? (
+          <p className="text-[12.5px] text-ink">
+            <span className="font-medium">{active.label}</span> — {moneyFull(active.value)},{" "}
+            {active.share.toFixed(1)}% of the total.{" "}
+            {active.isNew ? (
+              <span className="text-positive">New this month.</span>
+            ) : Math.abs(active.change) < 1 ? (
+              <span className="text-ink-muted">Unchanged on last month.</span>
+            ) : (
+              <span className={active.change > 0 ? "text-positive" : "text-flag"}>
+                {active.change > 0 ? "Up" : "Down"} {moneyFull(Math.abs(active.change))} on
+                last month.
+              </span>
+            )}
+          </p>
+        ) : (
+          <p className="flex flex-wrap gap-x-3 gap-y-1 text-[11.5px] text-ink-faint">
+            {rows.slice(0, 6).map((row) => (
+              <span key={row.label}>
+                {row.label} {row.share.toFixed(0)}%
+              </span>
+            ))}
+            <span className="italic">Hover a segment for the detail.</span>
+          </p>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -269,6 +340,13 @@ export function ProfitabilitySection({
       id="profitability"
       title="Profitability"
       subtitle="What is kept from what is billed"
+      summary={
+        grossTrend === null
+          ? "Six months of history are needed before a direction can be called."
+          : Math.abs(grossTrend) < 1
+            ? "Gross margin has held steady over six months."
+            : `Gross margin is ${grossTrend > 0 ? "improving" : "eroding"} about ${Math.abs(grossTrend).toFixed(1)}% a month.`
+      }
     >
       <TrendLine
         labels={labels}
@@ -402,7 +480,16 @@ export function CashSection({
   const dpo = metric("dpo");
 
   return (
-    <Panel id="cash" title="Profit into cash" subtitle="What the month earned against what it banked">
+    <Panel
+      id="cash"
+      title="Profit into cash"
+      subtitle="What the month earned against what it banked"
+      summary={
+        conversion === null
+          ? "Needs a second month of ageing data before profit can be traced into cash."
+          : `${Math.round(conversion)}% of operating income became cash this month.`
+      }
+    >
       {canBridge ? (
         <Waterfall
           opening={noi}
@@ -537,6 +624,7 @@ export function CustomersSection({
       id="customers"
       title="Customer economics"
       subtitle="Who the business runs on, and how exposed that makes it"
+      summary={`${conc.rows[0]?.label} is ${conc.topShare?.toFixed(0)}% of revenue; ${conc.customersTo80} customer${conc.customersTo80 === 1 ? "" : "s"} make up 80%.`}
       badge={
         conc.topShare !== null && conc.topShare > 30 ? (
           <SeverityChip severity={conc.topShare > 50 ? "critical" : "watch"} />
@@ -648,6 +736,11 @@ export function AgingSection({
       id={id}
       title={title}
       subtitle={subtitle}
+      summary={
+        distribution.overdueShare === null
+          ? `${money(distribution.total)} outstanding.`
+          : `${money(distribution.total)} outstanding, ${distribution.overdueShare.toFixed(0)}% of it more than thirty days ${prefix === "ar" ? "overdue" : "past due"}.`
+      }
       badge={
         distribution.overdueShare !== null && distribution.overdueShare > 20 ? (
           <SeverityChip severity={distribution.overdueShare > 40 ? "critical" : "warning"} />
@@ -740,6 +833,7 @@ export function ReferralsSection({ detail }: { detail: DetailByKind }) {
       id="referrals"
       title="Referral to cash"
       subtitle="Where the work comes from — last ninety days"
+      summary={`${sorted[0]?.label} is ${(((sorted[0]?.value ?? 0) / total) * 100).toFixed(0)}% of ${money(total)} referred across ${sorted.length} source${sorted.length === 1 ? "" : "s"}.`}
     >
       <div className="space-y-1.5">
         {sorted.map((row) => {
@@ -873,6 +967,11 @@ export function ForecastSection({
       id="forecast"
       title="Thirteen weeks ahead"
       subtitle="Cash on the current run rate, and what would break it"
+      summary={
+        base.breachWeek === null
+          ? `Stays positive, with a low point of ${money(base.low)}.`
+          : `Turns negative in week ${base.breachWeek}, bottoming at ${money(base.low)}.`
+      }
       badge={base.breachWeek !== null ? <SeverityChip severity="critical" /> : null}
     >
       <TrendLine
@@ -1034,6 +1133,11 @@ export function WarningsSection({
       id="warnings"
       title="Early warning centre"
       subtitle="Everything the data says is worth looking at, ranked"
+      summary={
+        warnings.length === 0
+          ? "Nothing outside its benchmark, and no structural pattern present."
+          : `${warnings.length} flagged — the most serious is ${warnings[0]!.title.toLowerCase()}.`
+      }
       badge={
         warnings[0] ? <SeverityChip severity={warnings[0].severity} /> : null
       }

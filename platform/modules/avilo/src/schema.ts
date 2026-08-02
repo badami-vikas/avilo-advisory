@@ -392,6 +392,41 @@ export const stickyNotes = sqliteTable(
 
 export type StickyNote = typeof stickyNotes.$inferSelect;
 
+/**
+ * Who owns a recommended action, when it is due, and whether it has been started.
+ *
+ * The actions themselves are derived — they are recomputed from the month's data every
+ * time the dashboard renders, and storing them would let a stale recommendation outlive
+ * the condition that produced it. What cannot be derived is the human part: an owner, a
+ * date, a status. Those are stored against the action's stable id so a recomputed action
+ * finds its own assignment again.
+ *
+ * Keyed by period as well as client: "chase the overdue accounts" in October is a
+ * different piece of work from the same sentence in November.
+ */
+export const actionStates = sqliteTable(
+  "action_states",
+  {
+    clientId: text("client_id")
+      .notNull()
+      .references(() => clients.id, { onDelete: "cascade" }),
+    period: text("period").notNull(),
+    /** The generated action's id, e.g. "collect" or "diversify". */
+    actionId: text("action_id").notNull(),
+    owner: text("owner"),
+    /** ISO date. Null until someone commits to one. */
+    dueDate: text("due_date"),
+    /** not_started | in_progress | done | dropped */
+    status: text("status").notNull().default("not_started"),
+    updatedAt: text("updated_at").notNull().default(now),
+  },
+  (table) => [
+    primaryKey({ columns: [table.clientId, table.period, table.actionId] }),
+  ],
+);
+
+export type ActionState = typeof actionStates.$inferSelect;
+
 /* ------------------------------------------------------------------ audit */
 
 export const auditLog = sqliteTable(
