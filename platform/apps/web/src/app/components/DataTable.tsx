@@ -75,12 +75,17 @@ export interface DataTableProps<Row> {
 /**
  * How long a click waits to find out whether it is half of a double-click.
  *
- * Only applied to cells that are both editable and navigable, where the gesture is
- * genuinely ambiguous. Without it the first click of a double-click navigates
- * immediately, the row unmounts, and the second click lands on a page that has already
- * replaced the table — which is why double-click-to-edit appeared to be treated as a
- * single click. `stopPropagation` on the double-click handler cannot help: by the time
- * it runs, the navigation has already been requested.
+ * Applied to every cell, not only the ones that happen to be editable today. Without it
+ * the first click of a double-click navigates immediately, the row unmounts, and the
+ * second click lands on a page that has already replaced the table — which is why
+ * double-click-to-edit appeared to be treated as a single click. `stopPropagation` on
+ * the double-click handler cannot help: by the time it runs, the navigation has already
+ * been requested.
+ *
+ * Uniform on purpose. Exempting read-only cells made the row open instantly in some
+ * columns and after a beat in others, which reads as lag rather than as a rule — and a
+ * column that is read-only now is one edit away from not being, at which point its
+ * timing would silently change under the user.
  *
  * 220ms is just above a comfortable double-click interval and below the point where a
  * deliberate single click starts to feel unresponsive.
@@ -201,12 +206,6 @@ export function DataTable<Row>({
                           ? (event) => {
                               if ((event.target as HTMLElement).closest("[data-stop]"))
                                 return;
-                              // Nothing to edit here, so the click is unambiguous and
-                              // opening the row immediately costs nothing.
-                              if (!editable) {
-                                onRowClick(row);
-                                return;
-                              }
                               cancelPendingOpen();
                               pendingOpen.current = setTimeout(() => {
                                 pendingOpen.current = null;

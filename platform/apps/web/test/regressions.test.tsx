@@ -13,6 +13,14 @@ import userEvent from "@testing-library/user-event";
 import { Button } from "../src/app/components/ui.js";
 import { DataTable } from "../src/app/components/DataTable.js";
 import { parseFigure } from "../src/lib/format.js";
+import {
+  DEFAULT_ORDER,
+  defaultLayout,
+  isExcluded,
+  moveSection,
+  normalizeLayout,
+  toggleExcluded,
+} from "../src/app/report/layout.js";
 import { visibleColumns, defaultViewConfig, type ColumnSpec } from "@avilo/tables";
 
 // `globals: false` keeps the vitest API explicit, which also means testing-library's
@@ -190,8 +198,16 @@ describe("double-click edits a cell instead of opening the row", () => {
 
     await userEvent.click(screen.getByText("Oct 2024"));
 
-    // No editor to wait for, so this one is immediate — the grace period applies only
-    // where the gesture is ambiguous.
+    /**
+     * The grace period is uniform across the table, including read-only cells.
+     *
+     * An earlier version exempted them, which opened the row instantly in some columns
+     * and after a beat in others — that reads as lag rather than as a rule. It also made
+     * the timing depend on whether a column happened to be editable, so making one
+     * editable silently changed how every other cell in it behaved.
+     */
+    expect(opened).toEqual([]);
+    await new Promise((resolve) => setTimeout(resolve, 300));
     expect(opened).toHaveLength(1);
     expect(opened[0]!.id).toBe("c1");
   });
@@ -241,5 +257,58 @@ describe("figures are parsed the way people type them", () => {
   it("refuses what is not a number rather than yielding NaN or 0", () => {
     expect(() => parseFigure("abc")).toThrow();
     expect(() => parseFigure("")).toThrow();
+  });
+});
+
+describe("report layout survives sections coming and going", () => {
+  /**
+   * A stored layout outlives the build that wrote it. Both directions have to be safe:
+   * a section this build no longer has must not leave a hole, and one it has *gained*
+   * must not be invisible just because an older layout never listed it. Either failure
+   * is silent — the section simply is not on the page — which is the argument for
+   * pinning it here.
+   */
+  it("appends sections a stored layout has never heard of, in default position", () => {
+    const stored = { order: ["flags", "key-insights"], excludedFromPrint: [] };
+    const layout = normalizeLayout(stored as never);
+
+    expect(layout.order.slice(0, 2)).toEqual(["flags", "key-insights"]);
+    expect([...layout.order].sort()).toEqual([...DEFAULT_ORDER].sort());
+  });
+
+  it("drops ids the registry no longer has, and de-duplicates", () => {
+    const stored = {
+      order: ["key-insights", "a-section-that-was-deleted", "key-insights", "flags"],
+      excludedFromPrint: ["gone-too", "flags", "flags"],
+    };
+    const layout = normalizeLayout(stored as never);
+
+    expect(layout.order.filter((id) => id === "key-insights")).toHaveLength(1);
+    expect(layout.order).not.toContain("a-section-that-was-deleted");
+    expect(layout.excludedFromPrint).toEqual(["flags"]);
+  });
+
+  it("round-trips an exclusion and restores it", () => {
+    const base = defaultLayout();
+    const hidden = toggleExcluded(base, "top-customers");
+
+    expect(isExcluded(hidden, "top-customers")).toBe(true);
+    // Still in the order — excluded from the PDF is not removed from the page.
+    expect(hidden.order).toContain("top-customers");
+    expect(isExcluded(toggleExcluded(hidden, "top-customers"), "top-customers")).toBe(
+      false,
+    );
+  });
+
+  it("moves a section without losing it, and refuses to move past either end", () => {
+    const base = defaultLayout();
+    const first = base.order[0]!;
+
+    const moved = moveSection(base, first, 1);
+    expect(moved.order[1]).toBe(first);
+    expect(moved.order).toHaveLength(base.order.length);
+
+    // Already at the top: a no-op, not a wrap to the bottom.
+    expect(moveSection(base, first, -1).order).toEqual(base.order);
   });
 });

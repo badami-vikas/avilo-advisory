@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { AlertTriangle } from "lucide-react";
+import { useEffect, useState, type ReactNode } from "react";
+import { AlertTriangle, EyeOff } from "lucide-react";
 
 import { Block } from "./ui.js";
 import { Tip } from "./Tooltip.js";
@@ -13,6 +13,11 @@ import {
   TopExpensesBlock,
 } from "./DetailSections.js";
 import { byUnit, money } from "../../lib/format.js";
+import {
+  isExcluded,
+  type ReportLayout,
+  type ReportSectionId,
+} from "../report/layout.js";
 import type {
   DetailByKind,
   FormulaRow,
@@ -155,6 +160,7 @@ export function ReportView({
   onSetAccountValue,
   onSetFormula,
   onSetSeriesValue,
+  layout,
 }: {
   clientName: string;
   report: PeriodReport;
@@ -178,6 +184,8 @@ export function ReportView({
     targetId: string,
     raw: string,
   ) => Promise<void>;
+  /** Which sections run in what order, and which of them reach the PDF. */
+  layout: ReportLayout;
 }) {
   const [editing, setEditing] = useState<string | null>(null);
   /** Which figure is showing its formula rather than its value. */
@@ -384,83 +392,76 @@ export function ReportView({
     return out;
   })();
 
-  return (
-    <div className="space-y-4">
-      {/* Print-only header: the exported PDF must identify itself. */}
-      <div className="print-only mb-4">
-        <h1 className="text-[18px] font-semibold tracking-tight text-ink">{clientName}</h1>
-        <p className="text-[12px] text-ink-muted">
-          Monthly business snapshot · {report.periodLabel} · Avilo Advisory
-        </p>
-        {rangeLabel ? (
-          <p className="text-[11.5px] text-ink-faint">
-            Trend data covers {rangeLabel}
-          </p>
-        ) : null}
-      </div>
+  /**
+   * Job performance, from the Sales by Customer export.
+   *
+   * Hoisted out of the section body so the record below stays a list of sections rather
+   * than a list of sections with one of them carrying forty lines of arithmetic.
+   */
+  const jobPerformanceCards = (() => {
+    const jobs = account("ops.job_count")?.value ?? null;
+    const customers = account("ops.customer_count")?.value ?? null;
+    const salesRows = detail["customer_sales"] ?? [];
+    const salesTotal =
+      salesRows.length > 0 ? salesRows.reduce((sum, row) => sum + row.value, 0) : null;
 
-      {report.missingRequired.length > 0 ? (
-        <Tip
-          content={report.accounts
-            .filter((a) => a.requiredButMissing)
-            .map((a) => a.label)
-            .join(", ")}
-        >
-          <div className="flex items-center gap-2 rounded-xl border border-flag/25 bg-flag-soft px-4 py-2.5">
-            <AlertTriangle size={14} className="shrink-0 text-flag" />
-            <p className="text-[12.5px] font-medium text-flag">
-              {report.missingRequired.length} required input
-              {report.missingRequired.length === 1 ? "" : "s"} missing for{" "}
-              {report.periodLabel} — metrics that depend on{" "}
-              {report.missingRequired.length === 1 ? "it" : "them"} are shown as
-              unavailable rather than estimated.
-            </p>
-          </div>
-        </Tip>
-      ) : null}
+    return [
+      {
+        label: "Jobs (12 mo)",
+        value: jobs === null ? "—" : byUnit(jobs, "count"),
+        tip:
+          jobs === null
+            ? "The Sales by Customer export carried no job or transaction count column, so this was not inferred. Enter it in Raw data if you track it elsewhere."
+            : "Summed from the export's own transaction count column",
+        missing: jobs === null,
+      },
+      {
+        label: "Customers billed (12 mo)",
+        value: customers === null ? "—" : byUnit(customers, "count"),
+        tip: "Distinct customers appearing in the Sales by Customer export",
+        missing: customers === null,
+      },
+      {
+        label: "Avg revenue / customer",
+        value:
+          salesTotal !== null && customers !== null && customers > 0
+            ? money(salesTotal / customers)
+            : "—",
+        tip: "Twelve-month revenue divided by customers billed over the same twelve months",
+        missing: salesTotal === null || customers === null,
+      },
+      {
+        label: "Avg revenue / job",
+        value:
+          salesTotal !== null && jobs !== null && jobs > 0
+            ? money(salesTotal / jobs)
+            : "—",
+        tip:
+          jobs === null
+            ? "Needs a job count, which this export did not provide"
+            : "Twelve-month revenue divided by jobs over the same twelve months",
+        missing: salesTotal === null || jobs === null,
+      },
+    ];
+  })();
 
-      {/* ------------------------------------------------------ Key Insights */}
-      <KeyInsightsBlock note={note} onSave={onSetNote} />
+  /**
+   * Every section, by id.
+   *
+   * Built as a record rather than written inline in order, because the order is a stored
+   * value now — see `report/layout.ts`. Keeping the JSX here and the ordering there means
+   * a section can be moved or dropped from the PDF without touching this file.
+   */
+  const sections: Record<ReportSectionId, ReactNode> = {
+    "key-insights": <KeyInsightsBlock note={note} onSave={onSetNote} />,
 
-      {/* ------------------------------------------------------- At a Glance */}
-      <Block title="At a Glance" subtitle={`${clientName} · ${report.periodLabel}`}>
-        <div className="grid grid-cols-1 gap-px bg-line-soft sm:grid-cols-3">
-          <Figure id="pl.revenue" kind="account" label="Revenue" size="lg" />
-          <Figure
-            id="net_operating_income"
-            kind="metric"
-            label="Net Operating Income"
-            size="lg"
-          />
-          <Figure
-            id="bs.cash"
-            kind="account"
-            label="Total cash in bank accounts"
-            size="lg"
-          />
-        </div>
-      </Block>
-
-      {/* -------------------------------------------- Did you make money? */}
-      <Block
-        title="Did you make money this month?"
-        subtitle="Double-click any figure to override it for this period"
-      >
-        <div className="grid grid-cols-1 gap-px bg-line-soft sm:grid-cols-2 lg:grid-cols-4">
-          {["gross_profit", "gross_margin_pct", "net_operating_income", "noi_margin_pct"].map(
-            (id) => (
-              <MetricCard key={id} id={id} />
-            ),
-          )}
-        </div>
-      </Block>
-
-      {/* -------------------------------------------------------- trend */}
+    "revenue-trend": (
       <ChartBlock
         title="Revenue & Net Operating Income margin"
         subtitle="Every period imported for this client"
         points={points}
         onEditCell={editChartCell}
+        printTable={layout.includeChartTables}
         series={[
           { id: "pl.revenue", label: "Revenue", unit: "currency", type: "bar", color: "#b2ddff" },
           {
@@ -480,22 +481,135 @@ export function ReportView({
           },
         ]}
       />
+    ),
 
-      {/* -------------------------------------------------------- liquidity */}
+    "top-expenses": <TopExpensesBlock rows={detail["pl_expense"] ?? []} />,
+
+    "at-a-glance": (
+      <Block title="At a Glance" subtitle={`${clientName} · ${report.periodLabel}`}>
+        <div className="grid grid-cols-1 gap-px bg-line-soft sm:grid-cols-3">
+          <Figure id="pl.revenue" kind="account" label="Revenue" size="lg" />
+          <Figure
+            id="net_operating_income"
+            kind="metric"
+            label="Net Operating Income"
+            size="lg"
+          />
+          <Figure
+            id="bs.cash"
+            kind="account"
+            label="Total cash in bank accounts"
+            size="lg"
+          />
+        </div>
+      </Block>
+    ),
+
+    profitability: (
+      <Block
+        title="Did you make money this month?"
+        subtitle="Double-click any figure to override it for this period"
+      >
+        <div className="grid grid-cols-1 gap-px bg-line-soft sm:grid-cols-2 lg:grid-cols-4">
+          {["gross_profit", "gross_margin_pct", "net_operating_income", "noi_margin_pct"].map(
+            (id) => (
+              <MetricCard key={id} id={id} />
+            ),
+          )}
+        </div>
+      </Block>
+    ),
+
+    "cash-position": (
       <Block title="Cash position">
         <div className="grid grid-cols-1 gap-px bg-line-soft sm:grid-cols-2">
           <Figure id="bs.cash" kind="account" label="Total cash in bank accounts" />
           <MetricCard id="days_cash_on_hand" />
         </div>
       </Block>
+    ),
 
-      {/* Gross profit against overhead: the second trend the prototype carried, and the
-          one the twelve months of P&L data actually supports. */}
+    "ar-customers": (
+      <AgingBlock
+        title="Who owes you money"
+        subtitle="Outstanding customer balances by ageing bucket"
+        rows={detail["ar_customer"] ?? []}
+        reportName="A/R Ageing Summary"
+        entityNoun="Customer"
+      />
+    ),
+
+    "ap-vendors": (
+      <AgingBlock
+        title="What you owe"
+        subtitle="Outstanding vendor balances by ageing bucket"
+        rows={detail["ap_vendor"] ?? []}
+        reportName="A/P Ageing Summary"
+        entityNoun="Vendor"
+      />
+    ),
+
+    "ar-ap-timing": (
+      <Block
+        title="A/R & A/P timing"
+        subtitle="How long money takes to arrive, and how long you take to pay"
+        printHideIfEmpty={metric("dso")?.status !== "ok" && metric("dpo")?.status !== "ok"}
+      >
+        <div className="grid grid-cols-1 gap-px bg-line-soft sm:grid-cols-2">
+          <MetricCard id="dso" />
+          <MetricCard id="dpo" />
+        </div>
+      </Block>
+    ),
+
+    "service-lines": <ServiceLinesBlock rows={detail["pl_income"] ?? []} />,
+
+    "top-jobs": <TopJobsBlock rows={detail["customer_sales"] ?? []} />,
+
+    /*
+      Job performance is derived from the Sales by Customer export, which covers the last
+      twelve months — not the reporting month. Labelling these "this month" would put a
+      twelve-month job count next to a one-month revenue figure and invite the reader to
+      divide one by the other.
+    */
+    "job-performance": (
+      <Block
+        title="Job performance"
+        subtitle="From the Sales by Customer export — last 12 months"
+        printHideIfEmpty={(detail["customer_sales"] ?? []).length === 0}
+      >
+        <div className="grid grid-cols-1 gap-px bg-line-soft sm:grid-cols-4">
+          {jobPerformanceCards.map((card) => (
+            <div key={card.label} className="bg-surface px-5 py-4">
+              <p className="text-[11px] font-medium uppercase tracking-[0.06em] text-ink-faint">
+                {card.label}
+              </p>
+              <Tip content={card.tip}>
+                <p
+                  className={`num mt-1 text-[21px] font-semibold tracking-tight ${
+                    card.missing ? "text-ink-faint" : "text-ink"
+                  }`}
+                >
+                  {card.value}
+                </p>
+              </Tip>
+            </div>
+          ))}
+        </div>
+      </Block>
+    ),
+
+    referrals: <ReferralBlock rows={detail["referral_partner"] ?? []} />,
+
+    /* Gross profit against overhead: the second trend the prototype carried, and the one
+       the twelve months of P&L data actually supports. */
+    "gross-overhead": (
       <ChartBlock
         title="Gross profit and overhead"
         subtitle="What is earned against what it costs to run"
         points={points}
         onEditCell={editChartCell}
+        printTable={layout.includeChartTables}
         series={[
           {
             id: "gross_profit",
@@ -521,132 +635,11 @@ export function ReportView({
           },
         ]}
       />
+    ),
 
-      {/* ------------------------------------------------ A/R & A/P timing */}
-      <Block
-        title="A/R & A/P timing"
-        subtitle="How long money takes to arrive, and how long you take to pay"
-        printHideIfEmpty={metric("dso")?.status !== "ok" && metric("dpo")?.status !== "ok"}
-      >
-        <div className="grid grid-cols-1 gap-px bg-line-soft sm:grid-cols-2">
-          <MetricCard id="dso" />
-          <MetricCard id="dpo" />
-        </div>
-      </Block>
+    "top-customers": <TopCustomersBlock rows={detail["customer_sales"] ?? []} />,
 
-      {/* -------------------------------------------------- Phase 2 sections */}
-      <ServiceLinesBlock rows={detail["pl_income"] ?? []} />
-
-      <TopExpensesBlock rows={detail["pl_expense"] ?? []} />
-
-      <AgingBlock
-        title="Who owes you money"
-        subtitle="Outstanding customer balances by ageing bucket"
-        rows={detail["ar_customer"] ?? []}
-        reportName="A/R Ageing Summary"
-        entityNoun="Customer"
-      />
-
-      <AgingBlock
-        title="What you owe"
-        subtitle="Outstanding vendor balances by ageing bucket"
-        rows={detail["ap_vendor"] ?? []}
-        reportName="A/P Ageing Summary"
-        entityNoun="Vendor"
-      />
-
-      <TopJobsBlock rows={detail["customer_sales"] ?? []} />
-
-      <TopCustomersBlock rows={detail["customer_sales"] ?? []} />
-
-      {/*
-        Job performance is derived from the Sales by Customer export, which covers the
-        last twelve months — not the reporting month. Labelling these "this month" would
-        put a twelve-month job count next to a one-month revenue figure and invite the
-        reader to divide one by the other.
-      */}
-      <Block
-        title="Job performance"
-        subtitle="From the Sales by Customer export — last 12 months"
-        printHideIfEmpty={(detail["customer_sales"] ?? []).length === 0}
-      >
-        <div className="grid grid-cols-1 gap-px bg-line-soft sm:grid-cols-4">
-          {(() => {
-            const jobs = account("ops.job_count")?.value ?? null;
-            const customers = account("ops.customer_count")?.value ?? null;
-            const salesRows = detail["customer_sales"] ?? [];
-            const salesTotal =
-              salesRows.length > 0
-                ? salesRows.reduce((sum, row) => sum + row.value, 0)
-                : null;
-
-            const cards: {
-              label: string;
-              value: string;
-              tip: string;
-              missing: boolean;
-            }[] = [
-              {
-                label: "Jobs (12 mo)",
-                value: jobs === null ? "—" : byUnit(jobs, "count"),
-                tip:
-                  jobs === null
-                    ? "The Sales by Customer export carried no job or transaction count column, so this was not inferred. Enter it in Raw data if you track it elsewhere."
-                    : "Summed from the export's own transaction count column",
-                missing: jobs === null,
-              },
-              {
-                label: "Customers billed (12 mo)",
-                value: customers === null ? "—" : byUnit(customers, "count"),
-                tip: "Distinct customers appearing in the Sales by Customer export",
-                missing: customers === null,
-              },
-              {
-                label: "Avg revenue / customer",
-                value:
-                  salesTotal !== null && customers !== null && customers > 0
-                    ? money(salesTotal / customers)
-                    : "—",
-                tip: "Twelve-month revenue divided by customers billed over the same twelve months",
-                missing: salesTotal === null || customers === null,
-              },
-              {
-                label: "Avg revenue / job",
-                value:
-                  salesTotal !== null && jobs !== null && jobs > 0
-                    ? money(salesTotal / jobs)
-                    : "—",
-                tip:
-                  jobs === null
-                    ? "Needs a job count, which this export did not provide"
-                    : "Twelve-month revenue divided by jobs over the same twelve months",
-                missing: salesTotal === null || jobs === null,
-              },
-            ];
-
-            return cards.map((card) => (
-              <div key={card.label} className="bg-surface px-5 py-4">
-                <p className="text-[11px] font-medium uppercase tracking-[0.06em] text-ink-faint">
-                  {card.label}
-                </p>
-                <Tip content={card.tip}>
-                  <p
-                    className={`num mt-1 text-[21px] font-semibold tracking-tight ${
-                      card.missing ? "text-ink-faint" : "text-ink"
-                    }`}
-                  >
-                    {card.value}
-                  </p>
-                </Tip>
-              </div>
-            ));
-          })()}
-        </div>
-      </Block>
-
-      <ReferralBlock rows={detail["referral_partner"] ?? []} />
-
-      {/* ------------------------------------------------- Flags to review */}
+    flags: (
       <Block
         title="Flags to review"
         subtitle="Measured against the benchmark bands set on each formula"
@@ -691,6 +684,65 @@ export function ReportView({
           </div>
         )}
       </Block>
+    ),
+  };
+
+  return (
+    <div className="space-y-4">
+      {/*
+        Print-only masthead, matching the reference report: practice, then client, then
+        what the document is. On paper this is the only thing identifying the PDF once it
+        has left the application.
+      */}
+      <div className="print-only print-masthead">
+        <p className="print-practice">Avilo Advisory</p>
+        <h1 className="print-client">{clientName}</h1>
+        <p className="print-period">{report.periodLabel}</p>
+        <p className="print-kicker">Monthly business snapshot</p>
+        {rangeLabel ? (
+          <p className="print-kicker">Trend data covers {rangeLabel}</p>
+        ) : null}
+      </div>
+
+      {report.missingRequired.length > 0 ? (
+        <Tip
+          content={report.accounts
+            .filter((a) => a.requiredButMissing)
+            .map((a) => a.label)
+            .join(", ")}
+        >
+          <div className="flex items-center gap-2 rounded-xl border border-flag/25 bg-flag-soft px-4 py-2.5">
+            <AlertTriangle size={14} className="shrink-0 text-flag" />
+            <p className="text-[12.5px] font-medium text-flag">
+              {report.missingRequired.length} required input
+              {report.missingRequired.length === 1 ? "" : "s"} missing for{" "}
+              {report.periodLabel} — metrics that depend on{" "}
+              {report.missingRequired.length === 1 ? "it" : "them"} are shown as
+              unavailable rather than estimated.
+            </p>
+          </div>
+        </Tip>
+      ) : null}
+
+      {/*
+        Sections in stored order.
+
+        A section excluded from the PDF still renders here — the advisor reads it, edits
+        figures in it, and needs somewhere to put it back from. `data-print-excluded` is
+        what drops it on paper, resolved in CSS because @page only exists inside the
+        browser's print engine.
+      */}
+      {layout.order.map((id) => (
+        <div key={id} data-print-excluded={isExcluded(layout, id) ? "true" : undefined}>
+          {isExcluded(layout, id) ? (
+            <p className="no-print mb-1 flex items-center gap-1.5 text-[11px] font-medium text-ink-faint">
+              <EyeOff size={11} />
+              Not in the exported report — restore it under Raw data › Report format
+            </p>
+          ) : null}
+          {sections[id]}
+        </div>
+      ))}
     </div>
   );
 }

@@ -8,6 +8,11 @@ import { parseFigure } from "../../lib/format.js";
 import { exportReportPdf } from "../../lib/desktop.js";
 import { Block, Button, EmptyState, Spinner } from "../components/ui.js";
 import { ClientHeader } from "../components/ClientHeader.js";
+import {
+  defaultLayout,
+  normalizeLayout,
+  type ReportLayout,
+} from "../report/layout.js";
 import { ReportView } from "../components/ReportView.js";
 import { RawDataView } from "../components/RawDataView.js";
 import { UploadDialog } from "../components/UploadDialog.js";
@@ -50,6 +55,9 @@ export function ClientDetailPage() {
   const [uploading, setUploading] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [layout, setLayout] = useState<ReportLayout>(defaultLayout);
+  /** The saved_views row backing this client's layout, once one exists. */
+  const [layoutRowId, setLayoutRowId] = useState<string | null>(null);
 
   /* ------------------------------------------------------------ loading */
 
@@ -191,6 +199,49 @@ export function ClientDetailPage() {
     },
     [clientId, period, refresh, report],
   );
+
+  /**
+   * The report layout, stored per client in the same saved_views table the tables use.
+   *
+   * Per client rather than global: two clients rarely want the same report. A client with
+   * no stored layout gets the default, and `normalizeLayout` reconciles whatever is
+   * stored against the sections this build actually has — so a layout written by an older
+   * version neither loses a section nor hides a new one.
+   */
+  const LAYOUT_TABLE_ID = "report.layout";
+
+  const loadLayout = useCallback(async () => {
+    try {
+      const rows = await api.views.list.query({ tableId: LAYOUT_TABLE_ID });
+      const mine = rows.find((row) => row.name === clientId);
+      setLayoutRowId(mine?.id ?? null);
+      setLayout(normalizeLayout(mine ? JSON.parse(mine.config) : null));
+    } catch {
+      // A malformed or unreachable layout must never block the report. The default is
+      // always correct enough to render, and the format panel can save over it.
+      setLayout(defaultLayout());
+    }
+  }, [clientId]);
+
+  const saveLayout = useCallback(
+    async (next: ReportLayout) => {
+      // Optimistic: this is a direct manipulation of a list the user is looking at, and
+      // waiting for a round-trip to reorder a row would feel broken.
+      setLayout(next);
+      const saved = await api.views.save.mutate({
+        ...(layoutRowId ? { id: layoutRowId } : {}),
+        tableId: LAYOUT_TABLE_ID,
+        name: clientId,
+        config: JSON.stringify(next),
+      });
+      setLayoutRowId(saved.id);
+    },
+    [clientId, layoutRowId],
+  );
+
+  useEffect(() => {
+    void loadLayout();
+  }, [loadLayout]);
 
   /** The client's own record — name, stage, industry, fiscal year, notes. */
   const patchClient = useCallback(
@@ -350,6 +401,7 @@ export function ClientDetailPage() {
           onSetAccountValue={(id, raw) => setOverride("account", id, raw)}
           onSetFormula={setFormula}
           onSetSeriesValue={setOverrideIn}
+          layout={layout}
         />
       ) : (
         <RawDataView
@@ -359,6 +411,8 @@ export function ClientDetailPage() {
           onSetMetricValue={(id, raw) => setOverride("metric", id, raw)}
           onSetFormula={setFormula}
           onClearOverride={clearOverride}
+          layout={layout}
+          onLayoutChange={(next) => void saveLayout(next)}
         />
       )}
 

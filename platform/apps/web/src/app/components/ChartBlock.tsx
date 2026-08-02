@@ -46,6 +46,7 @@ export function ChartBlock({
   points,
   height = 260,
   onEditCell,
+  printTable = false,
 }: {
   title: string;
   subtitle?: string;
@@ -53,6 +54,8 @@ export function ChartBlock({
   points: ChartPoint[];
   height?: number;
   onEditCell?: ChartCellEdit;
+  /** Emit the underlying figures beneath the chart in the exported PDF. */
+  printTable?: boolean;
 }) {
   const [mode, setMode] = useState<"graph" | "table">("graph");
 
@@ -91,12 +94,15 @@ export function ChartBlock({
       )}
 
       {/*
-        The table is always emitted for print in addition to the chart, so the exported
-        PDF carries the numbers behind every graph without the reader needing the toggle.
+        The numbers behind the graph, for print only, and only when the report layout asks
+        for them — see `includeChartTables`. Emitting them unconditionally doubled the
+        length of the exported PDF and pushed every later section down a page.
       */}
-      <div className="print-only">
-        <UnderlyingTable series={series} points={points} />
-      </div>
+      {printTable ? (
+        <div className="print-only">
+          <UnderlyingTable series={series} points={points} />
+        </div>
+      ) : null}
     </Block>
   );
 }

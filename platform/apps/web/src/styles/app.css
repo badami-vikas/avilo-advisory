@@ -61,12 +61,115 @@ body {
 */
 @media print {
   @page {
-    size: letter portrait;
-    margin: 12mm 10mm;
+    /*
+      A4, matching the reference report. The practice sends these to clients who print
+      them; letter would reflow every section by ~18mm of page height and change where
+      the breaks land.
+    */
+    size: A4 portrait;
+    margin: 14mm 12mm;
   }
 
   body {
     background: #fff;
+  }
+
+  /*
+    The exported report is a document, not a dashboard.
+
+    On screen the page is separated cards, which is what makes each section readable on
+    its own. On paper that same treatment prints a stack of boxes with rules between
+    them and wastes a third of the width on padding — so the card chrome comes off and
+    the sections become a continuous flow separated by their headings, as in the
+    reference report.
+  */
+  .block-card {
+    border: none !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+  }
+
+  .block-card > div:first-child {
+    border-bottom: 1px solid #d0d5dd !important;
+    padding: 0 0 4px !important;
+    margin-bottom: 8px;
+  }
+
+  /* Section headings: small, uppercase, letter-spaced — the reference's own voice. */
+  .block-card h2 {
+    font-size: 9.5pt !important;
+    font-weight: 600 !important;
+    letter-spacing: 0.08em !important;
+    text-transform: uppercase !important;
+    color: #101828 !important;
+  }
+
+  /*
+    Subtitles are instructions to the person editing ("double-click any figure…"), which
+    means nothing on paper and confuses the client reading it.
+  */
+  .block-card h2 + p {
+    display: none !important;
+  }
+
+  /* Cell padding tuned for a screen is wasteful at print scale. */
+  .block-card td,
+  .block-card th {
+    padding: 3px 6px !important;
+    font-size: 8.5pt !important;
+  }
+
+  .block-card [class*="px-5"] {
+    padding-left: 0 !important;
+    padding-right: 0 !important;
+  }
+
+  /* The card grids draw their separators with a background showing through 1px gaps. */
+  .block-card .bg-line-soft {
+    background: transparent !important;
+  }
+
+  /* The masthead, and only on paper. */
+  .print-masthead {
+    margin-bottom: 14px;
+    padding-bottom: 8px;
+    border-bottom: 2px solid #101828;
+  }
+
+  .print-practice {
+    font-size: 8pt;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: #475467;
+  }
+
+  .print-client {
+    font-size: 17pt;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    color: #101828;
+  }
+
+  .print-period {
+    font-size: 11pt;
+    color: #101828;
+  }
+
+  .print-kicker {
+    font-size: 8.5pt;
+    color: #667085;
+  }
+
+  /*
+    Sections the advisor left out of this client's report.
+
+    Separate from `data-print-empty`, which is about a section having no data. This one
+    is a deliberate editorial choice, it is per client, and it is reversible from
+    Raw data › Report format — so the section still renders on screen, marked.
+  */
+  [data-print-excluded="true"] {
+    display: none !important;
   }
 
   /*
@@ -98,7 +201,6 @@ body {
     break-inside: avoid;
     page-break-inside: avoid;
     box-shadow: none !important;
-    border: 1px solid var(--color-line);
   }
 
   /*
