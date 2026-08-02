@@ -381,6 +381,7 @@ export function ClientDetailPage() {
       ) : mode === "report" ? (
         <ReportView
           clientName={client.name}
+          legalName={client.legalName}
           report={report}
           series={series}
           detail={detail}

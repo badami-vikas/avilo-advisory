@@ -18,6 +18,7 @@ import { fileURLToPath } from "node:url";
 
 import { serveHost, type RunningHost } from "@bridge/module-host";
 import { buildHost, MODULES } from "@avilo/api/src/host.js";
+import { startUpdater } from "./updater.js";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
 
@@ -157,7 +158,15 @@ async function exportPdf(window: BrowserWindow): Promise<void> {
   const data = await window.webContents.printToPDF({
     printBackground: true,
     pageSize: "A4",
-    margins: { marginType: "default" },
+    /**
+     * Explicit margins, in inches, on every side.
+     *
+     * `marginType: "default"` leaves the decision to Chromium, which applies its own
+     * header/footer allowance to the first page and a much tighter box to the rest — so
+     * page two onwards began hard against the top edge. Naming the margins makes every
+     * page identical, and matches the @page rule the browser print path uses.
+     */
+    margins: { marginType: "custom", top: 0.55, bottom: 0.55, left: 0.5, right: 0.5 },
     // The report is a sequence of sections, not a paginated document; letting Chromium
     // reflow to the paper width is what makes sections flow onto the previous page
     // instead of each starting a new one.
@@ -300,6 +309,12 @@ app.whenReady().then(async () => {
 
   buildMenu();
   mainWindow = createWindow(running.url);
+
+  // Background, quiet, and never restarts on its own — see updater.ts.
+  startUpdater({
+    getWindow: () => BrowserWindow.getFocusedWindow() ?? mainWindow,
+    log: (message) => console.log(`[updater] ${message}`),
+  });
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0 && running) {

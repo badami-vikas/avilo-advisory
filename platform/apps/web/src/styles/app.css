@@ -136,12 +136,20 @@ body {
     border-bottom: 2px solid #101828;
   }
 
+  /* Practice and client on one baseline, as in the reference. */
+  .print-titleline {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+  }
+
   .print-practice {
     font-size: 8pt;
     font-weight: 600;
     letter-spacing: 0.14em;
     text-transform: uppercase;
     color: #475467;
+    white-space: nowrap;
   }
 
   .print-client {
@@ -149,6 +157,33 @@ body {
     font-weight: 600;
     letter-spacing: -0.01em;
     color: #101828;
+  }
+
+  .print-legal {
+    font-size: 10pt;
+    font-weight: 400;
+    color: #667085;
+  }
+
+  /*
+    Charts are rendered to a canvas sized to the *screen* container — around 1180px wide.
+    A printed page is about 520pt, so the bitmap ran off the right edge and the last two
+    months of every twelve-month chart were simply not in the PDF.
+
+    Chart.js writes its dimensions to inline styles, so these have to win outright.
+    Scaling the raster rather than re-rendering is deliberate: `printToPDF` does not fire
+    the resize events Chart.js would need, and it rasterises well above screen density,
+    so a scaled canvas prints sharp.
+  */
+  canvas {
+    max-width: 100% !important;
+    width: 100% !important;
+    height: auto !important;
+  }
+
+  /* The box that sizes the chart on screen must collapse to the scaled canvas on paper. */
+  .chart-frame {
+    height: auto !important;
   }
 
   .print-period {

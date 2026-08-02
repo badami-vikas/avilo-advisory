@@ -155,10 +155,24 @@ export interface ReportLayout {
    * asked would rather send it than field the email.
    */
   includeChartTables: boolean;
+  /**
+   * Print the registered entity name in brackets after the trading name.
+   *
+   * Off by default: most clients know themselves by the name on the invoice, and a
+   * report headed with a registered entity they never use reads as someone else's
+   * document. On when the report has to be unambiguous — anything going to a bank, an
+   * auditor or a lender.
+   */
+  showLegalName: boolean;
 }
 
 export function defaultLayout(): ReportLayout {
-  return { order: [...DEFAULT_ORDER], excludedFromPrint: [], includeChartTables: false };
+  return {
+    order: [...DEFAULT_ORDER],
+    excludedFromPrint: [],
+    includeChartTables: false,
+    showLegalName: false,
+  };
 }
 
 /**
@@ -192,6 +206,7 @@ export function normalizeLayout(stored: Partial<ReportLayout> | null): ReportLay
     order,
     excludedFromPrint: [...new Set(excludedFromPrint)],
     includeChartTables: stored?.includeChartTables === true,
+    showLegalName: stored?.showLegalName === true,
   };
 }
 

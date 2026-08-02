@@ -63,6 +63,26 @@ export function ReportFormatPanel({
       <label className="flex cursor-pointer items-start gap-2.5 border-b border-line-soft px-5 py-3 hover:bg-line-soft/40">
         <input
           type="checkbox"
+          checked={layout.showLegalName}
+          onChange={(event) =>
+            onChange({ ...layout, showLegalName: event.target.checked })
+          }
+          className="mt-0.5 h-3.5 w-3.5 shrink-0 accent-[#1570ef]"
+        />
+        <span className="min-w-0">
+          <span className="block text-[12.5px] font-medium text-ink">
+            Show the legal name in the report heading
+          </span>
+          <span className="block text-[11px] text-ink-faint">
+            Prints as “Trading Name (Registered Entity Ltd)”. Off by default — turn it on
+            for anything going to a bank, an auditor or a lender.
+          </span>
+        </span>
+      </label>
+
+      <label className="flex cursor-pointer items-start gap-2.5 border-b border-line-soft px-5 py-3 hover:bg-line-soft/40">
+        <input
+          type="checkbox"
           checked={layout.includeChartTables}
           onChange={(event) =>
             onChange({ ...layout, includeChartTables: event.target.checked })

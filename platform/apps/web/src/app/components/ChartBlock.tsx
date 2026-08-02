@@ -236,7 +236,12 @@ function ChartCanvas({
   }, [series, points]);
 
   return (
-    <div style={{ height }}>
+    /*
+      `chart-frame` lets the print stylesheet drop the fixed height. Chart.js needs a
+      sized box on screen, but on paper the canvas is scaled down to the page width and
+      the reserved height became a block of empty space beneath every chart.
+    */
+    <div className="chart-frame" style={{ height }}>
       <canvas ref={ref} />
     </div>
   );

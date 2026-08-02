@@ -6,6 +6,19 @@ directories:
   output: release
   buildResources: build
 
+# Where the app looks for updates, and where `--publish always` sends them.
+#
+# GitHub Releases rather than a server to run: the repository is already the source of
+# truth for what a build is, a release is a signed-off artifact rather than whatever was
+# last uploaded, and rolling back is re-tagging rather than re-uploading.
+#
+# On a private repository this needs a token at runtime; make the release public, or set
+# GH_TOKEN, for updates to reach an installed copy.
+publish:
+  provider: github
+  owner: badami-vikas
+  repo: avilo-advisory
+
 # Only the bundle and the two dependencies that could not be bundled. Everything else
 # the main process needs is already inside main.mjs.
 files:

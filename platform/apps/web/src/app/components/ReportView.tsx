@@ -12,6 +12,7 @@ import {
   TopCustomersBlock,
   TopExpensesBlock,
 } from "./DetailSections.js";
+import { formatPeriodLong } from "@avilo/module";
 import { byUnit, money } from "../../lib/format.js";
 import {
   isExcluded,
@@ -149,6 +150,7 @@ function TopJobsBlock({ rows }: { rows: { id: string; label: string; value: numb
  */
 export function ReportView({
   clientName,
+  legalName,
   report,
   series,
   detail,
@@ -163,6 +165,8 @@ export function ReportView({
   layout,
 }: {
   clientName: string;
+  /** Shown in brackets after the trading name when the layout asks for it. */
+  legalName: string | null;
   report: PeriodReport;
   series: SeriesPoint[];
   detail: DetailByKind;
@@ -695,9 +699,21 @@ export function ReportView({
         has left the application.
       */}
       <div className="print-only print-masthead">
-        <p className="print-practice">Avilo Advisory</p>
-        <h1 className="print-client">{clientName}</h1>
-        <p className="print-period">{report.periodLabel}</p>
+        {/*
+          Practice and client on one line, as in the reference. Stacking them made the
+          masthead four lines deep and pushed the first section down the page.
+        */}
+        <p className="print-titleline">
+          <span className="print-practice">Avilo Advisory</span>
+          <span className="print-client">
+            {clientName}
+            {layout.showLegalName && legalName ? (
+              <span className="print-legal"> ({legalName})</span>
+            ) : null}
+          </span>
+        </p>
+        {/* "October 2024", not "Oct 2024": this is a cover, not a table cell. */}
+        <p className="print-period">{formatPeriodLong(report.period)}</p>
         <p className="print-kicker">Monthly business snapshot</p>
         {rangeLabel ? (
           <p className="print-kicker">Trend data covers {rangeLabel}</p>

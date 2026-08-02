@@ -117,6 +117,21 @@ export function formatPeriod(p: Period | null | undefined): string {
   return `${months[periodMonth(p) - 1]} ${periodYear(p)}`;
 }
 
+/**
+ * Long form, for the printed report's masthead: "October 2024".
+ *
+ * The abbreviated form is right in a table cell and wrong on the cover of a document a
+ * client receives, where there is room for the word and nothing to align to.
+ */
+export function formatPeriodLong(p: Period | null | undefined): string {
+  if (!isPeriod(p)) return "—";
+  const months = [
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December",
+  ];
+  return `${months[periodMonth(p) - 1]} ${periodYear(p)}`;
+}
+
 const MONTH_NAMES: Record<string, number> = {
   jan: 1, january: 1,
   feb: 2, february: 2,
