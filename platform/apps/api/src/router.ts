@@ -6,6 +6,8 @@ import {
   CANONICAL_ACCOUNTS,
   fiscalYearToDate,
   isPeriod,
+  buildNarrativePrompt,
+  fabricatedFigures,
   normalizeLabel,
   suggestMappings,
   validateExpression,
@@ -285,6 +287,59 @@ const reportRouter = router({
         (byPeriod[row.period] ??= []).push(row);
       }
       return byPeriod;
+    }),
+
+  /**
+   * Rewrite the computed summary as prose. User-triggered only.
+   *
+   * The findings are calculated before the model is involved and are passed in as its only
+   * source, so this rewrites rather than analyses. Output is checked back against the
+   * source figures; if it asserts a number the books do not contain, it is rejected and
+   * the caller keeps the deterministic summary.
+   */
+  generateSummary: procedure
+    .input(
+      z.object({
+        clientName: z.string(),
+        periodLabel: z.string(),
+        beats: z.array(
+          z.object({
+            kicker: z.string(),
+            headline: z.string(),
+            body: z.array(z.string()),
+          }),
+        ),
+      }),
+    )
+    .mutation(async ({ input }) => {
+      const config = groqConfig();
+      if (!config) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "No model configured. Add a Groq API key in Model settings.",
+        });
+      }
+
+      const guidance = readSetting("narrative_guidance") ?? undefined;
+      const prompt = buildNarrativePrompt({ ...input, guidance });
+
+      try {
+        const text = (await callGroq(config, prompt, 700)).trim();
+        const source = input.beats
+          .map((b) => `${b.headline} ${b.body.join(" ")}`)
+          .join(" ");
+        const fabricated = fabricatedFigures(source, text);
+        if (fabricated.length > 0) {
+          return {
+            ok: false as const,
+            text: "",
+            message: `Discarded — the draft contained figures not in your books (${fabricated.slice(0, 3).join(", ")}).`,
+          };
+        }
+        return { ok: true as const, text, message: "" };
+      } catch (cause) {
+        throw new TRPCError({ code: "BAD_GATEWAY", message: (cause as Error).message });
+      }
     }),
 
   /** Default export range: current financial year to date, per the client's FY start. */

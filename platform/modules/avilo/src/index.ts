@@ -8,6 +8,7 @@ export * from "./import/types.js";
 export * from "./import/cells.js";
 export * from "./import/classify.js";
 export * from "./import/suggest.js";
+export * from "./import/narrative.js";
 export * from "./import/workbook.js";
 // Deliberately NOT exported here: ./import/pdf.js is Node-only (node:module, node:url)
 // and pulls in pdfjs. The web bundle imports this index, so anything re-exported from it

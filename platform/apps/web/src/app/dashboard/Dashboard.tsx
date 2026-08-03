@@ -12,8 +12,9 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, ArrowRight, Info } from "lucide-react";
+import { AlertTriangle, ArrowRight, Info, Sparkles } from "lucide-react";
 
+import { api } from "../../lib/trpc.js";
 import { moneyFull, percent } from "../../lib/format.js";
 import { Tip } from "../components/Tooltip.js";
 import type {
@@ -294,7 +295,12 @@ export function Dashboard({
               {story && hovered ? (
                 <DimensionPanel dimension={hovered} story={story} />
               ) : (
-                <Brief beats={beats} onGo={go} />
+                <Brief
+                  beats={beats}
+                  onGo={go}
+                  clientName={clientName}
+                  periodLabel={report.periodLabel}
+                />
               )}
             </div>
           </div>
@@ -397,14 +403,104 @@ export function Dashboard({
  * working, and that sits at the end of the sentence it belongs to rather than in a row of
  * buttons underneath.
  */
-function Brief({ beats, onGo }: { beats: Beat[]; onGo: (section: string) => void }) {
+function Brief({
+  beats,
+  onGo,
+  clientName,
+  periodLabel,
+}: {
+  beats: Beat[];
+  onGo: (section: string) => void;
+  clientName: string;
+  periodLabel: string;
+}) {
+  /*
+    The generated draft, when one has been asked for.
+
+    Held here and never persisted: the computed summary remains what the section *is*, and
+    the draft is a client-ready rewrite of it that the advisor copies out. Regenerating or
+    dismissing returns to the calculated text, so there is no state in which the page shows
+    prose whose provenance is unclear.
+  */
+  const [draft, setDraft] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const generate = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await api.report.generateSummary.mutate({
+        clientName,
+        periodLabel,
+        beats: beats.map((beat) => ({
+          kicker: beat.kicker,
+          headline: beat.headline,
+          body: beat.body,
+        })),
+      });
+      if (result.ok) setDraft(result.text);
+      else setError(result.message);
+    } catch (cause) {
+      setError((cause as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const paragraphs: Beat[][] = [
     beats.filter((beat) => beat.id === "what" || beat.id === "why"),
     beats.filter((beat) => beat.id === "risk" || beat.id === "next" || beat.id === "act"),
   ].filter((group) => group.length > 0);
 
+  if (draft !== null) {
+    return (
+      <div className="space-y-3">
+        <div className="flex items-center gap-2">
+          <span className="inline-flex items-center gap-1 rounded-md border border-accent/30 bg-accent-soft/50 px-1.5 py-[2px] text-[10.5px] font-medium text-accent">
+            <Sparkles size={10} />
+            Drafted from the findings below
+          </span>
+          <button
+            onClick={() => void generate()}
+            disabled={busy}
+            className="text-[11.5px] font-medium text-ink-muted hover:text-accent"
+          >
+            {busy ? "Writing…" : "Again"}
+          </button>
+          <button
+            onClick={() => setDraft(null)}
+            className="text-[11.5px] font-medium text-ink-muted hover:text-accent"
+          >
+            Dismiss
+          </button>
+        </div>
+        {draft.split(/\n{2,}/).map((paragraph, index) => (
+          <p key={index} className="text-[12.5px] leading-[1.65] text-ink">
+            {paragraph}
+          </p>
+        ))}
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-3">
+      <div className="flex items-center justify-end gap-2">
+        {error ? (
+          <span className="mr-auto text-[11px] leading-snug text-flag">{error}</span>
+        ) : null}
+        <Tip content="Rewrite these findings as a client-ready note. Uses only the figures already calculated — a draft containing anything else is discarded.">
+          <button
+            onClick={() => void generate()}
+            disabled={busy}
+            className="inline-flex items-center gap-1 rounded-md border border-line px-2 py-[3px] text-[11px] font-medium text-ink-muted transition-colors hover:border-accent hover:text-accent disabled:opacity-50"
+          >
+            <Sparkles size={11} />
+            {busy ? "Writing…" : "Generate"}
+          </button>
+        </Tip>
+      </div>
       {paragraphs.map((group, index) => (
         <p key={index} className="text-[12.5px] leading-[1.65] text-ink-muted">
           {group.map((beat) => (

@@ -449,14 +449,9 @@ function StagedFileCard({
                         remembered.
                       </p>
                     </div>
-                    {/* Mapping is proposed during staging, so this re-runs rather than starts. */}
                     <Button onClick={askModel} disabled={suggesting}>
                       <Sparkles size={12} />
-                      {suggesting
-                        ? "Thinking…"
-                        : Object.keys(suggestions).length > 0
-                          ? "Redo"
-                          : "Suggest"}
+                      {suggesting ? "Thinking…" : "Suggest"}
                     </Button>
                   </div>
 

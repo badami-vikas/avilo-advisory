@@ -12,6 +12,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Chart, { type ChartConfiguration, type ChartType } from "chart.js/auto";
+import { ChartColumn, Table as TableIcon } from "lucide-react";
 
 import { moneyFull } from "../../lib/format.js";
 import { Tip } from "../components/Tooltip.js";
@@ -46,16 +47,96 @@ function useChart<T extends ChartType>(config: ChartConfiguration<T>) {
   return ref;
 }
 
+/**
+ * The numbers behind a chart.
+ *
+ * Every visual can hand over its own source rows, so "show me the figures" is answered in
+ * place rather than by hunting for the raw-data view and matching a series by eye.
+ */
+export interface ChartTable {
+  columns: string[];
+  rows: (string | number | null)[][];
+  /** Which columns hold money, so the table formats them the way the axis did. */
+  money?: boolean[];
+}
+
+function TableView({ table }: { table: ChartTable }) {
+  const format = (value: string | number | null, column: number) => {
+    if (value === null || value === undefined || value === "") return "—";
+    if (typeof value === "number") {
+      return table.money?.[column] ? moneyFull(value) : value.toLocaleString();
+    }
+    return value;
+  };
+
+  return (
+    // Scrolls inside its own box: a wide series must never push the page sideways.
+    <div className="h-full overflow-auto rounded-lg border border-line-soft">
+      <table className="w-full border-collapse text-[11.5px]">
+        <thead className="sticky top-0 bg-canvas">
+          <tr>
+            {table.columns.map((column, index) => (
+              <th
+                key={column}
+                className={`border-b border-line px-2 py-1.5 font-semibold text-ink-muted ${
+                  index === 0 ? "text-left" : "text-right"
+                }`}
+              >
+                {column}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {table.rows.map((row, r) => (
+            <tr key={r} className="even:bg-canvas/60">
+              {row.map((cell, c) => (
+                <td
+                  key={c}
+                  className={`border-b border-line-soft px-2 py-1 ${
+                    c === 0 ? "text-left text-ink" : "num text-right text-ink-muted"
+                  }`}
+                >
+                  {format(cell, c)}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function Frame({
   height,
   children,
+  table,
 }: {
   height: number;
   children: React.ReactNode;
+  /** When present, a control appears to swap the drawing for its own figures. */
+  table?: ChartTable;
 }) {
+  const [showTable, setShowTable] = useState(false);
+
   return (
     <div className="chart-frame relative w-full" style={{ height }}>
-      {children}
+      {table ? (
+        <Tip content={showTable ? "Back to the chart" : "Show the figures behind this chart"}>
+          <button
+            onClick={() => setShowTable((value) => !value)}
+            aria-label={showTable ? "Show chart" : "Show data table"}
+            // Sits above the canvas rather than beside it: the frame is a fixed height and
+            // a control on its own row would shorten every chart on the page.
+            className="no-print absolute right-0 top-0 z-10 inline-flex items-center gap-1 rounded-md border border-line bg-surface/90 px-1.5 py-[3px] text-[10.5px] font-medium text-ink-muted backdrop-blur-[1px] transition-colors hover:border-accent hover:text-accent"
+          >
+            {showTable ? <ChartColumn size={11} /> : <TableIcon size={11} />}
+            {showTable ? "Chart" : "Data"}
+          </button>
+        </Tip>
+      ) : null}
+      {showTable && table ? <TableView table={table} /> : children}
     </div>
   );
 }
@@ -126,9 +207,22 @@ export function Donut({
     },
   });
 
+  const total = slices.reduce((sum, slice) => sum + slice.value, 0);
+
   return (
     <div>
-    <Frame height={height}>
+    <Frame
+      height={height}
+      table={{
+        columns: ["Bucket", "Amount", "Share"],
+        money: [false, true, false],
+        rows: slices.map((slice) => [
+          slice.label,
+          slice.value,
+          total > 0 ? `${((slice.value / total) * 100).toFixed(1)}%` : "—",
+        ]),
+      }}
+    >
       <canvas ref={ref} />
       {/*
         The total sits in the hole rather than beside the chart. A ring with a number in
@@ -612,7 +706,14 @@ export function GroupedBars({
 
   return (
     <div>
-      <Frame height={height}>
+      <Frame
+        height={height}
+        table={{
+          columns: ["Period", ...datasets.map((d) => d.label)],
+          money: [false, ...datasets.map(() => currency)],
+          rows: labels.map((label, i) => [label, ...datasets.map((d) => d.values[i] ?? null)]),
+        }}
+      >
         <canvas ref={ref} />
       </Frame>
       {withLegend ? (
@@ -715,7 +816,22 @@ export function Waterfall({
   });
 
   return (
-    <Frame height={height}>
+    <Frame
+      height={height}
+      table={{
+        columns: ["Step", "Change", "Running total"],
+        money: [false, true, true],
+        rows: [
+          [openingLabel, null, opening],
+          ...steps.map((step, i) => [
+            step.label,
+            step.change,
+            opening + steps.slice(0, i + 1).reduce((sum, s) => sum + s.change, 0),
+          ]),
+          [closingLabel, null, opening + steps.reduce((sum, s) => sum + s.change, 0)],
+        ],
+      }}
+    >
       <canvas ref={ref} />
     </Frame>
   );
@@ -799,7 +915,14 @@ export function TrendLine({
 
   return (
     <div>
-      <Frame height={height}>
+      <Frame
+        height={height}
+        table={{
+          columns: ["Period", ...datasets.map((d) => d.label)],
+          money: [false, ...datasets.map(() => currency)],
+          rows: labels.map((label, i) => [label, ...datasets.map((d) => d.values[i] ?? null)]),
+        }}
+      >
         <canvas ref={ref} />
       </Frame>
       {withLegend ? (
@@ -893,7 +1016,19 @@ export function BubbleMatrix({
   });
 
   return (
-    <Frame height={height}>
+    <Frame
+      height={height}
+      table={{
+        columns: ["Client", xLabel, yLabel, "Size"],
+        money: [false, !xIsPercent, true, true],
+        rows: points.map((point) => [
+          point.label,
+          xIsPercent ? `${point.x.toFixed(1)}%` : point.x,
+          point.y,
+          point.r,
+        ]),
+      }}
+    >
       <canvas ref={ref} />
     </Frame>
   );
@@ -1048,7 +1183,18 @@ export function Pareto({
 
   return (
     <div>
-      <Frame height={height}>
+      <Frame
+        height={height}
+        table={{
+          columns: ["Customer", "Revenue", "Cumulative share"],
+          money: [false, true, false],
+          rows: labels.map((label, i) => [
+            label,
+            values[i] ?? null,
+            cumulative[i] === undefined ? null : `${cumulative[i]!.toFixed(1)}%`,
+          ]),
+        }}
+      >
         <canvas ref={ref} />
       </Frame>
       <Legend
