@@ -5,7 +5,6 @@ import { and, eq } from "drizzle-orm";
 
 import {
   classifyGrid,
-  classifyWithFallback,
   findAsOfPeriod,
   parseAging,
   parseBalanceSheet,
@@ -26,7 +25,6 @@ import { checkIntegrity, formatPeriod, toCents } from "@avilo/module";
 import { getDb, newId, nowIso, schema } from "../db.js";
 import { clientFilesDir, ensureDir } from "../paths.js";
 import { buildResolver } from "./labels.js";
-import { groqRunner } from "./ai.js";
 
 export interface StagedFile {
   sourceFileId: string;
@@ -154,7 +152,20 @@ export async function stageFile(
     };
   }
 
-  const classification = await classifyWithFallback({ filename, grid }, groqRunner(20));
+  /*
+    Rules only. No model is consulted on upload.
+
+    Classification used to fall back to a cloud model whenever the rules scored below
+    confidence. That was AI by default: it spent a call, and a share of the user's quota,
+    on a decision nobody had asked for — and silently, so a wrong answer arrived with the
+    same face as a right one.
+
+    The contract now is that a model runs only when a human presses a button, because
+    pressing it is what says "I want speed here and I will check the result". When the
+    rules cannot place a file the report-type dropdown is already sitting there, unset and
+    waiting, which is a clearer request for input than a guess would be.
+  */
+  const classification = classifyGrid({ filename, grid });
   const parsed = classification.reportType
     ? previewParse(clientId, classification.reportType, grid)
     : null;
