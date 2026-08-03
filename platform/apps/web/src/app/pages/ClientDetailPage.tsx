@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router";
-import { BrainCircuit, Download, MoreHorizontal, Upload, X } from "lucide-react";
+import { Download, Upload, X } from "lucide-react";
 import { formatPeriod } from "@avilo/module";
 
 import { api } from "../../lib/trpc.js";
@@ -20,7 +20,6 @@ import { Tip } from "../components/Tooltip.js";
 import { Dashboard } from "../dashboard/Dashboard.js";
 import { UploadDialog } from "../components/UploadDialog.js";
 import { UploadProvider } from "../components/upload-context.js";
-import { ModelSettingsDialog } from "../components/ModelSettingsDialog.js";
 import type {
   ClientRecord,
   DetailByKind,
@@ -112,7 +111,6 @@ export function ClientDetailPage() {
   );
   const [uploading, setUploading] = useState(false);
   const [exporting, setExporting] = useState(false);
-  const [modelSettings, setModelSettings] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [layout, setLayout] = useState<ReportLayout>(defaultLayout);
   /** The saved_views row backing this client's layout, once one exists. */
@@ -491,11 +489,6 @@ export function ClientDetailPage() {
           <Download size={14} />
           Download PDF
         </Button>
-        <Tip content="Model settings — configure an AI provider for smarter file classification">
-          <Button onClick={() => setModelSettings(true)} aria-label="Model settings">
-            <MoreHorizontal size={15} />
-          </Button>
-        </Tip>
 
         <div className="ml-auto flex items-center gap-2">
           <label htmlFor="view-mode" className="text-[12px] text-ink-faint">
@@ -563,10 +556,6 @@ export function ClientDetailPage() {
       )}
 
       {/* ---------------------------------------------------------- dialogs */}
-      {modelSettings ? (
-        <ModelSettingsDialog onClose={() => setModelSettings(false)} />
-      ) : null}
-
       {uploading ? (
         <UploadDialog
           clientId={clientId}

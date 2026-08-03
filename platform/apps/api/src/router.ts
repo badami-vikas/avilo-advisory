@@ -57,16 +57,27 @@ const clientsRouter = router({
       const metric = (id: string) =>
         report?.metrics.find((m) => m.id === id)?.value ?? null;
 
+      const account = (id: string) =>
+        report?.accounts.find((a) => a.accountId === id)?.value ?? null;
+
       return {
         ...client,
         latestPeriod: latest ?? null,
         periodCount: periods.length,
-        revenue:
-          report?.accounts.find((a) => a.accountId === "pl.revenue")?.value ?? null,
+        revenue: account("pl.revenue"),
+        cogs: account("pl.cogs"),
+        overhead: account("pl.overhead"),
+        cash: account("bs.cash"),
+        ar: account("bs.ar"),
+        ap: account("bs.ap"),
+        totalAssets: account("bs.total_assets"),
+        grossProfit: metric("gross_profit"),
         netOperatingIncome: metric("net_operating_income"),
         grossMarginPct: metric("gross_margin_pct"),
         noiMarginPct: metric("noi_margin_pct"),
         daysCashOnHand: metric("days_cash_on_hand"),
+        dso: metric("dso"),
+        dpo: metric("dpo"),
         missingCount: report?.missingRequired.length ?? null,
         complete: report?.complete ?? false,
       };

@@ -5,6 +5,7 @@ import {
   ArrowDown,
   ArrowUp,
   ArrowUpDown,
+  BrainCircuit,
   Check,
   ChevronDown,
   Eye,
@@ -52,6 +53,7 @@ export function TableToolbar({
   onFilterOpenChange,
   viewMode = "table",
   onViewModeChange,
+  onModelSettings,
 }: {
   tableId: string;
   columns: ColumnSpec[];
@@ -67,6 +69,7 @@ export function TableToolbar({
    *  in both — a card grid still has an underlying row order and a hidden-field set. */
   viewMode?: "table" | "card";
   onViewModeChange?: (mode: "table" | "card") => void;
+  onModelSettings?: () => void;
 }) {
   const [lists, setLists] = useState<SavedList[]>([]);
   const [activeList, setActiveList] = useState<string | null>(null);
@@ -729,6 +732,19 @@ export function TableToolbar({
               >
                 Reset view
               </DropdownMenu.Item>
+
+              {onModelSettings ? (
+                <>
+                  <DropdownMenu.Separator className="my-1 h-px bg-line-soft" />
+                  <DropdownMenu.Item
+                    onSelect={onModelSettings}
+                    className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-[12.5px] text-ink outline-none data-[highlighted]:bg-line-soft"
+                  >
+                    <BrainCircuit size={13} className="text-ink-muted" />
+                    Model settings
+                  </DropdownMenu.Item>
+                </>
+              ) : null}
             </DropdownMenu.Content>
           </DropdownMenu.Portal>
         </DropdownMenu.Root>

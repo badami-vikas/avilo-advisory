@@ -11,6 +11,7 @@ import { DataTable, type ColumnRender } from "../components/DataTable.js";
 import { ClientCardView } from "../components/ClientCardView.js";
 import { TableToolbar } from "../components/TableToolbar.js";
 import { UploadDialog } from "../components/UploadDialog.js";
+import { ModelSettingsDialog } from "../components/ModelSettingsDialog.js";
 
 type ClientRow = Awaited<ReturnType<typeof api.clients.list.query>>[number];
 
@@ -18,21 +19,39 @@ const TABLE_ID = "clients.table";
 
 const STAGES = ["Onboarding", "Active", "Review", "Dormant"];
 
-/** Columns are data, per the @bridge/tables contract — not hardcoded UI branches. */
+/**
+ * Full column catalog. Core columns are visible by default; financial detail columns
+ * start hidden and appear when the user picks them from "Add column" in the ⋯ menu.
+ */
 const COLUMNS: ColumnSpec[] = [
   { id: "name", label: "Client", kind: "text", editable: true, width: 230 },
   { id: "stage", label: "Stage", kind: "select", editable: true, options: STAGES, width: 130 },
   { id: "latestPeriod", label: "Latest period", kind: "text", width: 140 },
   { id: "revenue", label: "Revenue", kind: "number", format: "currency", editable: true, width: 120 },
   { id: "netOperatingIncome", label: "Net Op. Income", kind: "number", format: "currency", editable: true, width: 140 },
-  { id: "grossMarginPct", label: "Gross margin", kind: "number", format: "percent", editable: true, width: 130 },
-  { id: "noiMarginPct", label: "NOI margin", kind: "number", format: "percent", editable: true, width: 120 },
+  { id: "grossMarginPct", label: "Gross margin %", kind: "number", format: "percent", editable: true, width: 130 },
+  { id: "noiMarginPct", label: "NOI margin %", kind: "number", format: "percent", editable: true, width: 120 },
   { id: "daysCashOnHand", label: "Days cash", kind: "number", editable: true, width: 110 },
-  // Stored on every client and, until now, typeable nowhere. Present here so a client
-  // added from this table can be filled in without leaving it.
+  // Financial detail — hidden by default, available via Add column
+  { id: "grossProfit", label: "Gross profit", kind: "number", format: "currency", editable: true, width: 130 },
+  { id: "cogs", label: "Cost of sales", kind: "number", format: "currency", editable: true, width: 130 },
+  { id: "overhead", label: "Overhead", kind: "number", format: "currency", editable: true, width: 120 },
+  { id: "cash", label: "Cash in bank", kind: "number", format: "currency", editable: true, width: 120 },
+  { id: "ar", label: "Accounts receivable", kind: "number", format: "currency", editable: true, width: 160 },
+  { id: "ap", label: "Accounts payable", kind: "number", format: "currency", editable: true, width: 150 },
+  { id: "totalAssets", label: "Total assets", kind: "number", format: "currency", editable: true, width: 130 },
+  { id: "dso", label: "Collection days (DSO)", kind: "number", editable: true, width: 160 },
+  { id: "dpo", label: "Payment days (DPO)", kind: "number", editable: true, width: 150 },
+  // Client profile fields
   { id: "legalName", label: "Legal name", kind: "text", editable: true, width: 180 },
   { id: "industry", label: "Industry", kind: "text", editable: true, width: 170 },
   { id: "data", label: "Data", kind: "text", width: 140 },
+];
+
+/** Columns hidden by default — available to add via the ⋯ menu. */
+const DEFAULT_HIDDEN = [
+  "grossProfit", "cogs", "overhead", "cash", "ar", "ap", "totalAssets", "dso", "dpo",
+  "legalName", "industry",
 ];
 
 /**
@@ -44,11 +63,20 @@ const COLUMNS: ColumnSpec[] = [
  * looking at.
  */
 const METRIC_TARGETS: Record<string, { kind: "account" | "metric"; id: string }> = {
-  revenue: { kind: "account", id: "pl.revenue" },
-  netOperatingIncome: { kind: "metric", id: "net_operating_income" },
-  grossMarginPct: { kind: "metric", id: "gross_margin_pct" },
-  noiMarginPct: { kind: "metric", id: "noi_margin_pct" },
-  daysCashOnHand: { kind: "metric", id: "days_cash_on_hand" },
+  revenue:           { kind: "account", id: "pl.revenue" },
+  cogs:              { kind: "account", id: "pl.cogs" },
+  overhead:          { kind: "account", id: "pl.overhead" },
+  cash:              { kind: "account", id: "bs.cash" },
+  ar:                { kind: "account", id: "bs.ar" },
+  ap:                { kind: "account", id: "bs.ap" },
+  totalAssets:       { kind: "account", id: "bs.total_assets" },
+  grossProfit:       { kind: "metric",  id: "gross_profit" },
+  netOperatingIncome:{ kind: "metric",  id: "net_operating_income" },
+  grossMarginPct:    { kind: "metric",  id: "gross_margin_pct" },
+  noiMarginPct:      { kind: "metric",  id: "noi_margin_pct" },
+  daysCashOnHand:    { kind: "metric",  id: "days_cash_on_hand" },
+  dso:               { kind: "metric",  id: "dso" },
+  dpo:               { kind: "metric",  id: "dpo" },
 };
 
 export function ClientsPage() {
@@ -59,9 +87,11 @@ export function ClientsPage() {
   const [view, setView] = useState<ViewConfig>(() => ({
     ...defaultViewConfig(TABLE_ID),
     sorts: [{ id: "name", dir: "asc" }],
+    hiddenColumns: DEFAULT_HIDDEN,
   }));
   const [uploadFor, setUploadFor] = useState<ClientRow | null>(null);
   const [viewMode, setViewMode] = useState<"table" | "card">("table");
+  const [modelSettings, setModelSettings] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
@@ -299,6 +329,70 @@ export function ClientsPage() {
             <span className="num text-ink-muted">{Math.round(row.daysCashOnHand)}</span>
           ),
       },
+      grossProfit: {
+        ...metricColumn("grossProfit", "Gross profit"),
+        value: (row) => row.grossProfit,
+        formatAggregate: money,
+        render: (row) => <span className="num text-ink-muted">{money(row.grossProfit)}</span>,
+      },
+      cogs: {
+        ...metricColumn("cogs", "Cost of sales"),
+        value: (row) => row.cogs,
+        formatAggregate: money,
+        render: (row) => <span className="num text-ink-muted">{money(row.cogs)}</span>,
+      },
+      overhead: {
+        ...metricColumn("overhead", "Overhead"),
+        value: (row) => row.overhead,
+        formatAggregate: money,
+        render: (row) => <span className="num text-ink-muted">{money(row.overhead)}</span>,
+      },
+      cash: {
+        ...metricColumn("cash", "Cash in bank accounts"),
+        value: (row) => row.cash,
+        formatAggregate: money,
+        render: (row) => <span className="num text-ink-muted">{money(row.cash)}</span>,
+      },
+      ar: {
+        ...metricColumn("ar", "Accounts receivable"),
+        value: (row) => row.ar,
+        formatAggregate: money,
+        render: (row) => <span className="num text-ink-muted">{money(row.ar)}</span>,
+      },
+      ap: {
+        ...metricColumn("ap", "Accounts payable"),
+        value: (row) => row.ap,
+        formatAggregate: money,
+        render: (row) => <span className="num text-ink-muted">{money(row.ap)}</span>,
+      },
+      totalAssets: {
+        ...metricColumn("totalAssets", "Total assets"),
+        value: (row) => row.totalAssets,
+        formatAggregate: money,
+        render: (row) => <span className="num text-ink-muted">{money(row.totalAssets)}</span>,
+      },
+      dso: {
+        ...metricColumn("dso", "Collection days (DSO)"),
+        value: (row) => row.dso,
+        formatAggregate: (v) => `${Math.round(v)}d`,
+        render: (row) =>
+          row.dso === null ? (
+            <span className="text-ink-faint">—</span>
+          ) : (
+            <span className="num text-ink-muted">{Math.round(row.dso)}d</span>
+          ),
+      },
+      dpo: {
+        ...metricColumn("dpo", "Payment days (DPO)"),
+        value: (row) => row.dpo,
+        formatAggregate: (v) => `${Math.round(v)}d`,
+        render: (row) =>
+          row.dpo === null ? (
+            <span className="text-ink-faint">—</span>
+          ) : (
+            <span className="num text-ink-muted">{Math.round(row.dpo)}d</span>
+          ),
+      },
       legalName: {
         value: (row) => row.legalName ?? "",
         editValue: (row) => row.legalName ?? "",
@@ -435,6 +529,10 @@ export function ClientsPage() {
 
   return (
     <div className="space-y-4">
+      {modelSettings ? (
+        <ModelSettingsDialog onClose={() => setModelSettings(false)} />
+      ) : null}
+
       <TableToolbar
         tableId={TABLE_ID}
         columns={COLUMNS}
@@ -447,6 +545,7 @@ export function ClientsPage() {
         onFilterOpenChange={setOpenFilter}
         viewMode={viewMode}
         onViewModeChange={setViewMode}
+        onModelSettings={() => setModelSettings(true)}
       />
 
       <div className="flex flex-wrap gap-2.5">
