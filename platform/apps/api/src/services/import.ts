@@ -26,6 +26,7 @@ import { checkIntegrity, formatPeriod, toCents } from "@avilo/module";
 import { getDb, newId, nowIso, schema } from "../db.js";
 import { clientFilesDir, ensureDir } from "../paths.js";
 import { buildResolver } from "./labels.js";
+import { groqRunner } from "./ai.js";
 
 export interface StagedFile {
   sourceFileId: string;
@@ -153,34 +154,7 @@ export async function stageFile(
     };
   }
 
-  const groqRow = db.select().from(schema.appSettings)
-    .where(eq(schema.appSettings.key, "groq_api_key")).get();
-  const groqKey = groqRow?.value ?? null;
-  const groqModel = db.select().from(schema.appSettings)
-    .where(eq(schema.appSettings.key, "groq_model")).get()?.value ?? "llama-3.3-70b-versatile";
-
-  const groqRunner = groqKey
-    ? async (prompt: string): Promise<string> => {
-        const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-          method: "POST",
-          headers: {
-            "Authorization": `Bearer ${groqKey}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            model: groqModel,
-            messages: [{ role: "user", content: prompt }],
-            max_tokens: 20,
-            temperature: 0,
-          }),
-        });
-        if (!res.ok) throw new Error(`Groq ${res.status}`);
-        const json = await res.json() as { choices: { message: { content: string } }[] };
-        return json.choices[0]?.message.content ?? "";
-      }
-    : undefined;
-
-  const classification = await classifyWithFallback({ filename, grid }, groqRunner);
+  const classification = await classifyWithFallback({ filename, grid }, groqRunner(20));
   const parsed = classification.reportType
     ? previewParse(clientId, classification.reportType, grid)
     : null;

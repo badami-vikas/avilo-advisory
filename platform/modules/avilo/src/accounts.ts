@@ -368,6 +368,18 @@ export const BUILTIN_LABEL_MAPPINGS: BuiltinMapping[] = [
     "Total for Bank Accounts",
     "Total Cash",
     "Total Cash and Cash Equivalents",
+    // Charts of accounts that name the bank line directly rather than printing a
+    // "Total Bank Accounts" subtotal. Common when there is only one bank account, in
+    // which case QuickBooks omits the section total entirely and the detail row is the
+    // only place the figure appears.
+    "Cash in Bank",
+    "Cash at Bank",
+    "Cash and Cash Equivalents",
+    "Cash on Hand",
+    "Checking",
+    "Checking Account",
+    "Operating Account",
+    "Business Checking",
   ]),
   ...seed("balance_sheet", "bs.ar", [
     "Total Accounts Receivable",

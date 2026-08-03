@@ -3,6 +3,7 @@ import {
   AlertTriangle,
   CheckCircle2,
   FileSpreadsheet,
+  Sparkles,
   UploadCloud,
   X,
 } from "lucide-react";
@@ -312,6 +313,47 @@ function StagedFileCard({
   const { classification, preview } = file;
   const confident = classification.reportType && !classification.needsConfirmation;
 
+  /*
+    AI suggestions for the rows the deterministic resolver could not place.
+
+    Held in local state and rendered as a pre-selected value with a reason, never applied
+    silently: the model is a fast first draft of a decision that remains the user's. A
+    suggestion becomes real only when "Apply" is pressed, which routes through exactly the
+    same mapLabel call as a manual choice — so an accepted suggestion is learned, and the
+    same label is never asked about again on any future import.
+  */
+  const [suggestions, setSuggestions] = useState<Record<string, { accountId: string | null; reason: string }>>({});
+  const [suggesting, setSuggesting] = useState(false);
+  const [suggestError, setSuggestError] = useState<string | null>(null);
+
+  const suggested = Object.entries(suggestions).filter(([, s]) => s.accountId);
+
+  const askModel = async () => {
+    if (!preview || !classification.reportType) return;
+    setSuggesting(true);
+    setSuggestError(null);
+    try {
+      const result = await api.import.suggestMappings.mutate({
+        reportType: classification.reportType,
+        labels: preview.unmatched.map((u) => u.rawLabel),
+      });
+      const next: Record<string, { accountId: string | null; reason: string }> = {};
+      for (const s of result) next[s.rawLabel] = { accountId: s.accountId, reason: s.reason };
+      setSuggestions(next);
+    } catch (cause) {
+      setSuggestError((cause as Error).message);
+    } finally {
+      setSuggesting(false);
+    }
+  };
+
+  const applyAll = () => {
+    for (const [rawLabel, s] of suggested) {
+      if (s.accountId) onMapLabel(rawLabel, s.accountId);
+    }
+    setSuggestions({});
+  };
+
   return (
     <div className="rounded-xl border border-line bg-surface p-4">
       <div className="flex items-start gap-3">
@@ -381,44 +423,103 @@ function StagedFileCard({
 
               {preview.unmatched.length > 0 ? (
                 <div className="rounded-lg border border-line bg-canvas p-3">
-                  <p className="text-[12px] font-medium text-ink">
-                    {preview.unmatched.length} row
-                    {preview.unmatched.length === 1 ? "" : "s"} not recognised
-                  </p>
-                  <p className="mt-0.5 text-[11.5px] leading-relaxed text-ink-muted">
-                    Map any you need. Each choice is remembered, so this file's layout
-                    only has to be taught once.
-                  </p>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      {/*
+                        "No matching account", not "not recognised".
+
+                        Most of these rows are sub-accounts and subtotals that the
+                        canonical chart has no slot for — mapping a subtotal alongside its
+                        children would double-count it. Calling that "not recognised"
+                        described a healthy import as a failure and sent people hunting for
+                        a bug that was not there.
+                      */}
+                      <p className="text-[12px] font-medium text-ink">
+                        {preview.unmatched.length} row
+                        {preview.unmatched.length === 1 ? " has" : "s have"} no matching
+                        account
+                      </p>
+                      <p className="mt-0.5 text-[11.5px] leading-relaxed text-ink-muted">
+                        Usually fine — subtotals and sub-accounts have nowhere to map, and
+                        skipping them is correct. Map the ones that matter; each choice is
+                        remembered.
+                      </p>
+                    </div>
+                    <Button onClick={askModel} disabled={suggesting}>
+                      <Sparkles size={12} />
+                      {suggesting ? "Thinking…" : "Suggest"}
+                    </Button>
+                  </div>
+
+                  {suggestError ? (
+                    <p className="mt-2 flex items-start gap-1.5 text-[11.5px] leading-relaxed text-flag">
+                      <AlertTriangle size={12} className="mt-0.5 shrink-0" />
+                      {suggestError}
+                    </p>
+                  ) : null}
+
+                  {suggested.length > 0 ? (
+                    <div className="mt-2 flex items-center justify-between gap-3 rounded-md border border-accent/30 bg-accent-soft/40 px-2.5 py-1.5">
+                      <span className="text-[11.5px] text-ink">
+                        {suggested.length} mapping{suggested.length === 1 ? "" : "s"}{" "}
+                        suggested below. Review, then apply.
+                      </span>
+                      <Button variant="primary" onClick={applyAll}>
+                        Apply {suggested.length}
+                      </Button>
+                    </div>
+                  ) : null}
                   <div className="mt-2 max-h-44 space-y-1.5 overflow-y-auto">
-                    {preview.unmatched.map((row) => (
-                      <div
-                        key={row.normalizedLabel}
-                        className="flex items-center gap-2"
-                      >
-                        <span className="min-w-0 flex-1 truncate text-[12px] text-ink">
-                          {row.rawLabel}
-                          {row.sampleValues[0] ? (
-                            <span className="num ml-2 text-ink-faint">
-                              {moneyFull(row.sampleValues[0].value)}
-                            </span>
-                          ) : null}
-                        </span>
-                        <select
-                          defaultValue=""
-                          onChange={(event) =>
-                            onMapLabel(row.rawLabel, event.target.value)
-                          }
-                          className="h-7 w-52 shrink-0 rounded-md border border-line bg-surface px-2 text-[11.5px] outline-none focus:border-accent"
+                    {preview.unmatched.map((row) => {
+                      const hint = suggestions[row.rawLabel];
+                      return (
+                        <div
+                          key={row.normalizedLabel}
+                          className="flex items-center gap-2"
                         >
-                          <option value="">Skip</option>
-                          {accounts.map((account) => (
-                            <option key={account.id} value={account.id}>
-                              {account.label}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    ))}
+                          <span className="min-w-0 flex-1 truncate text-[12px] text-ink">
+                            {row.rawLabel}
+                            {row.sampleValues[0] ? (
+                              <span className="num ml-2 text-ink-faint">
+                                {moneyFull(row.sampleValues[0].value)}
+                              </span>
+                            ) : null}
+                            {hint?.reason ? (
+                              <span
+                                className={`ml-2 text-[11px] ${hint.accountId ? "text-accent" : "text-ink-faint"}`}
+                              >
+                                {hint.accountId ? "AI: " : "AI: skip — "}
+                                {hint.reason}
+                              </span>
+                            ) : null}
+                          </span>
+                          <select
+                            value={hint?.accountId ?? ""}
+                            onChange={(event) => {
+                              const value = event.target.value;
+                              setSuggestions((current) => ({
+                                ...current,
+                                [row.rawLabel]: {
+                                  accountId: value || null,
+                                  reason: current[row.rawLabel]?.reason ?? "",
+                                },
+                              }));
+                              if (value) onMapLabel(row.rawLabel, value);
+                            }}
+                            className={`h-7 w-52 shrink-0 rounded-md border bg-surface px-2 text-[11.5px] outline-none focus:border-accent ${
+                              hint?.accountId ? "border-accent text-accent" : "border-line"
+                            }`}
+                          >
+                            <option value="">Skip</option>
+                            {accounts.map((account) => (
+                              <option key={account.id} value={account.id}>
+                                {account.label}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               ) : null}

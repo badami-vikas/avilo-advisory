@@ -7,10 +7,12 @@ import {
   fiscalYearToDate,
   isPeriod,
   normalizeLabel,
+  suggestMappings,
   validateExpression,
   type ReportType,
 } from "@avilo/module";
 import { getDb, newId, nowIso, schema } from "./db.js";
+import { callGroq, groqConfig, groqRunner, DEFAULT_GROQ_MODEL } from "./services/ai.js";
 import { learnMapping } from "./services/labels.js";
 import { commitFile, stageFile } from "./services/import.js";
 import {
@@ -605,6 +607,59 @@ const importRouter = router({
       return staged;
     }),
 
+  /**
+   * Ask the configured model to map rows the deterministic resolver could not place.
+   *
+   * Returns proposals only. Nothing is persisted and no fact is written — the user
+   * accepts a suggestion through the same `mapLabel` path as a manual choice, which is
+   * what turns an accepted proposal into a mapping the app never has to ask about again.
+   */
+  suggestMappings: procedure
+    .input(
+      z.object({
+        reportType: z.string(),
+        labels: z.array(z.string()).max(100),
+      }),
+    )
+    .mutation(async ({ input }) => {
+      const runner = groqRunner(1200);
+      if (!runner) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "No model configured. Add a Groq API key in Model settings.",
+        });
+      }
+
+      const statementOf: Record<string, string> = {
+        profit_and_loss: "pl",
+        balance_sheet: "balance_sheet",
+        ar_aging: "ar_aging",
+        ap_aging: "ap_aging",
+        sales_by_customer_l12m: "sales_by_customer",
+        referral_l90d: "referral",
+      };
+
+      try {
+        return await suggestMappings(
+          {
+            labels: input.labels,
+            reportType: statementOf[input.reportType] ?? "",
+            candidates: CANONICAL_ACCOUNTS.map((a) => ({
+              id: a.id,
+              label: a.label,
+              statement: a.statement,
+            })),
+          },
+          runner,
+        );
+      } catch (cause) {
+        throw new TRPCError({
+          code: "BAD_GATEWAY",
+          message: (cause as Error).message,
+        });
+      }
+    }),
+
   /** Teach a label→account mapping, then the caller re-stages to see the effect. */
   mapLabel: procedure
     .input(
@@ -892,6 +947,37 @@ const settingsRouter = router({
       const db = getDb();
       db.delete(schema.appSettings).where(eq(schema.appSettings.key, input.key)).run();
       return { ok: true };
+    }),
+
+  /**
+   * Prove the key and model actually work.
+   *
+   * Without this there is no way to tell a working configuration from a typo: the
+   * classifier only consults a model for files the rules cannot place, which for a
+   * well-formed QuickBooks export is never — so a broken key stays silent indefinitely.
+   */
+  testConnection: procedure
+    .input(z.object({ apiKey: z.string().optional(), model: z.string().optional() }))
+    .mutation(async ({ input }) => {
+      const stored = groqConfig();
+      const config = {
+        apiKey: input.apiKey?.trim() || stored?.apiKey || "",
+        model: input.model?.trim() || stored?.model || DEFAULT_GROQ_MODEL,
+      };
+      if (!config.apiKey) {
+        return { ok: false as const, message: "No API key set." };
+      }
+      const started = Date.now();
+      try {
+        const reply = await callGroq(config, 'Reply with the single word: ready', 10);
+        return {
+          ok: true as const,
+          message: `${config.model} replied in ${Date.now() - started} ms`,
+          reply: reply.trim().slice(0, 40),
+        };
+      } catch (cause) {
+        return { ok: false as const, message: (cause as Error).message };
+      }
     }),
 });
 

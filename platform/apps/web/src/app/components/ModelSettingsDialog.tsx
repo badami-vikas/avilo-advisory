@@ -1,12 +1,20 @@
 import { useEffect, useState } from "react";
-import { Eye, EyeOff, X } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Eye, EyeOff, X } from "lucide-react";
 import { api } from "../../lib/trpc.js";
 import { Button } from "./ui.js";
 
+/*
+  Only models currently served by Groq.
+
+  "mixtral-8x7b-32768" was offered here until it turned out to be decommissioned — the
+  API rejects it outright. Nothing surfaced that, because classification only consults a
+  model for files the rules cannot place, so the dead model sat unused and silent. Hence
+  the Test button below: a configuration you cannot exercise is a configuration you
+  cannot trust.
+*/
 const GROQ_MODELS = [
-  { id: "llama-3.3-70b-versatile", label: "Llama 3.3 70B (recommended)" },
-  { id: "llama-3.1-8b-instant", label: "Llama 3.1 8B (fastest)" },
-  { id: "mixtral-8x7b-32768", label: "Mixtral 8x7B" },
+  { id: "llama-3.3-70b-versatile", label: "Llama 3.3 70B — best accuracy" },
+  { id: "llama-3.1-8b-instant", label: "Llama 3.1 8B — fastest" },
 ];
 
 export function ModelSettingsDialog({ onClose }: { onClose: () => void }) {
@@ -15,6 +23,8 @@ export function ModelSettingsDialog({ onClose }: { onClose: () => void }) {
   const [showKey, setShowKey] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [test, setTest] = useState<{ ok: boolean; message: string } | null>(null);
 
   useEffect(() => {
     void Promise.all([
@@ -25,6 +35,28 @@ export function ModelSettingsDialog({ onClose }: { onClose: () => void }) {
       if (modelRow?.value) setModel(modelRow.value);
     });
   }, []);
+
+  /**
+   * Exercise the configuration against the real endpoint.
+   *
+   * Tests what is typed rather than what is stored, so a key can be verified before it
+   * is committed — and a bad one never gets saved in the first place.
+   */
+  const runTest = async () => {
+    setTesting(true);
+    setTest(null);
+    try {
+      const result = await api.settings.testConnection.mutate({
+        apiKey: apiKey.trim() || undefined,
+        model,
+      });
+      setTest({ ok: result.ok, message: result.message });
+    } catch (cause) {
+      setTest({ ok: false, message: (cause as Error).message });
+    } finally {
+      setTesting(false);
+    }
+  };
 
   const save = async () => {
     setSaving(true);
@@ -119,16 +151,39 @@ export function ModelSettingsDialog({ onClose }: { onClose: () => void }) {
               </button>
             </div>
             <p className="mt-1 text-[11.5px] text-ink-faint">
-              Get a free key at console.groq.com. Leave blank to use rule-based classification only.
+              Get a free key at console.groq.com. Leave blank to work entirely offline —
+              every figure still imports, unmatched rows just stay manual.
             </p>
           </div>
+
+          {test ? (
+            <p
+              className={`flex items-start gap-1.5 rounded-lg border px-3 py-2 text-[12px] leading-relaxed ${
+                test.ok
+                  ? "border-positive/25 bg-positive/5 text-positive"
+                  : "border-flag/25 bg-flag-soft text-flag"
+              }`}
+            >
+              {test.ok ? (
+                <CheckCircle2 size={13} className="mt-0.5 shrink-0" />
+              ) : (
+                <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+              )}
+              {test.message}
+            </p>
+          ) : null}
         </div>
 
-        <footer className="flex justify-end gap-2 border-t border-line px-5 py-3.5">
-          <Button onClick={onClose}>Cancel</Button>
-          <Button variant="primary" onClick={save} disabled={saving}>
-            {saved ? "Saved" : saving ? "Saving…" : "Save"}
+        <footer className="flex items-center justify-between gap-2 border-t border-line px-5 py-3.5">
+          <Button onClick={runTest} disabled={testing || !apiKey.trim()}>
+            {testing ? "Testing…" : "Test connection"}
           </Button>
+          <div className="flex gap-2">
+            <Button onClick={onClose}>Cancel</Button>
+            <Button variant="primary" onClick={save} disabled={saving}>
+              {saved ? "Saved" : saving ? "Saving…" : "Save"}
+            </Button>
+          </div>
         </footer>
       </div>
     </div>
