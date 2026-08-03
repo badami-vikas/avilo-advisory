@@ -284,6 +284,8 @@ export const ACCOUNTS_BY_ID = new Map(CANONICAL_ACCOUNTS.map((a) => [a.id, a]));
  */
 export function normalizeLabel(raw: string): string {
   return raw
+    // Strip leading chart-of-accounts codes: "1100 Accounts Receivable" → "Accounts Receivable"
+    .replace(/^\d{3,6}\s+/, "")
     .toLowerCase()
     .replace(/[‘’“”]/g, "")
     .replace(/[^a-z0-9%&/ -]+/g, " ")

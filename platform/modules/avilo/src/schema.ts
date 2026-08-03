@@ -443,6 +443,14 @@ export const auditLog = sqliteTable(
   (t) => [index("audit_log_entity_idx").on(t.entity, t.entityId)],
 );
 
+/* ----------------------------------------------------------- app settings */
+
+/** Simple key-value store for app-wide configuration (e.g., AI provider keys). */
+export const appSettings = sqliteTable("app_settings", {
+  key: text("key").primaryKey(),
+  value: text("value").notNull(),
+});
+
 /* ------------------------------------------------------------- relations */
 
 export const clientRelations = relations(clients, ({ many }) => ({

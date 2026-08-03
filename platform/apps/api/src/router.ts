@@ -858,6 +858,32 @@ const actionsRouter = router({
     }),
 });
 
+const settingsRouter = router({
+  get: procedure
+    .input(z.object({ key: z.string() }))
+    .query(({ input }) => {
+      const db = getDb();
+      return db.select().from(schema.appSettings).where(eq(schema.appSettings.key, input.key)).get() ?? null;
+    }),
+  set: procedure
+    .input(z.object({ key: z.string(), value: z.string() }))
+    .mutation(({ input }) => {
+      const db = getDb();
+      db.insert(schema.appSettings)
+        .values({ key: input.key, value: input.value })
+        .onConflictDoUpdate({ target: schema.appSettings.key, set: { value: input.value } })
+        .run();
+      return { ok: true };
+    }),
+  delete: procedure
+    .input(z.object({ key: z.string() }))
+    .mutation(({ input }) => {
+      const db = getDb();
+      db.delete(schema.appSettings).where(eq(schema.appSettings.key, input.key)).run();
+      return { ok: true };
+    }),
+});
+
 export const appRouter = router({
   views: viewsRouter,
   stickyNotes: stickyNotesRouter,
@@ -868,6 +894,7 @@ export const appRouter = router({
   formulas: formulasRouter,
   overrides: overridesRouter,
   import: importRouter,
+  settings: settingsRouter,
 });
 
 export type AppRouter = typeof appRouter;
