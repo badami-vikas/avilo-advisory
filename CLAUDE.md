@@ -33,6 +33,8 @@ The predecessor (v9) held **one** client for **one** month, read prior-year valu
 - **A fresh database is not a test.** Migration bugs here hide behind fresh installs — the failure mode is always an *existing* database. Test the upgrade path against a copy of a real one.
 - **`build.mjs` does not build the web bundle.** It copies `apps/web/dist` and errors only if missing. Always `pnpm --filter @avilo/web build` before `dist:mac` / `dist:win`, then grep the packaged bundle for a string you just added.
 - **Grep the asar with `asar extract-file`, never directly.** A raw `grep` on `app.asar` returns 0 for strings that are definitely present.
+- **A cross-built installer proves nothing on the build host.** Per-platform native dependencies resolve to the *host's* architecture, and no content check reveals it — a Windows build that passed every inspection could not launch (BUG-016). Launch on the target, or ship no platform-divergent native deps.
+- **Never import a platform-fragile dependency at module scope.** It becomes load-bearing for application start. Lazy-load it so it can only break its own feature.
 - **Blast-radius check before finishing.** You own the neighbourhood, not just the file — callers, shared types, the packaged app, the other three views.
 - **Never fabricate a figure.** Everything on screen must trace to an imported fact, a stored override, or a formula. "Unknown" is a first-class result.
 
@@ -59,7 +61,7 @@ platform/apps/{web,api,desktop}   platform/modules/avilo   platform/packages/tab
 
 ```bash
 pnpm dev                 # web + api
-pnpm test                # 230 tests
+pnpm test                # 232 tests
 pnpm typecheck           # 6 packages
 pnpm --filter @avilo/web build && pnpm app:win   # installer — build web FIRST
 ```
@@ -68,4 +70,4 @@ Data lives in `~/Documents/Bridge/Avilo Advisory/` (`.data/avilo.sqlite` + impor
 
 ## Status
 
-v1.4.0. Shipping to a first beta user. Windows installer is **unsigned and has never been launched on Windows** — SmartScreen will warn. Open items in [docs/wiki/progress.md](docs/wiki/progress.md).
+v1.4.2. Shipping to a first beta user. Windows installer is **unsigned** — SmartScreen will warn. v1.4.1 and earlier could not launch on Windows at all (BUG-016); 1.4.2 fixes it but has still not been launched there by us. Open items in [docs/wiki/progress.md](docs/wiki/progress.md).

@@ -1,6 +1,6 @@
 # Progress
 
-**v1.4.0** — shipping to a first beta user.
+**v1.4.2** — shipping to a first beta user.
 
 ## Done
 
@@ -18,7 +18,8 @@
 
 | Item | Priority |
 |---|---|
-| Windows installer never launched on Windows | **high before beta** |
+| v1.4.1 and earlier crashed on Windows launch (BUG-016) | **FIXED in 1.4.2** — still unconfirmed on real hardware |
+| Windows installer never launched on Windows by us | **high** |
 | Installer unsigned — SmartScreen warns | high before wider release |
 | Groq key stored plain text (BUG-014) | accepted for local beta |
 | No CSP on loopback server (BUG-013) | low while local-only |
@@ -27,4 +28,4 @@
 
 ## Verification budget
 
-230 tests (150 domain + 25 API + 55 web) · 6 packages typecheck · smoke test on the packaged app.
+232 tests (152 domain + 25 API + 55 web) · 6 packages typecheck · smoke test on the packaged app.

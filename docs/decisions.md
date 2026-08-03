@@ -181,6 +181,32 @@ Format: **ADR-nnn · date · decision** → why · rejected · consequence.
 
 ---
 
+### ADR-024 · Native dependencies a feature does not need are not shipped
+**Date.** 2026-08-03
+
+**Decision.** `@napi-rs/canvas` is excluded from the package, and pdfjs is loaded lazily behind a minimal DOM shim.
+
+**Why.** pdfjs pulls canvas in to *render* pages. Nothing here renders — the importer reads text positions and advance widths only. But canvas resolves one prebuilt binary per platform through separate optional packages, so a cross-build ships the build host's: the Windows installer carried the darwin binary and no win32 one. pdfjs then could not polyfill `DOMMatrix`, and its top-level `new DOMMatrix()` threw inside the ES module loader. The app refused to launch for every Windows user, PDF or no PDF (BUG-016).
+
+**Rejected.** Installing the win32 optional package alongside the darwin one. It makes the installer bigger, still depends on the build host resolving correctly, and buys nothing — the product never renders a page.
+
+**Consequence.** Every platform takes the path that is actually tested. Proven by removing canvas from `node_modules` entirely and re-running the PDF suite: all 9 tests pass.
+
+**Corollary — a general rule.** A dependency only one feature needs must only be able to break that feature. Any import that can fail on a platform belongs behind a lazy load, never at module scope where it becomes load-bearing for application start.
+
+---
+
+### ADR-025 · A cross-built installer is not verified on the build host
+**Date.** 2026-08-03
+
+**Decision.** Treat "inspected the package on macOS" as no evidence at all about Windows.
+
+**Why.** Per-platform native dependencies resolve to the host's architecture, and nothing in the build output says so. Every content check passed on a Windows installer that could not start (BUG-016).
+
+**Consequence.** Either launch on the target platform before shipping, or remove the native dependencies that make platform divergence possible. Recorded in CLAUDE.md.
+
+---
+
 ## Interface
 
 ### ADR-020 · One legend, one verb, every chart

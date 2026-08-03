@@ -17,8 +17,72 @@ import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 import type { Cell, Grid } from "./types.js";
+
+/**
+ * pdfjs is loaded on first use, never at module scope.
+ *
+ * It was a static import, which made it load-bearing for application start: pdfjs
+ * evaluates DOM globals when it is imported, and on a platform where those are missing the
+ * exception propagates out of the ES module loader before any of our code runs. A Windows
+ * build shipped without a matching native canvas binary therefore refused to launch at all
+ * — including for users who never open a PDF.
+ *
+ * A dependency that only one feature needs must only be able to break that feature.
+ */
+type GetDocument = typeof import("pdfjs-dist/legacy/build/pdf.mjs")["getDocument"];
+let cached: GetDocument | null = null;
+
+/**
+ * The DOM surface pdfjs touches at import time.
+ *
+ * Only text positions are ever read here — never a rendered glyph — so a real canvas is
+ * not needed and neither is a native module. These stand-ins exist so that importing
+ * pdfjs succeeds; nothing in the text path calls into them. Installed only when absent, so
+ * a genuine implementation (a browser, or a platform where the native canvas did load)
+ * always wins.
+ */
+function shimDomGlobals(): void {
+  const global = globalThis as Record<string, unknown>;
+
+  if (typeof global["DOMMatrix"] === "undefined") {
+    global["DOMMatrix"] = class DOMMatrixShim {
+      a = 1; b = 0; c = 0; d = 1; e = 0; f = 0;
+      constructor(init?: number[]) {
+        if (Array.isArray(init) && init.length >= 6) {
+          [this.a, this.b, this.c, this.d, this.e, this.f] = init as [
+            number, number, number, number, number, number,
+          ];
+        }
+      }
+    };
+  }
+
+  if (typeof global["Path2D"] === "undefined") {
+    global["Path2D"] = class Path2DShim {};
+  }
+
+  if (typeof global["ImageData"] === "undefined") {
+    global["ImageData"] = class ImageDataShim {
+      width: number;
+      height: number;
+      data: Uint8ClampedArray;
+      constructor(width = 0, height = 0) {
+        this.width = width;
+        this.height = height;
+        this.data = new Uint8ClampedArray(Math.max(0, width * height * 4));
+      }
+    };
+  }
+}
+
+async function loadPdfjs(): Promise<GetDocument> {
+  if (cached) return cached;
+  shimDomGlobals();
+  const module = await import("pdfjs-dist/legacy/build/pdf.mjs");
+  cached = module.getDocument;
+  return cached;
+}
 
 /**
  * pdfjs falls back to fetching the standard Type1 font metrics when a PDF references a
@@ -230,6 +294,7 @@ export async function readPdf(
   data: Uint8Array,
   filename = "document.pdf",
 ): Promise<PdfGrid> {
+  const getDocument = await loadPdfjs();
   const task = getDocument({
     // pdfjs transfers and neuters the buffer it is given, which would corrupt the copy
     // the caller still holds for hashing and storage.

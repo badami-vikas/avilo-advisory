@@ -119,6 +119,32 @@ Ordered newest first within each section.
 
 ## Packaging
 
+### BUG-016 · Windows build would not launch — `ReferenceError: DOMMatrix is not defined`
+**RESOLVED 2026-08-03** · v1.4.2 · **found by the first beta user, on the first launch**
+
+**Symptom.** Electron error dialog on startup, before any window: `A JavaScript error occurred in the main process — ReferenceError: DOMMatrix is not defined`, thrown from inside `app.asar` at `ModuleJob.run`. The app never started. macOS was unaffected.
+
+**Root cause — a chain, and every link matters.**
+1. `modules/avilo/src/import/pdf.ts` imported pdfjs **statically at module scope**, so pdfjs became load-bearing for application start.
+2. pdfjs evaluates `const SCALE_MATRIX = new DOMMatrix();` at its own module scope.
+3. pdfjs polyfills `DOMMatrix` from `@napi-rs/canvas`, guarded by `if (isNodeJS)`. Electron's main process **is** `isNodeJS` (`process.type === "browser"`), so the branch runs.
+4. `@napi-rs/canvas` resolves one prebuilt binary per platform through separate optional packages. Cross-building on macOS resolved **the build host's**: the Windows installer shipped `@napi-rs/canvas-darwin-arm64` and `skia.darwin-arm64.node`, with no win32 binary.
+5. On Windows the require failed, pdfjs warned `Cannot polyfill DOMMatrix` and continued, then `new DOMMatrix()` threw — inside the ES module loader, before any of our code ran.
+
+**Why every user was affected, not just PDF users.** Because the import was static, the failure happened while `main.mjs` was still loading. Whether anyone ever opened a PDF was irrelevant.
+
+**Fix — two independent parts, deliberately.**
+- **pdfjs is now loaded on first use** (`await import(...)` inside `readPdf`), with a minimal `DOMMatrix` / `Path2D` / `ImageData` shim installed first. Only text positions are ever read, so no real canvas is needed. A dependency one feature needs must only be able to break that feature.
+- **`@napi-rs/canvas` is excluded from the package** (`!node_modules/@napi-rs/**`). Shipping a per-platform native binary chosen by the build host is a trap; excluding it makes every platform take the path that is actually tested.
+
+**Proof of fix.** `@napi-rs/canvas` was moved out of `node_modules` entirely — exactly what Windows sees — and all 9 PDF tests still passed, with pdfjs logging only `Cannot load "@napi-rs/canvas"`. Verified in the rebuilt Windows package: 0 napi-rs entries, shim present in `main.mjs`, pdfjs's 312 files intact.
+
+**Blast radius checked.** `better-sqlite3`, the other native dependency, is structurally safe — it ships *all* platform prebuilds in one package (win32-x64 and win32-arm64 confirmed present and unpacked in the Windows build), rather than splitting per-platform.
+
+**Standing lesson.** *A cross-built installer is not verified by inspecting it on the build host.* Per-platform native dependencies resolve to the host's architecture and nothing in the build output says so. Either launch it on the target, or exclude native dependencies the product does not actually need. Added to CLAUDE.md.
+
+---
+
 ### BUG-010 · Packaged app shipped without the changes
 **RESOLVED 2026-08-03**
 

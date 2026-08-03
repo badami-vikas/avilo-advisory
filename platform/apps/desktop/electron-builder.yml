@@ -34,6 +34,19 @@ files:
   # in every installer.
   - "!node_modules/pdfjs-dist/{web,image_decoders}/**"
   - "!node_modules/pdfjs-dist/**/*.map"
+  # @napi-rs/canvas, pdfjs's optional native dependency, is deliberately NOT shipped.
+  #
+  # It exists so pdfjs can *render* pages to a bitmap. Nothing here renders: the importer
+  # reads text positions and advance widths only, and `modules/avilo/src/import/pdf.ts`
+  # installs the handful of DOM globals pdfjs evaluates at load time.
+  #
+  # Shipping it was actively harmful. The package resolves one prebuilt binary per
+  # platform, and a cross-build picks the build host's — so the Windows installer carried
+  # `skia.darwin-arm64.node` and no win32 binary. pdfjs then failed to polyfill DOMMatrix,
+  # its top-level `new DOMMatrix()` threw inside the ES module loader, and the application
+  # refused to launch at all, for every user, PDF or no PDF. Excluding it makes every
+  # platform take the same path we actually test.
+  - "!node_modules/@napi-rs/**"
 
 # Read-only assets, kept outside the asar so the SQLite migration runner and the static
 # file server can read them as ordinary files.

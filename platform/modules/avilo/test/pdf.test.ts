@@ -179,3 +179,35 @@ describe("readPdf — refusals", () => {
     expect(bytes[0]).toBe("%".charCodeAt(0));
   });
 });
+
+/**
+ * Regression — the Windows launch failure.
+ *
+ * pdfjs was a static top-level import. It evaluates `const SCALE_MATRIX = new DOMMatrix()`
+ * at module scope, and polyfills DOMMatrix from `@napi-rs/canvas` only when that native
+ * package loads. A Windows build cross-built on macOS shipped the darwin canvas binary and
+ * no win32 one, so the polyfill was skipped, the constant threw ReferenceError inside the
+ * ES module loader, and the application refused to start at all — for every user, whether
+ * or not they ever opened a PDF.
+ *
+ * Two properties are asserted here: the DOM globals pdfjs needs exist before it loads, and
+ * importing this module has no top-level side effect that can take the app down with it.
+ */
+describe("pdf module loading", () => {
+  it("does not import pdfjs at module scope", async () => {
+    // Importing our wrapper must not pull pdfjs in — that is what made a missing native
+    // dependency fatal to startup rather than fatal to one feature.
+    const source = await import("node:fs/promises").then((fs) =>
+      fs.readFile(new URL("../src/import/pdf.ts", import.meta.url), "utf8"),
+    );
+    expect(source).not.toMatch(/^import .*pdfjs-dist/m);
+    expect(source).toMatch(/await import\("pdfjs-dist/);
+  });
+
+  it("provides the DOM globals pdfjs evaluates at load time", async () => {
+    await readPdf(profitAndLossPdf(), "pl.pdf");
+    // Set by the shim (or by a real canvas); either way pdfjs's `new DOMMatrix()` resolves.
+    expect(typeof (globalThis as Record<string, unknown>)["DOMMatrix"]).toBe("function");
+    expect(new (globalThis as any).DOMMatrix([1, 0, 0, 1, 5, 7]).e).toBe(5);
+  });
+});
