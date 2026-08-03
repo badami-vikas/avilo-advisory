@@ -322,9 +322,13 @@ function StagedFileCard({
     same mapLabel call as a manual choice — so an accepted suggestion is learned, and the
     same label is never asked about again on any future import.
   */
-  const [suggestions, setSuggestions] = useState<Record<string, { accountId: string | null; reason: string }>>({});
+  const [suggestions, setSuggestions] = useState<
+    Record<string, { accountId: string | null; reason: string }>
+  >(file.suggestions ?? {});
   const [suggesting, setSuggesting] = useState(false);
-  const [suggestError, setSuggestError] = useState<string | null>(null);
+  const [suggestError, setSuggestError] = useState<string | null>(
+    file.suggestError ?? null,
+  );
 
   const suggested = Object.entries(suggestions).filter(([, s]) => s.accountId);
 
@@ -445,9 +449,14 @@ function StagedFileCard({
                         remembered.
                       </p>
                     </div>
+                    {/* Mapping is proposed during staging, so this re-runs rather than starts. */}
                     <Button onClick={askModel} disabled={suggesting}>
                       <Sparkles size={12} />
-                      {suggesting ? "Thinking…" : "Suggest"}
+                      {suggesting
+                        ? "Thinking…"
+                        : Object.keys(suggestions).length > 0
+                          ? "Redo"
+                          : "Suggest"}
                     </Button>
                   </div>
 

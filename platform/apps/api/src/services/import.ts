@@ -4,7 +4,9 @@ import { join } from "node:path";
 import { and, eq } from "drizzle-orm";
 
 import {
+  CANONICAL_ACCOUNTS,
   classifyGrid,
+  suggestMappings,
   findAsOfPeriod,
   parseAging,
   parseBalanceSheet,
@@ -25,6 +27,7 @@ import { checkIntegrity, formatPeriod, toCents } from "@avilo/module";
 import { getDb, newId, nowIso, schema } from "../db.js";
 import { clientFilesDir, ensureDir } from "../paths.js";
 import { buildResolver } from "./labels.js";
+import { groqRunner, readSetting } from "./ai.js";
 
 export interface StagedFile {
   sourceFileId: string;
@@ -34,7 +37,28 @@ export interface StagedFile {
   preview: ParseResult | null;
   /** Set when the file could not be read at all. */
   error?: string;
+  /**
+   * Proposed mappings for rows the resolver could not place, keyed by raw label.
+   *
+   * Computed during staging when a model is configured, so the review screen opens with
+   * the work already done rather than asking the user to request it and wait again. This
+   * is safe to do automatically because staging writes nothing: the proposals sit in the
+   * dropdowns the user was going to read anyway, and only become mappings on Import.
+   */
+  suggestions?: Record<string, { accountId: string | null; reason: string }>;
+  /** Why suggestions are absent, when a model was configured but the call failed. */
+  suggestError?: string;
 }
+
+/** Report type -> the `statement` its canonical accounts carry. */
+const STATEMENT_OF: Record<string, string> = {
+  profit_and_loss: "pl",
+  balance_sheet: "balance_sheet",
+  ar_aging: "ar_aging",
+  ap_aging: "ap_aging",
+  sales_by_customer_l12m: "sales_by_customer",
+  referral_l90d: "referral",
+};
 
 const SUPPORTED = /\.(xlsx|xlsm|xls|csv|pdf)$/i;
 
@@ -193,7 +217,49 @@ export async function stageFile(
     db.insert(schema.sourceFiles).values(record).run();
   }
 
-  return { sourceFileId, filename, classification, preview };
+  /*
+    Map the leftovers while the user is still reading the card.
+
+    Row mapping is mechanical and auditable — a proposal names an account the user can
+    check against a label in front of them — so making them ask for it twice (press
+    Suggest, wait again) is friction without a safeguard attached. The audit gate is
+    Import, which is unchanged: nothing reaches the fact store until it is pressed.
+
+    Generative text is the opposite case and keeps its button: there is no label to check
+    a sentence against.
+
+    Failure is soft on purpose. No key, no network, a dead model — the import proceeds
+    exactly as it would have, with every row manual.
+  */
+  const runner = groqRunner(1200);
+  let suggestions: StagedFile["suggestions"];
+  let suggestError: string | undefined;
+
+  if (runner && preview && preview.unmatched.length > 0 && classification.reportType) {
+    try {
+      const proposals = await suggestMappings(
+        {
+          labels: preview.unmatched.map((row) => row.rawLabel),
+          reportType: STATEMENT_OF[classification.reportType] ?? "",
+          guidance: readSetting("accounting_guidance") ?? undefined,
+          candidates: CANONICAL_ACCOUNTS.map((a) => ({
+            id: a.id,
+            label: a.label,
+            statement: a.statement,
+          })),
+        },
+        runner,
+      );
+      suggestions = {};
+      for (const p of proposals) {
+        suggestions[p.rawLabel] = { accountId: p.accountId, reason: p.reason };
+      }
+    } catch (cause) {
+      suggestError = (cause as Error).message;
+    }
+  }
+
+  return { sourceFileId, filename, classification, preview, suggestions, suggestError };
 }
 
 /** Detail rows a parse produced, ready for the detail_rows table. */

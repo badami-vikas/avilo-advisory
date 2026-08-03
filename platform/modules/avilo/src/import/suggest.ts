@@ -14,6 +14,45 @@
 //     user was going to use anyway, and only becomes a persisted mapping when accepted —
 //     at which point it is learned and never asked again.
 
+/**
+ * Accounting domain knowledge sent with every mapping request.
+ *
+ * This is the "skill" a cloud model can actually use. A model reached over HTTP has no
+ * filesystem and no plugin loader — it sees the prompt and nothing else — so domain
+ * expertise has to travel *inside* the request. That is all a skill file ever was:
+ * instructions, written down, loaded at the point of use.
+ *
+ * Held as data rather than woven into the prompt builder for the same reason formulas are
+ * stored rather than compiled in: mapping accuracy is tuned by editing this text, and
+ * editing it must not require shipping a new binary. `settings.accounting_guidance`
+ * overrides it at runtime.
+ */
+export const ACCOUNTING_GUIDANCE = `You are an experienced bookkeeper mapping a client's chart of accounts onto a fixed set of canonical accounts.
+
+How real exports behave:
+- Leading digits are account codes, not meaning. "1100 Accounts Receivable" is receivables.
+- QuickBooks prints a detail line AND a section total ("Accounts Receivable (A/R)" then
+  "Total for Accounts Receivable"). The section total is the authoritative figure.
+- A chart with a single bank account often prints no "Total Bank Accounts" line at all, so
+  the detail row ("Cash in Bank", "Operating Account", "Checking") is the only place the
+  cash figure appears. Map it.
+- Contra accounts reduce their parent. "Accumulated Depreciation" is not an asset to map
+  as one; "Net Computer Equipment" is already net of it.
+
+Rules that protect the figures:
+- NEVER map a subtotal that aggregates rows you are also mapping — that double-counts.
+  "Total Current Assets", "Total Other Current Assets", "Total Liabilities and Equity"
+  are subtotals. Skip them.
+- Work in progress / work in process is inventory, not receivables, even though both sit
+  in current assets. If there is no canonical inventory account, skip it.
+- Retained earnings, owner's equity and common stock are components of equity. Map to the
+  equity account only when no more specific one exists, and never alongside a total equity
+  line.
+- Prepaid expenses, deposits and intangibles are not cash and not receivables. Skip unless
+  an exact canonical account exists.
+- When two canonical accounts could plausibly fit, skip rather than guess. An unmapped row
+  costs one click; a wrongly mapped row silently corrupts a client's statements.`;
+
 export interface SuggestCandidate {
   id: string;
   label: string;
@@ -27,6 +66,8 @@ export interface SuggestInput {
   candidates: SuggestCandidate[];
   /** Which report the labels came from, so the model knows the context. */
   reportType: string;
+  /** Domain instructions. Defaults to ACCOUNTING_GUIDANCE; override to retune at runtime. */
+  guidance?: string;
 }
 
 export interface Suggestion {
@@ -46,18 +87,12 @@ export function buildSuggestPrompt(input: SuggestInput): string {
     .join("\n");
 
   return [
-    "You map bookkeeping row labels onto a fixed chart of accounts.",
+    input.guidance ?? ACCOUNTING_GUIDANCE,
     "",
     `Report type: ${input.reportType}`,
     "",
     "Allowed account ids (you may use no others):",
     accounts || input.candidates.map((c) => `  ${c.id} = ${c.label}`).join("\n"),
-    "",
-    "Rules:",
-    '- Answer "skip" when the row is a SUBTOTAL of other rows (e.g. "Total Current Assets"),',
-    "  because mapping a subtotal alongside its children double-counts the figure.",
-    '- Answer "skip" when no allowed account is a genuine match. Do not force a mapping.',
-    "- Ignore any leading account-code digits when judging the meaning of a label.",
     "",
     "Rows to map:",
     ...input.labels.map((l, i) => `${i + 1}. ${l}`),

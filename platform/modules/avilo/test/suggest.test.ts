@@ -68,7 +68,23 @@ describe("buildSuggestPrompt", () => {
   });
 
   it("instructs the model to skip subtotals rather than double-count", () => {
-    expect(buildSuggestPrompt(input)).toMatch(/SUBTOTAL/);
+    const prompt = buildSuggestPrompt(input);
+    expect(prompt).toMatch(/subtotal/i);
+    expect(prompt).toMatch(/double-count/i);
+  });
+
+  it("carries the accounting guidance by default", () => {
+    expect(buildSuggestPrompt(input)).toContain("bookkeeper");
+  });
+
+  /**
+   * The runtime-tuning path: guidance is data, so a deployment can retune mapping
+   * accuracy without shipping a binary.
+   */
+  it("uses supplied guidance in place of the default", () => {
+    const prompt = buildSuggestPrompt({ ...input, guidance: "CUSTOM HOUSE RULES" });
+    expect(prompt).toContain("CUSTOM HOUSE RULES");
+    expect(prompt).not.toContain("bookkeeper");
   });
 
   it("lists every label to be mapped", () => {

@@ -12,7 +12,13 @@ import {
   type ReportType,
 } from "@avilo/module";
 import { getDb, newId, nowIso, schema } from "./db.js";
-import { callGroq, groqConfig, groqRunner, DEFAULT_GROQ_MODEL } from "./services/ai.js";
+import {
+  callGroq,
+  groqConfig,
+  groqRunner,
+  readSetting,
+  DEFAULT_GROQ_MODEL,
+} from "./services/ai.js";
 import { learnMapping } from "./services/labels.js";
 import { commitFile, stageFile } from "./services/import.js";
 import {
@@ -644,6 +650,8 @@ const importRouter = router({
           {
             labels: input.labels,
             reportType: statementOf[input.reportType] ?? "",
+            // Editable without a redeploy, the same way formulas are.
+            guidance: readSetting("accounting_guidance") ?? undefined,
             candidates: CANONICAL_ACCOUNTS.map((a) => ({
               id: a.id,
               label: a.label,
