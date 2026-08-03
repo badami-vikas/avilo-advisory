@@ -4,6 +4,7 @@ import {
   buildNarrativePrompt,
   fabricatedFigures,
   figuresIn,
+  summaryFingerprint,
 } from "../src/import/narrative.js";
 
 const input = {
@@ -102,5 +103,42 @@ describe("figuresIn percentage normalisation", () => {
 
   it("treats an equivalently-written percentage as the same figure", () => {
     expect(fabricatedFigures("Margin was 8.40%.", "Margin was 8.4%.")).toEqual([]);
+  });
+});
+
+/**
+ * The rule that keeps an edit honest: an advisor's wording survives anything that does not
+ * change the figures, and nothing that does.
+ */
+describe("summaryFingerprint", () => {
+  const beats = (revenue: string) => [
+    { kicker: "What happened", headline: "A bigger month", body: [`Revenue was ${revenue}.`] },
+  ];
+
+  it("is stable across recomputation from unchanged facts", () => {
+    expect(summaryFingerprint(beats("$482,000"))).toBe(summaryFingerprint(beats("$482,000")));
+  });
+
+  it("changes when a figure moves", () => {
+    expect(summaryFingerprint(beats("$482,000"))).not.toBe(
+      summaryFingerprint(beats("$501,000")),
+    );
+  });
+
+  it("changes when a headline changes even if the figures do not", () => {
+    const a = [{ kicker: "K", headline: "A bigger month", body: ["Revenue was $1."] }];
+    const b = [{ kicker: "K", headline: "A smaller month", body: ["Revenue was $1."] }];
+    expect(summaryFingerprint(a)).not.toBe(summaryFingerprint(b));
+  });
+
+  it("changes when a beat is added", () => {
+    const one = beats("$482,000");
+    const two = [...one, { kicker: "Risk", headline: "Watch cash", body: ["Cash is tight."] }];
+    expect(summaryFingerprint(one)).not.toBe(summaryFingerprint(two));
+  });
+
+  it("handles an empty summary without throwing", () => {
+    expect(summaryFingerprint([])).toBe(summaryFingerprint([]));
+    expect(summaryFingerprint([])).toMatch(/^[0-9a-f]{8}$/);
   });
 });

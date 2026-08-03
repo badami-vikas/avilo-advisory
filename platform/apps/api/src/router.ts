@@ -316,7 +316,7 @@ const reportRouter = router({
       if (!config) {
         throw new TRPCError({
           code: "PRECONDITION_FAILED",
-          message: "No model configured. Add a Groq API key in Model settings.",
+          message: "No model configured. Add a Groq API key under Clients \u2192 \u22ef \u2192 Model settings. One key serves every AI feature.",
         });
       }
 
@@ -340,6 +340,88 @@ const reportRouter = router({
       } catch (cause) {
         throw new TRPCError({ code: "BAD_GATEWAY", message: (cause as Error).message });
       }
+    }),
+
+  /**
+   * The advisor's own wording for this month's summary, if it is still valid.
+   *
+   * Returns nothing once the figures have moved: the caller sends the fingerprint of the
+   * summary it just computed, and an edit written against different numbers is stale by
+   * definition. New data supersedes a custom edit — a page showing hand-written prose
+   * above figures it no longer describes is worse than no edit at all.
+   */
+  summaryEdit: procedure
+    .input(
+      z.object({
+        clientId: z.string(),
+        period: periodSchema,
+        fingerprint: z.string(),
+      }),
+    )
+    .query(({ input }) => {
+      const db = getDb();
+      const row = db
+        .select()
+        .from(schema.summaryEdits)
+        .where(
+          and(
+            eq(schema.summaryEdits.clientId, input.clientId),
+            eq(schema.summaryEdits.period, input.period),
+          ),
+        )
+        .get();
+      if (!row) return { body: null, superseded: false };
+      if (row.sourceFingerprint !== input.fingerprint) {
+        return { body: null, superseded: true };
+      }
+      return { body: row.body, superseded: false };
+    }),
+
+  setSummaryEdit: procedure
+    .input(
+      z.object({
+        clientId: z.string(),
+        period: periodSchema,
+        body: z.string().max(8000),
+        fingerprint: z.string(),
+      }),
+    )
+    .mutation(({ input }) => {
+      const db = getDb();
+      requireClient(input.clientId);
+
+      // An empty body is a request to go back to the calculated summary, not a request to
+      // store emptiness.
+      if (input.body.trim() === "") {
+        db.delete(schema.summaryEdits)
+          .where(
+            and(
+              eq(schema.summaryEdits.clientId, input.clientId),
+              eq(schema.summaryEdits.period, input.period),
+            ),
+          )
+          .run();
+        return { ok: true };
+      }
+
+      db.insert(schema.summaryEdits)
+        .values({
+          clientId: input.clientId,
+          period: input.period,
+          body: input.body,
+          sourceFingerprint: input.fingerprint,
+          updatedAt: nowIso(),
+        })
+        .onConflictDoUpdate({
+          target: [schema.summaryEdits.clientId, schema.summaryEdits.period],
+          set: {
+            body: input.body,
+            sourceFingerprint: input.fingerprint,
+            updatedAt: nowIso(),
+          },
+        })
+        .run();
+      return { ok: true };
     }),
 
   /** Default export range: current financial year to date, per the client's FY start. */
@@ -687,7 +769,7 @@ const importRouter = router({
       if (!runner) {
         throw new TRPCError({
           code: "PRECONDITION_FAILED",
-          message: "No model configured. Add a Groq API key in Model settings.",
+          message: "No model configured. Add a Groq API key under Clients \u2192 \u22ef \u2192 Model settings. One key serves every AI feature.",
         });
       }
 

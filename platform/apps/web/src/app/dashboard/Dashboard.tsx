@@ -12,7 +12,9 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, ArrowRight, Info, Sparkles } from "lucide-react";
+import { AlertTriangle, ArrowRight, Info, Pencil, Sparkles } from "lucide-react";
+
+import { summaryFingerprint } from "@avilo/module";
 
 import { api } from "../../lib/trpc.js";
 import { moneyFull, percent } from "../../lib/format.js";
@@ -300,6 +302,8 @@ export function Dashboard({
                   onGo={go}
                   clientName={clientName}
                   periodLabel={report.periodLabel}
+                  clientId={clientId}
+                  period={report.period}
                 />
               )}
             </div>
@@ -408,12 +412,61 @@ function Brief({
   onGo,
   clientName,
   periodLabel,
+  clientId,
+  period,
 }: {
   beats: Beat[];
   onGo: (section: string) => void;
   clientName: string;
   periodLabel: string;
+  clientId: string;
+  period: string;
 }) {
+  /*
+    The advisor's own wording, when they have written one and it still applies.
+
+    `fingerprint` identifies the computed summary this edit was made against. It is sent
+    with every read, so the server can decline an edit written against figures that have
+    since moved: new data supersedes a custom edit, without exception. The alternative is
+    a page showing confident hand-written prose above numbers it no longer describes.
+  */
+  const fingerprint = useMemo(
+    () =>
+      summaryFingerprint(
+        beats.map((beat) => ({
+          kicker: beat.kicker,
+          headline: beat.headline,
+          body: beat.body,
+        })),
+      ),
+    [beats],
+  );
+
+  const [edit, setEdit] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [superseded, setSuperseded] = useState(false);
+
+  useEffect(() => {
+    let live = true;
+    void api.report.summaryEdit
+      .query({ clientId, period, fingerprint })
+      .then((result) => {
+        if (!live) return;
+        setEdit(result.body);
+        setSuperseded(result.superseded);
+      });
+    return () => {
+      live = false;
+    };
+  }, [clientId, period, fingerprint]);
+
+  const saveEdit = async (body: string) => {
+    setEditing(false);
+    const trimmed = body.trim();
+    setEdit(trimmed === "" ? null : trimmed);
+    setSuperseded(false);
+    await api.report.setSummaryEdit.mutate({ clientId, period, body: trimmed, fingerprint });
+  };
   /*
     The generated draft, when one has been asked for.
 
@@ -453,6 +506,49 @@ function Brief({
     beats.filter((beat) => beat.id === "risk" || beat.id === "next" || beat.id === "act"),
   ].filter((group) => group.length > 0);
 
+  /* --- the advisor's own wording, being written */
+  if (editing) {
+    return (
+      <SummaryEditor
+        initial={edit ?? beats.map((beat) => beat.body.join(" ")).join("\n\n")}
+        onCancel={() => setEditing(false)}
+        onSave={(body) => void saveEdit(body)}
+      />
+    );
+  }
+
+  /* --- the advisor's own wording, saved and still valid */
+  if (edit !== null && draft === null) {
+    return (
+      <div className="space-y-3">
+        <div className="flex items-center gap-2">
+          <span className="rounded-md border border-line bg-line-soft px-1.5 py-[2px] text-[10.5px] font-medium text-ink-muted">
+            Your wording
+          </span>
+          <button
+            onClick={() => setEditing(true)}
+            className="text-[11.5px] font-medium text-ink-muted hover:text-accent"
+          >
+            Edit
+          </button>
+          <button
+            onClick={() => void saveEdit("")}
+            className="text-[11.5px] font-medium text-ink-muted hover:text-accent"
+          >
+            Use calculated
+          </button>
+        </div>
+        <div onDoubleClick={() => setEditing(true)} className="cursor-text">
+          {edit.split(/\n{2,}/).map((paragraph, index) => (
+            <p key={index} className="mb-3 text-[12.5px] leading-[1.65] text-ink last:mb-0">
+              {paragraph}
+            </p>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   if (draft !== null) {
     return (
       <div className="space-y-3">
@@ -486,10 +582,25 @@ function Brief({
 
   return (
     <div className="space-y-3">
+      {superseded ? (
+        <p className="rounded-md border border-warn/25 bg-[#fffaeb] px-2.5 py-1.5 text-[11px] leading-relaxed text-warn">
+          Your earlier wording was written against different figures, so it has been set
+          aside. This is the calculated summary for the numbers now imported.
+        </p>
+      ) : null}
       <div className="flex items-center justify-end gap-2">
         {error ? (
           <span className="mr-auto text-[11px] leading-snug text-flag">{error}</span>
         ) : null}
+        <Tip content="Write this summary in your own words. Double-click the text to start.">
+          <button
+            onClick={() => setEditing(true)}
+            className="inline-flex items-center gap-1 rounded-md border border-line px-2 py-[3px] text-[11px] font-medium text-ink-muted transition-colors hover:border-accent hover:text-accent"
+          >
+            <Pencil size={11} />
+            Edit
+          </button>
+        </Tip>
         <Tip content="Rewrite these findings as a client-ready note. Uses only the figures already calculated — a draft containing anything else is discarded.">
           <button
             onClick={() => void generate()}
@@ -502,7 +613,11 @@ function Brief({
         </Tip>
       </div>
       {paragraphs.map((group, index) => (
-        <p key={index} className="text-[12.5px] leading-[1.65] text-ink-muted">
+        <p
+          key={index}
+          onDoubleClick={() => setEditing(true)}
+          className="cursor-text text-[12.5px] leading-[1.65] text-ink-muted"
+        >
           {group.map((beat) => (
             <span key={beat.id}>
               {beat.body.join(" ")}{" "}
@@ -519,6 +634,65 @@ function Brief({
           ))}
         </p>
       ))}
+    </div>
+  );
+}
+
+/**
+ * The summary, in the advisor's own words.
+ *
+ * Seeded with whatever is currently on screen — calculated text or a generated draft — so
+ * rewriting starts from something rather than a blank box. Saving an empty body clears the
+ * edit and returns the section to the calculated summary, which is the honest way to undo.
+ */
+function SummaryEditor({
+  initial,
+  onSave,
+  onCancel,
+}: {
+  initial: string;
+  onSave: (body: string) => void;
+  onCancel: () => void;
+}) {
+  const [text, setText] = useState(initial);
+  const ref = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    ref.current?.focus();
+  }, []);
+
+  return (
+    <div className="space-y-2">
+      <textarea
+        ref={ref}
+        value={text}
+        onChange={(event) => setText(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") onCancel();
+          // Enter inserts a paragraph break; the summary is prose, so saving is explicit.
+          if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) onSave(text);
+        }}
+        rows={9}
+        className="w-full resize-y rounded-lg border border-accent bg-surface px-3 py-2 text-[12.5px] leading-[1.65] text-ink outline-none"
+      />
+      <div className="flex items-center gap-2">
+        <button
+          onClick={() => onSave(text)}
+          className="rounded-md bg-accent px-2.5 py-1 text-[11.5px] font-medium text-white hover:opacity-90"
+        >
+          Save
+        </button>
+        <button
+          onClick={onCancel}
+          className="rounded-md border border-line px-2.5 py-1 text-[11.5px] font-medium text-ink-muted hover:bg-line-soft"
+        >
+          Cancel
+        </button>
+        <span className="text-[11px] text-ink-faint">
+          Clear the box and save to go back to the calculated summary. New figures always
+          replace your wording.
+        </span>
+      </div>
     </div>
   );
 }

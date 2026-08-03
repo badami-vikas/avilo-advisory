@@ -443,6 +443,36 @@ export const auditLog = sqliteTable(
   (t) => [index("audit_log_entity_idx").on(t.entity, t.entityId)],
 );
 
+/* -------------------------------------------------------- summary edits */
+
+/**
+ * An advisor's own wording for one client-month's executive summary.
+ *
+ * The summary is normally derived, so there is nothing to edit and nothing to store. This
+ * table exists for the case where the advisor rewrites it in their own words — for a
+ * client who needs a particular emphasis, or wording the engine would never choose.
+ *
+ * `sourceFingerprint` is what keeps an edit honest. It records the computed summary the
+ * edit was made against; when the underlying figures change, the fingerprint no longer
+ * matches and the edit is treated as stale. New data supersedes a custom edit, always —
+ * the alternative is a page confidently showing last month's prose above this month's
+ * numbers, which is the exact failure the whole app is built to avoid.
+ */
+export const summaryEdits = sqliteTable(
+  "summary_edits",
+  {
+    clientId: text("client_id")
+      .notNull()
+      .references(() => clients.id, { onDelete: "cascade" }),
+    period: text("period").notNull(),
+    body: text("body").notNull(),
+    /** Hash of the computed summary this edit was written against. */
+    sourceFingerprint: text("source_fingerprint").notNull(),
+    updatedAt: text("updated_at").notNull().default(now),
+  },
+  (table) => [primaryKey({ columns: [table.clientId, table.period] })],
+);
+
 /* ----------------------------------------------------------- app settings */
 
 /** Simple key-value store for app-wide configuration (e.g., AI provider keys). */

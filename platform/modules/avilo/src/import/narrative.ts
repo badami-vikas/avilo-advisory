@@ -46,6 +46,31 @@ Style:
 - Lead with what happened, then why, then what it means for the month ahead.
 - Keep every figure exactly as written, including its units and sign.`;
 
+/**
+ * A stable identity for one computed summary.
+ *
+ * Two summaries fingerprint the same when they say the same thing, so an edit survives a
+ * re-render, a restart and a recomputation from unchanged facts — and stops surviving the
+ * moment a figure moves. Deliberately content-based rather than a timestamp: importing
+ * the same file twice must not invalidate the advisor's wording.
+ *
+ * A non-cryptographic hash is the right tool: this detects change, it does not defend
+ * against a forged match, and there is no adversary here.
+ */
+export function summaryFingerprint(beats: NarrativeBeat[]): string {
+  const source = beats
+    .map((beat) => `${beat.kicker}|${beat.headline}|${beat.body.join("|")}`)
+    .join("||");
+
+  // FNV-1a, 32-bit.
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < source.length; i += 1) {
+    hash ^= source.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash.toString(16).padStart(8, "0");
+}
+
 export function buildNarrativePrompt(input: NarrativeInput): string {
   const findings = input.beats
     .map((beat) => [`${beat.kicker}: ${beat.headline}`, ...beat.body.map((b) => `  - ${b}`)].join("\n"))
