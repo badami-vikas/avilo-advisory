@@ -1,10 +1,11 @@
 # Progress
 
-**v1.7.0** — shipping to a first beta user.
+**v1.8.0** — shipping to a first beta user.
 
 ## Done
 
 - Multi-client, multi-period fact store; formulas as data; override history
+- Right-panel AI chatbot (blueprint proposals — see below), same Groq key as row mapping and summaries
 - Import: Excel/CSV/PDF → one grid → six parsers; deterministic classification at 1.0
 - Label learning — teach once, never asked again; multi-select, and Undo
 - Report view, raw data view, PDF export, interactive dashboard
@@ -58,4 +59,4 @@ Three changes in 1.6.0, none of them verified on Windows by us:
 
 ## Verification budget
 
-261 tests (168 domain + 30 API + 63 web) · 6 packages typecheck · parsers validated against the real client exports in `reference/Reporting data`, asserting against each report's own printed totals rather than against a row count.
+289 tests (168 domain + 37 API + 63 web + 14 core) · 6 packages typecheck · parsers validated against the real client exports in `reference/Reporting data`, asserting against each report's own printed totals rather than against a row count.

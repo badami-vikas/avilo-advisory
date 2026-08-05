@@ -473,6 +473,43 @@ export const summaryEdits = sqliteTable(
   (table) => [primaryKey({ columns: [table.clientId, table.period] })],
 );
 
+/* -------------------------------------------------- blueprint proposals */
+
+/**
+ * A proposed change to the app's configuration — formulas, label mappings, prompts,
+ * layout — never to its source. `blueprint` is the full `AviloBlueprint` JSON
+ * (`@avilo/core`); `diff` is the `BlueprintChange[]` computed against the live
+ * configuration at proposal time, stored rather than recomputed so an activated proposal's
+ * record does not drift if the live configuration moves again before review.
+ *
+ * Global rather than per-client: formulas, mappings and prompts are already global data
+ * (ADR-002, ADR-003, ADR-013), so a blueprint changes the same things a person changes by
+ * hand in Formulas / Suggest / Settings — through the same governed path (ADR-031's
+ * upgrade rule and ADR-004's override history both apply downstream of activation).
+ *
+ * Nothing here is ever applied on write. `status` starts at 'proposed' and only a
+ * separate activate call — issued by the person reviewing the diff, not the chatbot that
+ * proposed it — moves it to 'active'. This is the "propose, never apply directly" rule
+ * relationship-os's WorkspaceBlueprint uses, narrowed to Avilo's configuration surface.
+ */
+export const blueprintProposals = sqliteTable(
+  "blueprint_proposals",
+  {
+    id: text("id").primaryKey(),
+    /** "chatbot" for an AI-authored proposal, "user" for an imported file or manual edit. */
+    author: text("author").notNull(),
+    summary: text("summary").notNull(),
+    blueprint: text("blueprint").notNull(),
+    diff: text("diff").notNull(),
+    status: text("status").notNull().default("proposed"),
+    createdAt: text("created_at").notNull().default(now),
+    decidedAt: text("decided_at"),
+    /** Free-text reviewer note — why accepted, or why rejected. */
+    decisionNote: text("decision_note"),
+  },
+  (t) => [index("blueprint_proposals_status_idx").on(t.status)],
+);
+
 /* ----------------------------------------------------------- app settings */
 
 /** Simple key-value store for app-wide configuration (e.g., AI provider keys). */

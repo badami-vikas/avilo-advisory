@@ -1,6 +1,7 @@
 import { Link, Outlet, useLocation } from "react-router";
 
 import { TooltipProvider } from "./components/Tooltip.js";
+import { AgentPanel } from "./components/shared/AgentPanel.js";
 
 /**
  * Application shell.
@@ -43,6 +44,8 @@ export function Shell() {
       <main className="mx-auto max-w-[1600px] px-6 py-6">
         <Outlet />
       </main>
+
+      <AgentPanel />
     </div>
     </TooltipProvider>
   );

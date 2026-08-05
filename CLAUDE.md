@@ -42,9 +42,9 @@ The predecessor (v9) held **one** client for **one** month, read prior-year valu
 
 The app works fully with **no model configured**. AI is additive, never load-bearing.
 
-- **No model call without a button press.** Nothing calls out on upload, render, or navigation. Two call sites only: **Suggest** (row mapping) and **Generate** (executive summary), plus **Test connection**.
-- **One key, everywhere.** `groq_api_key` in `app_settings`, read only via `groqConfig()` in `apps/api/src/services/ai.ts`. Never add a second key or a second reader.
-- **A model may choose, never invent.** Row mapping picks from the canonical account list or answers `skip`; a hallucinated id degrades to `skip`. Summary generation rewrites *computed* findings and is rejected if it contains a figure the books do not have (`fabricatedFigures`).
+- **No model call without a button press.** Nothing calls out on upload, render, or navigation. Three call sites: **Suggest** (row mapping), **Generate** (executive summary), and the **Assistant** chat panel — plus **Test connection**. The panel is chat-initiated, not autonomous; it never calls out on render or a timer.
+- **One key, everywhere.** `groq_api_key` in `app_settings`, read only via `groqConfig()` in `apps/api/src/services/ai.ts`. Never add a second key or a second reader. The Assistant panel goes through the same reader.
+- **A model may choose, never invent.** Row mapping picks from the canonical account list or answers `skip`; a hallucinated id degrades to `skip`. Summary generation rewrites *computed* findings and is rejected if it contains a figure the books do not have (`fabricatedFigures`). The Assistant may propose a configuration change (formula, mapping, prompt) as a **blueprint**, validated against the live registry — an id it invents is refused outright, not partially applied — and never activated by the model itself. See `docs/wiki/blueprint.md`.
 - **The deterministic narrative is the source of truth.** `insights.ts` is pure functions. Generated prose is a rewrite of it for sending to a client, never a replacement.
 - **Prompts are data.** `ACCOUNTING_GUIDANCE` and `NARRATIVE_GUIDANCE` are overridable at runtime via `app_settings` — mapping accuracy is tuned by editing text, not by shipping a binary.
 - **New data supersedes a custom edit.** An edited summary is stored with a fingerprint of the findings it was written against; when the figures move, the edit is set aside.
@@ -61,7 +61,7 @@ platform/apps/{web,api,desktop}   platform/modules/avilo   platform/packages/tab
 
 ```bash
 pnpm dev                 # web + api
-pnpm test                # 261 tests
+pnpm test                # 289 tests
 pnpm typecheck           # 6 packages
 pnpm --filter @avilo/web build && pnpm app:win   # installer — build web FIRST
 ```
@@ -70,6 +70,6 @@ Data lives in `~/Documents/Bridge/Avilo Advisory/` (`.data/avilo.sqlite` + impor
 
 ## Status
 
-v1.7.0. Shipping to a first beta user. Windows installer is **unsigned** — SmartScreen will warn, and no build of this app has yet been launched on Windows by us (BUG-016 was fixed in 1.4.2 and remains unconfirmed on real hardware).
+v1.8.0. Shipping to a first beta user. Windows installer is **unsigned** — SmartScreen will warn, and no build of this app has yet been launched on Windows by us (BUG-016 was fixed in 1.4.2 and remains unconfirmed on real hardware).
 
 The first beta round returned six data-correctness bugs, all fixed and all validated against the real client exports in `reference/Reporting data` — every parser assertion is against the report's own printed total, never a row count. Open items in [docs/wiki/progress.md](docs/wiki/progress.md).

@@ -29,6 +29,14 @@ import {
   buildSeries,
   loadFormulaSpecs,
 } from "./services/report.js";
+import {
+  activateProposal,
+  exportBlueprint,
+  listProposals,
+  proposeBlueprint,
+  rejectProposal,
+} from "./services/blueprint.js";
+import { converse } from "./services/copilot.js";
 
 const t = initTRPC.create();
 export const router = t.router;
@@ -1145,6 +1153,60 @@ const settingsRouter = router({
     }),
 });
 
+/*
+ * The right-panel AI chatbot (relationship-os AgentPanel counterpart).
+ *
+ * `copilot.converse` talks to Groq — the same key and reader `settingsRouter` above
+ * exercises with Test connection (ADR-011, "one key, one reader"). It never writes
+ * directly; a proposed change comes back as a `blueprintProposals` row and this router's
+ * `blueprint.*` procedures are the only way it is reviewed and activated.
+ */
+const copilotRouter = router({
+  converse: procedure
+    .input(z.object({ history: z.array(z.object({ role: z.enum(["user", "assistant"]), text: z.string() })).max(40) }))
+    .mutation(async ({ input }) => {
+      const reply = await converse(input.history);
+      if (!reply) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "No model configured. Add a Groq API key under Clients → ⋯ → Model settings.",
+        });
+      }
+      return reply;
+    }),
+});
+
+const blueprintRouter = router({
+  /** The live configuration, packaged for download as `<name>.avilo-blueprint.json`. */
+  export: procedure
+    .input(z.object({ name: z.string(), description: z.string().optional() }))
+    .query(({ input }) => exportBlueprint(input.name, input.description)),
+
+  /** Validate + diff an imported file or a hand-written document. Records, never applies. */
+  propose: procedure
+    .input(z.object({ summary: z.string(), document: z.unknown() }))
+    .mutation(({ input }) => {
+      const outcome = proposeBlueprint("user", input.summary, input.document);
+      if ("errors" in outcome) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: outcome.errors.map((e) => `${e.path}: ${e.message}`).join("; "),
+        });
+      }
+      return outcome.proposal;
+    }),
+
+  list: procedure.query(() => listProposals()),
+
+  activate: procedure
+    .input(z.object({ id: z.string(), note: z.string().optional() }))
+    .mutation(({ input }) => activateProposal(input.id, input.note)),
+
+  reject: procedure
+    .input(z.object({ id: z.string(), note: z.string().optional() }))
+    .mutation(({ input }) => rejectProposal(input.id, input.note)),
+});
+
 export const appRouter = router({
   views: viewsRouter,
   stickyNotes: stickyNotesRouter,
@@ -1156,6 +1218,8 @@ export const appRouter = router({
   overrides: overridesRouter,
   import: importRouter,
   settings: settingsRouter,
+  copilot: copilotRouter,
+  blueprint: blueprintRouter,
 });
 
 export type AppRouter = typeof appRouter;

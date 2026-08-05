@@ -1,6 +1,6 @@
 {
   "name": "@avilo/api",
-  "version": "1.7.0",
+  "version": "1.8.0",
   "private": true,
   "type": "module",
   "description": "Local Fastify + tRPC surface over SQLite. Binds to 127.0.0.1 only; makes no outbound requests.",
@@ -15,6 +15,7 @@
     "migrations:generate": "drizzle-kit generate"
   },
   "dependencies": {
+    "@avilo/core": "workspace:*",
     "@avilo/module": "workspace:*",
     "@avilo/tables": "workspace:*",
     "@bridge/module-host": "workspace:*",

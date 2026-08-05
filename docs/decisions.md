@@ -194,6 +194,77 @@ these two numbers are not comparable, instead of printing both.
 
 ---
 
+### ADR-033 · A blueprint holds configuration, never source or a key
+**Date.** 2026-08-05
+
+**Decision.** `AviloBlueprint` (`@avilo/core`) is a versioned JSON document limited to
+formula overrides, QuickBooks label mappings, the two AI guidance prompts, and report
+layout. It has no field for source code and no field for a credential.
+
+**Why.** The user asked for a chatbot that can "modify and optimise" the app, with the
+change recorded and shareable so someone else's local copy can replicate it. The shipped
+app is `asar`-packed (read-only to the running process), so source editing cannot work
+inside an installed copy — only a dev checkout with a rebuild, which is not what a shared
+file's recipient has. Separately, Avilo ingests third-party QuickBooks exports; a model
+with write access to app behaviour and read access to untrusted import data is an
+injection surface. ADR-016's rule — a model may choose, never invent — is the same rule
+one level up: it may choose *configuration*, never invent *code*.
+
+**Rejected.** Real source editing gated to a dev checkout, as a second artifact type
+(a git patch). Considered and set aside for this release: two artifact types is real
+surface for a first beta, and almost everything a user actually wants to change —
+mapping accuracy, a formula's base, a prompt's tone — is already configuration (ADR-002,
+ADR-003, ADR-013). Revisit if a real request needs more.
+
+**Consequence.** `validateBlueprint` refuses a document carrying a forbidden field
+outright — not a runtime check on a value, a fact about the type's shape — and refuses any
+id (account, formula, report type, prompt key, layout section) outside the live registry,
+the whole document at once rather than dropping the bad part silently.
+
+---
+
+### ADR-034 · Propose, diff, activate — never applied on write
+**Date.** 2026-08-05
+
+**Decision.** A blueprint is validated and diffed against live configuration, then stored
+as a `blueprint_proposals` row with `status = 'proposed'`. A separate `activate` call —
+issued by a person, never by the chatbot that proposed it — is the only path to changing
+anything.
+
+**Why.** Mirrors relationship-os's `WorkspaceBlueprint`: blueprint changes go through
+`workspace.blueprint.propose` / `.activate`, never applied directly. `diffBlueprint` is
+what the panel shows before Apply — the record ADR-004 already requires ("where did that
+number come from") extended to configuration: where did this formula come from, and what
+did it replace.
+
+**Consequence.** `activateProposal` writes through the exact paths a manual edit already
+uses — `learnMapping` for a mapping, a new `formula_versions` row for a formula (ADR-031),
+`app_settings` for a prompt — so an activated blueprint change is indistinguishable in the
+audit trail from a person typing the same edit by hand.
+
+---
+
+### ADR-035 · The chatbot and its governance mirror relationship-os, not just its style
+**Date.** 2026-08-05
+
+**Decision.** `platform/packages/core` and `apps/web/.../components/shared/AgentPanel.tsx`
+sit at the same paths relationship-os uses for `packages/core/src/blueprint.ts` and its own
+`AgentPanel.tsx`, and follow the same shape: a persistent right panel, a `converse`-shaped
+procedure, a routed action that becomes a real, reviewable proposal rather than fabricated
+feed content.
+
+**Why.** Avilo is meant to lift into relationship-os as `platform/modules/avilo`
+(README.md); the AI surface should not diverge in shape only to be rewritten at
+integration. Avilo has no Chief of Staff or Approvals surface, so `copilot.converse`
+substitutes for `chiefOfStaff.converse` and the panel's own proposal card substitutes for
+an Approvals entry — narrower, same principle.
+
+**Consequence.** Integration is deleting these two paths and repointing imports at
+`@bridge/core` / the platform's own `AgentPanel.tsx`, the same move already documented for
+`packages/tables`.
+
+---
+
 ## AI
 
 ### ADR-010 · The app must work with no model configured
