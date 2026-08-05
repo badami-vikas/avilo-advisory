@@ -19,6 +19,8 @@ import { RawDataView } from "../components/RawDataView.js";
 import { StickyNotes } from "../components/StickyNotes.js";
 import { Tip } from "../components/Tooltip.js";
 import { Dashboard } from "../dashboard/Dashboard.js";
+import type { CustomView } from "@avilo/core";
+import { DynamicView } from "../components/DynamicView.js";
 import { UploadDialog } from "../components/UploadDialog.js";
 import { UploadProvider } from "../components/upload-context.js";
 import type {
@@ -58,7 +60,7 @@ const CHART_IDS = [
  * them. Report is the document that will be exported, shown on an actual A4 sheet.
  * Dashboard is the analysis: the same numbers, asked what they mean.
  */
-type ViewMode = "standard" | "report" | "raw" | "dashboard";
+type ViewMode = "standard" | "report" | "raw" | "dashboard" | `custom:${string}`;
 
 const VIEWS: { id: ViewMode; label: string; hint: string }[] = [
   { id: "standard", label: "Standard view", hint: "Working surface — every figure editable" },
@@ -93,11 +95,27 @@ export function ClientDetailPage() {
    * send a link rather than three instructions. It also gives the PDF probe and any
    * future automation a way to ask for the document without driving a dropdown.
    */
+  /*
+    Views the assistant built, read from the same `app_settings` path the default layout
+    uses. They are app-wide rather than per-client — a dashboard for overdue invoices is a
+    way of looking at any client's books, not a property of one client.
+  */
+  const [customViews, setCustomViews] = useState<CustomView[]>([]);
+
   const view = ((): ViewMode => {
     const requested = searchParams.get("view");
-    return VIEWS.some((entry) => entry.id === requested)
-      ? (requested as ViewMode)
-      : "standard";
+    if (VIEWS.some((entry) => entry.id === requested)) return requested as ViewMode;
+    /*
+      An assistant-built view is addressable by URL too — same "send a link rather than
+      three instructions" reason the built-in ones are. Checked against the loaded set
+      rather than waved through, so a stale link to a view that has since been removed
+      falls back to Standard instead of rendering an empty screen.
+    */
+    if (requested?.startsWith("custom:")) {
+      const id = requested.slice("custom:".length);
+      if (customViews.some((v) => v.id === id)) return requested as ViewMode;
+    }
+    return "standard";
   })();
 
   const setView = useCallback(
@@ -344,6 +362,37 @@ export function ClientDetailPage() {
     void loadLayout();
   }, [loadLayout]);
 
+  /*
+    Assistant-built views. Reloaded whenever the report reloads, so a view created in the
+    chat panel appears in the picker without a page refresh — an assistant that acts should
+    not need the user to reload to see what it did.
+  */
+  const loadCustomViews = useCallback(async () => {
+    try {
+      const row = await api.settings.get.query({ key: "custom_views" });
+      setCustomViews(row ? (JSON.parse(row.value) as CustomView[]) : []);
+    } catch {
+      // A malformed row must not take the page down; the built-in views still work.
+      setCustomViews([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadCustomViews();
+    const reload = () => {
+      void loadCustomViews();
+      void loadLayout();
+    };
+    // `avilo:configuration-changed` is fired by the assistant panel the moment it applies
+    // something, so a view it just built is in the picker before the user looks for it.
+    window.addEventListener("avilo:configuration-changed", reload);
+    window.addEventListener("focus", reload);
+    return () => {
+      window.removeEventListener("avilo:configuration-changed", reload);
+      window.removeEventListener("focus", reload);
+    };
+  }, [loadCustomViews, loadLayout]);
+
   /** The client's own record — name, stage, industry, fiscal year, notes. */
   const patchClient = useCallback(
     async (field: string, value: string | number | null) => {
@@ -530,6 +579,15 @@ export function ClientDetailPage() {
                 {entry.label}
               </option>
             ))}
+            {customViews.length > 0 ? (
+              <optgroup label="Built by the assistant">
+                {customViews.map((entry) => (
+                  <option key={entry.id} value={`custom:${entry.id}`}>
+                    {entry.label}
+                  </option>
+                ))}
+              </optgroup>
+            ) : null}
           </select>
         </div>
       </div>
@@ -550,6 +608,31 @@ export function ClientDetailPage() {
         </Block>
       ) : !report ? (
         <Spinner label="Building report…" />
+      ) : view.startsWith("custom:") ? (
+        (() => {
+          const found = customViews.find((v) => v.id === view.slice("custom:".length));
+          // A view can vanish from under the picker if the assistant removes it while it is
+          // open; fall back to the report rather than render nothing.
+          return found ? (
+            <DynamicView
+              view={found}
+              report={report}
+              series={series}
+              detail={detail}
+              formulas={formulas}
+              actions={{
+                "export-pdf": () => setPrintRange({ start: period ?? "", end: period ?? "" }),
+                upload: () => setUploading(true),
+                "open-report": () => setView("report"),
+                "open-raw-data": () => setView("raw"),
+                "open-dashboard": () => setView("dashboard"),
+                "open-standard": () => setView("standard"),
+              }}
+            />
+          ) : (
+            renderReport(false)
+          );
+        })()
       ) : view === "dashboard" ? (
         <Dashboard
           clientId={clientId}

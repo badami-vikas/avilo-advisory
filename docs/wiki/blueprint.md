@@ -103,12 +103,49 @@ Before this, "what data is missing for this client?" produced a generic list of 
 are *commonly* missing in accounting data, because the model had the account registry but
 no client. That answer was plausible and useless.
 
+## Views: screens the assistant builds (v1.9.4)
+
+A blueprint may carry `views` — named screens composed from a closed component registry,
+which appear in the client page's View picker beside Standard/Report/Raw data/Dashboard and
+are addressable as `?view=custom:<id>`.
+
+| Component | Binds to |
+|---|---|
+| `metric` | `valueId` — an account or formula id |
+| `chart` | `series[].id` — account or formula ids |
+| `table` | `source` — a detail set the importer produced (`ar_customer`, `pl_expense`, …) |
+| `text` | its own prose (rendered as text, never HTML) |
+| `actions` | `buttons[]` — ids from `VIEW_ACTIONS`, actions the app already performs |
+
+**A component carries bindings, never values.** There is no field in `ViewComponent` that
+can hold a number: a metric names an id and the figure is looked up from the same
+`PeriodReport` the report view renders. That is what makes a generated screen as trustworthy
+as the books behind it, by construction rather than by instruction (ADR-041). `DynamicView`
+therefore has no defensive branches — `validateBlueprint` refuses the whole document if any
+binding is unknown, so a broken view is never stored in the first place.
+
+`views` replaces the whole set on apply, which is how removal is expressible; the assistant
+is given the existing views so it can send them back alongside a new one. Omitted entirely
+means "leave views alone".
+
+## Creating a formula (v1.9.4)
+
+A formula id outside the registry is a **creation**, not an invention — the one place the
+closed-id rule is relaxed, because "add a metric for X" has no other expression. The id must
+look like an identifier, and `applyBlueprintDirectly` compiles the expression against the
+live accounts and formulas before writing, so a created formula referencing something
+imaginary is refused whole (ADR-042). Creation leaves a version-1 `formula_versions` row,
+the same audit trail an edit leaves.
+
 ## What it cannot do, on purpose
 
 - Cannot touch application source.
 - Cannot see or emit a Groq API key — `validateBlueprint` refuses a document carrying one.
-- Cannot write a financial fact, import a file, or add UI. Configuration is the entire
-  surface — there is no mechanism for the rest, not a policy against it.
+- Cannot write a financial fact or import a file.
+- Cannot change the application's own chrome — its header, navigation, or the assistant
+  panel itself. It builds screens *inside* the app; it does not restyle the app.
+- Cannot invent a component type, a table source or an action. It composes from the
+  registry; it cannot extend the vocabulary.
 - Cannot make a change that is not reversible from the panel (ADR-038), with the one
   documented exception of an added label mapping.
 - Cannot reference an account, formula, report type, prompt key or layout section this

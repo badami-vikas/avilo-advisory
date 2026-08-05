@@ -13,6 +13,8 @@ const surface: RegisteredSurface = {
   reportTypes: new Set(["profit_and_loss", "balance_sheet"]),
   promptKeys: new Set(["accounting_guidance", "narrative_guidance"]),
   sectionIds: new Set(["profitability", "customers"]),
+  detailKinds: new Set(["pl_expense", "ar_customer"]),
+  actionIds: new Set(["export-pdf", "upload"]),
 };
 
 describe("validateBlueprint", () => {
@@ -32,11 +34,29 @@ describe("validateBlueprint", () => {
     expect(blueprint?.formulas).toHaveLength(1);
   });
 
-  it("rejects a reference to a formula id that does not exist", () => {
+  /*
+    A formula id outside the registry is a CREATION, not an invention — "add a metric for X"
+    has no other expression. The id still has to look like an identifier, and the expression
+    is compiled against the live registry by `applyBlueprintDirectly` before anything is
+    written (see the api package's own tests). Every other id in the grammar stays closed.
+  */
+  it("accepts a formula id that does not exist yet, as a creation", () => {
+    const { blueprint, errors } = validateBlueprint(
+      {
+        ...emptyBlueprint("new metric"),
+        formulas: [{ id: "made_up_metric", expression: "1" }],
+      },
+      surface,
+    );
+    expect(errors).toEqual([]);
+    expect(blueprint?.formulas[0]?.id).toBe("made_up_metric");
+  });
+
+  it("rejects a formula id that is not a usable identifier", () => {
     const { blueprint, errors } = validateBlueprint(
       {
         ...emptyBlueprint("bad"),
-        formulas: [{ id: "made_up_metric", expression: "1" }],
+        formulas: [{ id: "rm -rf /", expression: "1" }],
       },
       surface,
     );

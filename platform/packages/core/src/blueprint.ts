@@ -58,6 +58,48 @@ export interface LayoutOverride {
   hiddenSections?: string[];
 }
 
+/**
+ * A component the assistant may place in a view.
+ *
+ * The generative-UI contract, and the reason this is a closed union rather than anything
+ * resembling markup: the assistant composes from a vocabulary it cannot extend. `type`
+ * selects a real React component that already exists and is already tested; the rest of
+ * the fields are *bindings*, never content.
+ *
+ * The binding rule is what keeps CLAUDE.md's "never fabricate a figure" true through a
+ * generated interface. A metric carries `valueId` — an account or formula id resolved
+ * against the live report — never a number. A chart carries series ids, never points. A
+ * table names a detail set the importer produced. There is no field anywhere in this union
+ * that lets a model put a figure on screen, so a generated dashboard is exactly as
+ * trustworthy as the books behind it.
+ *
+ * `text` is the one place free prose reaches the page. It is rendered as plain text, never
+ * as HTML, and it is the assistant's own words rather than a figure — the same standing as
+ * a sticky note.
+ */
+export type ViewComponent =
+  | { id: string; type: "metric"; label: string; valueId: string }
+  | {
+      id: string;
+      type: "chart";
+      label: string;
+      series: { id: string; label?: string; kind?: "bar" | "line" }[];
+    }
+  | { id: string; type: "table"; label: string; source: string }
+  | { id: string; type: "text"; label?: string; body: string }
+  | { id: string; type: "actions"; label?: string; buttons: string[] };
+
+/**
+ * A named view, composed of approved components — what "build me a dashboard for overdue
+ * invoices" produces. Appears in the client page's view picker beside the built-in ones.
+ */
+export interface CustomView {
+  id: string;
+  label: string;
+  layout: "grid" | "stack";
+  components: ViewComponent[];
+}
+
 export interface AviloBlueprint {
   schemaVersion: typeof BLUEPRINT_SCHEMA_VERSION;
   /** Free-text name for the export, shown in the picker when importing. */
@@ -69,6 +111,8 @@ export interface AviloBlueprint {
   mappings: LabelMappingEntry[];
   prompts: PromptOverride[];
   layout?: LayoutOverride;
+  /** User-defined views. Absent means "leave the existing views alone" (see ADR-039). */
+  views?: CustomView[];
 }
 
 export function emptyBlueprint(name: string): AviloBlueprint {
@@ -100,6 +144,10 @@ export interface RegisteredSurface {
   promptKeys: ReadonlySet<string>;
   /** Every section id the report layout understands. */
   sectionIds: ReadonlySet<string>;
+  /** Every detail set a `table` component may bind to (`pl_expense`, `ar_customer`, …). */
+  detailKinds: ReadonlySet<string>;
+  /** Every action an `actions` component may place a button for. */
+  actionIds: ReadonlySet<string>;
 }
 
 /**
@@ -158,8 +206,25 @@ export function validateBlueprint(
       fail(`formulas[${i}]`, "Requires string `id` and `expression`.");
       return;
     }
-    if (!surface.formulaIds.has(f.id)) {
-      fail(`formulas[${i}].id`, `Unknown formula id "${f.id}".`);
+    /*
+      A formula id the registry does not have is a CREATION, not an invention.
+
+      This is the one place the "never invent an id" rule is deliberately relaxed, because
+      "add a metric for X" is a real thing to ask for and there is no other way to express
+      it. The safety it gives up is recovered twice over downstream: the id must look like
+      an identifier (so it cannot smuggle punctuation into a key), and `applyBlueprintDirectly`
+      compiles the expression against the live accounts and formulas before writing, so a
+      new formula whose body references something imaginary is still refused whole.
+
+      Every OTHER id in a blueprint — accounts, report types, prompt keys, section ids,
+      view bindings — remains closed. Those name things that already exist; only a formula
+      can bring a new name into being.
+    */
+    if (!surface.formulaIds.has(f.id) && !/^[a-z][a-z0-9_.]{1,63}$/i.test(f.id)) {
+      fail(
+        `formulas[${i}].id`,
+        `"${f.id}" is not a usable formula id — letters, digits, underscores and dots only.`,
+      );
       return;
     }
     validFormulas.push({
@@ -237,6 +302,104 @@ export function validateBlueprint(
     }
   }
 
+  /*
+    Views. Every id a component binds to is checked here against the live registry, which
+    is what makes a generated interface safe to render without inspecting it: by the time a
+    `CustomView` exists, every metric resolves, every series resolves, every table names a
+    real detail set and every button names a real action. The renderer needs no defensive
+    checks of its own, and a model that invents `revenue_chart` gets the whole document
+    refused rather than a view with one broken tile in it.
+  */
+  let views: CustomView[] | undefined;
+  if (doc.views !== undefined) {
+    if (!Array.isArray(doc.views)) {
+      fail("views", "Not an array.");
+    } else {
+      const valueIds = (id: string) => surface.accountIds.has(id) || surface.formulaIds.has(id);
+      const seen = new Set<string>();
+      const collected: CustomView[] = [];
+
+      doc.views.forEach((raw, i) => {
+        if (typeof raw !== "object" || raw === null) return fail(`views[${i}]`, "Not an object.");
+        const v = raw as Record<string, unknown>;
+        if (typeof v.id !== "string" || v.id === "") return fail(`views[${i}].id`, "Missing id.");
+        if (typeof v.label !== "string" || v.label === "")
+          return fail(`views[${i}].label`, "Missing label.");
+        if (seen.has(v.id)) return fail(`views[${i}].id`, `Duplicate view id "${v.id}".`);
+        seen.add(v.id);
+
+        const layoutKind = v.layout === "stack" ? "stack" : "grid";
+        if (!Array.isArray(v.components))
+          return fail(`views[${i}].components`, "Not an array.");
+
+        const components: ViewComponent[] = [];
+        v.components.forEach((rawC, j) => {
+          const at = `views[${i}].components[${j}]`;
+          if (typeof rawC !== "object" || rawC === null) return fail(at, "Not an object.");
+          const c = rawC as Record<string, unknown>;
+          const id = typeof c.id === "string" && c.id !== "" ? c.id : `${v.id}-${j}`;
+          const label = typeof c.label === "string" ? c.label : "";
+
+          switch (c.type) {
+            case "metric": {
+              if (typeof c.valueId !== "string" || !valueIds(c.valueId))
+                return fail(`${at}.valueId`, `Unknown account or formula id "${String(c.valueId)}".`);
+              components.push({ id, type: "metric", label: label || c.valueId, valueId: c.valueId });
+              return;
+            }
+            case "chart": {
+              if (!Array.isArray(c.series) || c.series.length === 0)
+                return fail(`${at}.series`, "A chart needs at least one series.");
+              const series: { id: string; label?: string; kind?: "bar" | "line" }[] = [];
+              for (const rawS of c.series) {
+                const s = (typeof rawS === "string" ? { id: rawS } : rawS) as Record<string, unknown>;
+                if (typeof s?.id !== "string" || !valueIds(s.id))
+                  return fail(`${at}.series`, `Unknown account or formula id "${String(s?.id)}".`);
+                series.push({
+                  id: s.id,
+                  ...(typeof s.label === "string" ? { label: s.label } : {}),
+                  ...(s.kind === "line" || s.kind === "bar" ? { kind: s.kind } : {}),
+                });
+              }
+              components.push({ id, type: "chart", label: label || "Chart", series });
+              return;
+            }
+            case "table": {
+              if (typeof c.source !== "string" || !surface.detailKinds.has(c.source))
+                return fail(`${at}.source`, `Unknown table source "${String(c.source)}".`);
+              components.push({ id, type: "table", label: label || c.source, source: c.source });
+              return;
+            }
+            case "text": {
+              if (typeof c.body !== "string" || c.body === "")
+                return fail(`${at}.body`, "A text block needs a body.");
+              components.push({ id, type: "text", ...(label ? { label } : {}), body: c.body });
+              return;
+            }
+            case "actions": {
+              if (!Array.isArray(c.buttons) || c.buttons.length === 0)
+                return fail(`${at}.buttons`, "An actions block needs at least one button.");
+              const buttons: string[] = [];
+              for (const b of c.buttons) {
+                if (typeof b !== "string" || !surface.actionIds.has(b))
+                  return fail(`${at}.buttons`, `Unknown action "${String(b)}".`);
+                buttons.push(b);
+              }
+              components.push({ id, type: "actions", ...(label ? { label } : {}), buttons });
+              return;
+            }
+            default:
+              return fail(`${at}.type`, `Unknown component type "${String(c.type)}".`);
+          }
+        });
+
+        collected.push({ id: v.id, label: v.label, layout: layoutKind, components });
+      });
+
+      views = collected;
+    }
+  }
+
   if (errors.length > 0) return { blueprint: null, errors };
 
   return {
@@ -249,6 +412,7 @@ export function validateBlueprint(
       mappings: validMappings,
       prompts: validPrompts,
       ...(layout ? { layout } : {}),
+      ...(views ? { views } : {}),
     },
     errors: [],
   };
@@ -259,7 +423,7 @@ export function validateBlueprint(
 export type ChangeKind = "add" | "modify" | "remove" | "unchanged";
 
 export interface BlueprintChange {
-  section: "formulas" | "mappings" | "prompts" | "layout";
+  section: "formulas" | "mappings" | "prompts" | "layout" | "views";
   key: string;
   kind: ChangeKind;
   before?: unknown;
@@ -281,6 +445,7 @@ export function diffBlueprint(
     mappings: LabelMappingEntry[];
     prompts: PromptOverride[];
     layout?: LayoutOverride;
+    views?: CustomView[];
   },
 ): BlueprintChange[] {
   const changes: BlueprintChange[] = [];
@@ -327,6 +492,29 @@ export function diffBlueprint(
         ...(current.layout ? { before: current.layout } : {}),
         after: proposed.layout,
       });
+    }
+  }
+
+  /*
+    Views diff per view, not as one blob. A blueprint that carries three views and changes
+    one must report one change — "Added view Overdue invoices" — rather than "views
+    changed", or the panel is back to the unreadable `modify layout: layout` that let
+    BUG-031 through unnoticed. A view present now and absent from the proposal is a
+    removal, which is how the assistant deletes a view it built.
+  */
+  if (proposed.views) {
+    const currentViews = byId(current.views ?? [], (v) => v.id);
+    const proposedIds = new Set(proposed.views.map((v) => v.id));
+
+    for (const v of proposed.views) {
+      const existing = currentViews.get(v.id);
+      if (!existing) changes.push({ section: "views", key: v.id, kind: "add", after: v });
+      else if (JSON.stringify(existing) !== JSON.stringify(v))
+        changes.push({ section: "views", key: v.id, kind: "modify", before: existing, after: v });
+    }
+    for (const v of current.views ?? []) {
+      if (!proposedIds.has(v.id))
+        changes.push({ section: "views", key: v.id, kind: "remove", before: v });
     }
   }
 

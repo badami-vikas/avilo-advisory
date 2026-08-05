@@ -124,6 +124,9 @@ importers:
 
   platform/apps/web:
     dependencies:
+      '@avilo/core':
+        specifier: workspace:*
+        version: link:../../packages/core
       '@avilo/module':
         specifier: workspace:*
         version: link:../../modules/avilo

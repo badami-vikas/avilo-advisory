@@ -543,3 +543,67 @@ unchallenged lie. Tuning it, keep that asymmetry.
 
 **Standing rule.** Where a model's claim is shown to a user, something that knows the truth
 must be able to contradict it. An assistant's own account of its work is not evidence.
+
+---
+
+### ADR-041 · Generative UI: the assistant composes screens from a closed component registry
+**Date.** 2026-08-06
+
+**Decision.** A blueprint may carry `views` — named screens built from a closed union of
+component types (`metric`, `chart`, `table`, `text`, `actions`). They appear in the client
+page's View picker, are addressable by URL, and are created, edited and removed by the
+assistant through the same validate → snapshot → apply → undo path as every other change.
+
+**The rule that makes it safe: a component carries BINDINGS, NEVER VALUES.** A metric names
+an account or formula id and the figure is looked up from the same `PeriodReport` the report
+view renders. A chart names series ids; the points come from `report.series`. A table names
+a detail set the importer produced. There is no field in `ViewComponent` that can hold a
+number, so "never fabricate a figure" survives a generated interface *by construction*
+rather than by instruction. Verified on real data: the assistant's "Overdue invoices" view
+shows $60,000 receivable, which is the imported `ar.total` fact, and its customer table sums
+to exactly that.
+
+**Buttons are bindings too.** `VIEW_ACTIONS` is a closed list of things the application
+already does. The assistant places a button; it never authors behaviour.
+
+**Why a registry rather than letting the model write UI.** The model composes from a
+vocabulary it cannot extend. `validateBlueprint` checks every binding against the live
+registry before a view can be stored, which is why `DynamicView` has no defensive branches:
+an unknown id never becomes a stored view, because the whole document is refused. Nothing
+the model emits is executed, and no path exists from its output to markup — `text` renders
+as text, never HTML.
+
+**Rejected.** Preview-then-confirm, which the proposal that prompted this recommended. It
+contradicts ADR-038 and buys little for a change that is cheap and already reversible: the
+snapshot and Undo already existed. Preview earns its cost for expensive or irreversible
+actions; a view is neither.
+
+**Consequence.** `views` replaces the whole set on apply, which is how removal is
+expressible at all — and why the assistant is told to send existing views back alongside a
+new one. Absent entirely means "leave views alone", the same rule ADR-039 set for layout.
+
+---
+
+### ADR-042 · A new formula id is a creation; every other id stays closed
+**Date.** 2026-08-06
+
+**Decision.** `validateBlueprint` accepts a formula id outside the registry, provided it
+looks like an identifier. `applyBlueprintDirectly` then compiles the expression against the
+live accounts and formulas — including `avgN.` trailing windows — and refuses the document
+if anything it references does not exist. Creation writes a `formulas` row and a version-1
+`formula_versions` row, the same audit trail an edit leaves.
+
+**Why.** "Add a metric for X" has no other expression, and it was silently broken: the
+apply loop skipped any formula without an existing row, so a blueprint adding a metric
+activated cleanly and changed nothing. `registeredSurface().formulaIds` unions the database
+with `SEED_FORMULAS`, so validation passed and the write never happened.
+
+**The asymmetry is deliberate.** Only a formula can bring a new name into being. Accounts,
+report types, prompt keys, section ids and every view binding name things that already
+exist, and stay closed. Relaxing the id check for formulas is safe only because the
+expression check replaces it — a created formula that references an imaginary figure is
+refused whole.
+
+**Consequence.** The expression check runs on creations only. Re-checking edits would reject
+seeded definitions that legitimately use `avgN.` windows, which `validateExpression` does
+not model — a pre-existing limitation this ADR does not attempt to fix.

@@ -292,18 +292,139 @@ describe("blueprint propose/activate/reject", () => {
   it("applying directly writes nothing when the document references an unknown id", async () => {
     const { db, blueprint } = freshApi();
 
-    const outcome = blueprint.applyBlueprintDirectly("assistant", "Invent a formula", {
+    const base = {
       schemaVersion: 1,
       name: "t",
       exportedAt: new Date().toISOString(),
-      formulas: [{ id: "not.a.real.formula", expression: "1 + 1" }],
+      formulas: [],
+      mappings: [],
+      prompts: [],
+    };
+
+    /*
+      Since v1.9.4 an unknown FORMULA id is a creation, not an error — that is how "add a
+      metric" works. Everything else stays closed, and a created formula still has to
+      compile: these are the cases that must keep failing whole.
+    */
+    const refused: unknown[] = [
+      // A mapping onto an account this build does not have.
+      { ...base, mappings: [{ reportType: "profit_and_loss", rawLabel: "X", accountId: "pl.imaginary" }] },
+      // A brand-new formula whose body references a figure that does not exist.
+      { ...base, formulas: [{ id: "made_up_ratio", expression: "pl.revenue / pl.imaginary" }] },
+      // A new formula whose body does not parse at all.
+      { ...base, formulas: [{ id: "broken_ratio", expression: "pl.revenue /" }] },
+      // A formula id that is not a usable identifier.
+      { ...base, formulas: [{ id: "rm -rf /", expression: "1 + 1" }] },
+      // A section id outside the registry.
+      { ...base, layout: { hiddenSections: ["not-a-section"] } },
+    ];
+
+    for (const doc of refused) {
+      const outcome = blueprint.applyBlueprintDirectly("assistant", "bad", doc);
+      expect("errors" in outcome, JSON.stringify(doc).slice(0, 90)).toBe(true);
+    }
+
+    // Not even the pre-apply snapshot is recorded when validation fails first.
+    expect(db.getDb().select().from(schema.blueprintProposals).all()).toHaveLength(0);
+  });
+
+  it("builds a view from approved components, and undo removes it", async () => {
+    const { db, blueprint } = freshApi();
+
+    const outcome = blueprint.applyBlueprintDirectly("assistant", "Overdue invoices", {
+      schemaVersion: 1,
+      name: "t",
+      exportedAt: new Date().toISOString(),
+      formulas: [],
+      mappings: [],
+      prompts: [],
+      views: [
+        {
+          id: "overdue-invoices",
+          label: "Overdue invoices",
+          layout: "grid",
+          components: [
+            { id: "m1", type: "metric", label: "Total receivable", valueId: "ar.total" },
+            { id: "c1", type: "chart", label: "Trend", series: [{ id: "ar.total", kind: "bar" }] },
+            { id: "t1", type: "table", label: "By customer", source: "ar_customer" },
+            { id: "a1", type: "actions", buttons: ["export-pdf"] },
+          ],
+        },
+      ],
+    });
+    if (!("proposal" in outcome)) throw new Error("expected an applied proposal");
+
+    const stored = () =>
+      db.getDb().select().from(schema.appSettings).all()
+        .find((r: { key: string }) => r.key === "custom_views");
+
+    expect(JSON.parse(stored().value)).toHaveLength(1);
+    expect(outcome.proposal.diff[0]).toMatchObject({ section: "views", kind: "add" });
+
+    blueprint.activateProposal(outcome.revertId);
+    expect(JSON.parse(stored().value)).toEqual([]);
+  });
+
+  it("refuses a view whose component binds to an id or action this build does not have", async () => {
+    const { db, blueprint } = freshApi();
+
+    const base = {
+      schemaVersion: 1,
+      name: "t",
+      exportedAt: new Date().toISOString(),
+      formulas: [],
+      mappings: [],
+      prompts: [],
+    };
+    const view = (components: unknown[]) => ({
+      ...base,
+      views: [{ id: "v", label: "V", layout: "grid", components }],
+    });
+
+    // A metric bound to an invented figure, a table bound to an invented source, a button
+    // bound to an invented action, and a component type that does not exist.
+    for (const components of [
+      [{ id: "a", type: "metric", label: "X", valueId: "revenue_chart" }],
+      [{ id: "a", type: "table", label: "X", source: "invoices" }],
+      [{ id: "a", type: "actions", buttons: ["delete-everything"] }],
+      [{ id: "a", type: "iframe", src: "https://example.com" }],
+    ]) {
+      const outcome = blueprint.applyBlueprintDirectly("assistant", "bad", view(components));
+      expect("errors" in outcome, JSON.stringify(components)).toBe(true);
+    }
+
+    // Nothing written by any of them — refusal is whole-document, never partial.
+    expect(
+      db.getDb().select().from(schema.appSettings).all()
+        .find((r: { key: string }) => r.key === "custom_views"),
+    ).toBeUndefined();
+    expect(db.getDb().select().from(schema.blueprintProposals).all()).toHaveLength(0);
+  });
+
+  it("creates a formula that did not exist, with a version-1 history row", async () => {
+    const { db, blueprint } = freshApi();
+
+    const outcome = blueprint.applyBlueprintDirectly("assistant", "Add overdue ratio", {
+      schemaVersion: 1,
+      name: "t",
+      exportedAt: new Date().toISOString(),
+      // Not in SEED_FORMULAS and not in the database — this is a genuinely new metric.
+      formulas: [{ id: "ar_to_revenue", expression: "ar.total / pl.revenue", label: "AR to revenue" }],
       mappings: [],
       prompts: [],
     });
+    if (!("proposal" in outcome)) throw new Error("expected an applied proposal");
 
-    expect("errors" in outcome).toBe(true);
-    // Not even the pre-apply snapshot is recorded when validation fails first.
-    expect(db.getDb().select().from(schema.blueprintProposals).all()).toHaveLength(0);
+    const created = db.getDb().select().from(schema.formulas).all()
+      .find((f: { id: string }) => f.id === "ar_to_revenue");
+    expect(created).toBeDefined();
+    expect(created.expression).toBe("ar.total / pl.revenue");
+    expect(created.label).toBe("AR to revenue");
+
+    const history = db.getDb().select().from(schema.formulaVersions).all()
+      .filter((v: { formulaId: string }) => v.formulaId === "ar_to_revenue");
+    expect(history).toHaveLength(1);
+    expect(history[0].version).toBe(1);
   });
 
   it("export produces a document that re-validates and diffs to nothing against itself", async () => {

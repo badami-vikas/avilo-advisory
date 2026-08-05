@@ -1,6 +1,6 @@
 {
   "name": "@avilo/core",
-  "version": "1.9.3",
+  "version": "1.9.4",
   "private": true,
   "type": "module",
   "description": "Local port of relationship-os @bridge/core's blueprint grammar, narrowed to Avilo's configuration surface (formulas, label mappings, prompts, layout). Zero runtime dependencies, mirroring @bridge/core's own constraint, so a blueprint compiles identically in apps/api and apps/web. Delete this package on integration and repoint imports at @bridge/core.",

@@ -1,6 +1,6 @@
 # Progress
 
-**v1.9.3** — shipping to a first beta user. macOS ships arm64 only for now (BUG-028). The assistant **acts** on the four things it can configure — formulas, mappings, prompts, default report layout — and refuses everything else out loud. 1.9.2 shipped it claiming to have added UI buttons and silently hiding a report section it was never asked about (BUG-029 to BUG-032); the server now contradicts a claim that does not match what it wrote (ADR-040), and every applied change is described in words the user can check. It also reads the open client's real data, and the report and assistant scroll independently.
+**v1.9.4** — shipping to a first beta user. macOS ships arm64 only for now (BUG-028). The assistant **builds**: it composes whole views from an approved component registry (metrics, charts, tables, text, action buttons) that appear in the client page's View picker, creates new formulas, and still edits mappings, prompts and the report layout — applying each immediately with an Undo. A generated component binds to an id and can never carry a figure (ADR-041), so a screen it built is exactly as trustworthy as the books behind it. It refuses anything outside that surface out loud, and the server corrects it when its prose does not match what it wrote (ADR-040).
 
 ## Done
 
@@ -59,6 +59,6 @@ Three changes in 1.6.0, none of them verified on Windows by us:
 
 ## Verification budget
 
-300 tests (168 domain + 44 API + 63 web + 17 core, up from 297 in 1.9.2 for the empty-diff guard and the false-claim detector) · 7 packages typecheck · parsers validated against the real client exports in `reference/Reporting data`, asserting against each report's own printed totals rather than against a row count.
+296 tests (168 domain + 47 API + 63 web + 18 core) · 7 packages typecheck · parsers validated against the real client exports in `reference/Reporting data`, asserting against each report's own printed totals rather than against a row count.
 
-The 1.9.3 assistant was verified live against the real database, in one session, both ways: "I want the undo button on header of avilo assistant" is refused with nothing written (no layout row, no proposal), and "Hide the top jobs section" applies, shows "Report layout — hid top-jobs", and undoes. In between, the model was caught claiming a layout change it had not made — the red "Nothing was actually changed" correction is a screenshot of the real failure, not a mock. That round-trip is what produced ADR-039 and ADR-040.
+1.9.4's generative UI was verified live against the real database, not mocked: "Build me a dashboard for monitoring overdue invoices" produced a five-component view that renders Total receivable **$60K** — which is the imported `ar.total` fact for that period — over a customer table whose four rows sum to exactly $60,000. Its generated Download PDF button fired the real export. A second request ("a cash health view") appeared in the View picker without a reload and preserved the first. "Change the app header colour and rename the Clients link" was refused with nothing written. Both directions in one session.

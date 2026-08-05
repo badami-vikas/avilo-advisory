@@ -208,6 +208,13 @@ export function AgentPanelBody({ collapsed, clientId }: { collapsed: boolean; cl
         history: next.map((t) => ({ role: t.role, text: t.text })),
         clientId,
       });
+      /*
+        A change the assistant just made should be visible without a reload — a new view in
+        the picker, a reordered report. The page reads its configuration on mount and on
+        window focus, and neither fires here, so say so explicitly.
+      */
+      if (reply.revertId) window.dispatchEvent(new Event("avilo:configuration-changed"));
+
       setTurns((current) => [
         ...current,
         {

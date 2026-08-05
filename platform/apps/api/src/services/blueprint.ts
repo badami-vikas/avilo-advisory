@@ -10,6 +10,7 @@ import {
   validateBlueprint,
   type AviloBlueprint,
   type BlueprintChange,
+  type CustomView,
   type LayoutOverride,
   type RegisteredSurface,
 } from "@avilo/core";
@@ -18,10 +19,13 @@ import {
   normalizeLabel,
   REPORT_TYPES,
   SEED_FORMULAS,
+  TRAILING,
+  extractDependencies,
 } from "@avilo/module";
 import { getDb, newId, schema } from "../db.js";
 import { readSetting } from "./ai.js";
 import { learnMapping } from "./labels.js";
+import { loadFormulaSpecs } from "./report.js";
 
 /** The two prompts actually read at runtime (see suggest.ts / narrative.ts / router.ts). */
 export const PROMPT_KEYS = ["accounting_guidance", "narrative_guidance"] as const;
@@ -50,6 +54,30 @@ export const LAYOUT_SECTION_IDS = [
  */
 export const REPORT_LAYOUT_DEFAULT_KEY = "report_layout_default";
 
+/** Where user-defined views live — one JSON array, same `app_settings` path as the layout default. */
+export const CUSTOM_VIEWS_KEY = "custom_views";
+
+/**
+ * Detail sets a generated `table` may bind to, mirrored from `report.detail`'s own keys
+ * (see `ReportView.tsx`, which reads exactly these). A table names one of these; it never
+ * carries rows, so the figures in a generated table are the imported ones.
+ */
+export const DETAIL_KINDS = [
+  "pl_income", "pl_expense", "ar_customer", "ap_vendor", "customer_sales", "referral_partner",
+] as const;
+
+/**
+ * Actions a generated button may invoke.
+ *
+ * Closed on purpose, and small on purpose: every entry maps to something the application
+ * already does and already tests. This is the answer to "can the assistant add a button" —
+ * it can place one, from this list. It cannot invent an action, because a button is a
+ * binding to a handler that exists, not a piece of behaviour the model authors.
+ */
+export const VIEW_ACTIONS = [
+  "export-pdf", "upload", "open-report", "open-raw-data", "open-dashboard", "open-standard",
+] as const;
+
 export function registeredSurface(): RegisteredSurface {
   const db = getDb();
   const formulaIds = db.select({ id: schema.formulas.id }).from(schema.formulas).all();
@@ -59,6 +87,8 @@ export function registeredSurface(): RegisteredSurface {
     reportTypes: new Set(REPORT_TYPES),
     promptKeys: new Set(PROMPT_KEYS),
     sectionIds: new Set(LAYOUT_SECTION_IDS),
+    detailKinds: new Set(DETAIL_KINDS),
+    actionIds: new Set(VIEW_ACTIONS),
   };
 }
 
@@ -68,6 +98,7 @@ export function currentConfiguration(): {
   mappings: AviloBlueprint["mappings"];
   prompts: AviloBlueprint["prompts"];
   layout?: LayoutOverride;
+  views?: CustomView[];
 } {
   const db = getDb();
   const formulas = db.select().from(schema.formulas).all().map((f) => ({
@@ -93,7 +124,23 @@ export function currentConfiguration(): {
       // A corrupt stored value must not block export or diffing — treat as unset.
     }
   }
-  return { formulas, mappings, prompts, ...(layout ? { layout } : {}) };
+  const storedViews = readSetting(CUSTOM_VIEWS_KEY);
+  let views: CustomView[] | undefined;
+  if (storedViews) {
+    try {
+      views = JSON.parse(storedViews) as CustomView[];
+    } catch {
+      // Same rule as the layout above — a corrupt row must not block export or diffing.
+    }
+  }
+
+  return {
+    formulas,
+    mappings,
+    prompts,
+    ...(layout ? { layout } : {}),
+    ...(views ? { views } : {}),
+  };
 }
 
 /** The full current configuration as an exportable blueprint. */
@@ -194,7 +241,44 @@ export function activateProposal(id: string, note?: string): ProposalRecord {
 
   for (const formula of blueprint.formulas) {
     const existing = db.select().from(schema.formulas).where(eq(schema.formulas.id, formula.id)).get();
-    if (!existing || existing.expression === formula.expression) continue;
+
+    /*
+      A formula id with no row is a NEW metric, and it is created here.
+
+      This branch did not exist until v1.9.4, which meant "add a formula" was silently a
+      no-op: the loop skipped anything without an existing row, so a blueprint that added a
+      metric activated cleanly and changed nothing. `registeredSurface().formulaIds` unions
+      the database with `SEED_FORMULAS`, so validation passed and the write never happened.
+    */
+    if (!existing) {
+      const maxOrder = db.select().from(schema.formulas).all()
+        .reduce((max, f) => Math.max(max, f.sortOrder ?? 0), 0);
+      db.insert(schema.formulas)
+        .values({
+          id: formula.id,
+          label: formula.label ?? formula.id,
+          expression: formula.expression,
+          unit: "currency",
+          ...(formula.description ? { description: formula.description } : {}),
+          sortOrder: maxOrder + 10,
+          version: 1,
+          active: true,
+        })
+        .run();
+      db.insert(schema.formulaVersions)
+        .values({
+          id: `${formula.id}@1`,
+          formulaId: formula.id,
+          version: 1,
+          expression: formula.expression,
+          author: `blueprint:${row.author}`,
+          note: `Created by proposal ${id}: ${row.summary}`,
+        })
+        .run();
+      continue;
+    }
+
+    if (existing.expression === formula.expression) continue;
     const nextVersion = existing.version + 1;
     db.update(schema.formulas)
       .set({
@@ -242,6 +326,20 @@ export function activateProposal(id: string, note?: string): ProposalRecord {
       .run();
   }
 
+  /*
+    Views are written whole, not merged. The blueprint's `views` IS the set of views after
+    activation, which is what makes removal expressible at all — a view the document omits
+    is gone. Absent entirely (the common case for a formula-only change) means "leave views
+    alone", the same rule ADR-039 established for layout.
+  */
+  if (blueprint.views) {
+    const value = JSON.stringify(blueprint.views);
+    db.insert(schema.appSettings)
+      .values({ key: CUSTOM_VIEWS_KEY, value })
+      .onConflictDoUpdate({ target: schema.appSettings.key, set: { value } })
+      .run();
+  }
+
   db.update(schema.blueprintProposals)
     .set({ status: "active", decidedAt: new Date().toISOString(), decisionNote: note ?? null })
     .where(eq(schema.blueprintProposals.id, id))
@@ -278,6 +376,55 @@ export function applyBlueprintDirectly(
   if (!blueprint) return { errors };
 
   /*
+    Compile every NEWLY CREATED formula before anything is written.
+
+    `validateBlueprint` lets an unknown formula id through, because creating a metric is a
+    legitimate request and there is no other way to express it. This is where a created
+    formula earns its place: the expression must parse, and every id it references must be a
+    real account, a real formula, or a trailing window over one. Without it, "add a metric
+    for the overdue ratio" could write a row whose body names a figure that does not exist,
+    surfacing later as a broken tile on someone's report.
+
+    Deliberately scoped to creations. An EDIT to an existing formula keeps whatever the
+    formulas router already allows — re-checking those here would reject the seeded
+    definitions that legitimately use `avgN.` windows, which `validateExpression` does not
+    model.
+  */
+  const knownIds = new Set<string>([
+    ...CANONICAL_ACCOUNTS.map((a) => a.id),
+    ...loadFormulaSpecs().map((f) => f.id),
+    ...blueprint.formulas.map((f) => f.id),
+  ]);
+  const resolvable = (dep: string) => {
+    if (knownIds.has(dep)) return true;
+    // `avg3.pl.revenue` is a trailing window over `pl.revenue` — real if its target is.
+    const trailing = TRAILING.exec(dep);
+    return trailing !== null && knownIds.has(trailing[2]!);
+  };
+
+  const db0 = getDb();
+  const expressionErrors: { path: string; message: string }[] = [];
+  blueprint.formulas.forEach((f, i) => {
+    const exists = db0.select().from(schema.formulas).where(eq(schema.formulas.id, f.id)).get();
+    if (exists) return;
+    let deps: string[];
+    try {
+      deps = extractDependencies(f.expression);
+    } catch (cause) {
+      expressionErrors.push({ path: `formulas[${i}].expression`, message: (cause as Error).message });
+      return;
+    }
+    const unknown = deps.filter((d) => !resolvable(d));
+    if (unknown.length > 0) {
+      expressionErrors.push({
+        path: `formulas[${i}].expression`,
+        message: `Unknown reference${unknown.length > 1 ? "s" : ""}: ${unknown.join(", ")}`,
+      });
+    }
+  });
+  if (expressionErrors.length > 0) return { errors: expressionErrors };
+
+  /*
     A document that matches the live configuration is not a change, and must not be
     reported as one. This is the guard for BUG-030: a model that has been told to act will
     sometimes emit a blueprint simply to have something to show, and an empty diff shown as
@@ -296,6 +443,9 @@ export function applyBlueprintDirectly(
   const snapshot = proposeBlueprint("revert", `Configuration before: ${summary}`, {
     ...before,
     layout: before.layout ?? { sectionOrder: [...LAYOUT_SECTION_IDS], hiddenSections: [] },
+    // Same reason as layout: an absent `views` means "leave alone", so undoing the creation
+    // of the very first view needs the empty set said out loud.
+    views: before.views ?? [],
   });
   if ("errors" in snapshot) return snapshot;
 
