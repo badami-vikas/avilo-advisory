@@ -1,7 +1,10 @@
 import { and, eq, gte, lte } from "drizzle-orm";
 import {
+  TRAILING,
+  buildTrailing,
   displayValue,
   evaluateFormulas,
+  extractDependencies,
   formatPeriod,
   type EvaluationScope,
   type FormulaSpec,
@@ -152,6 +155,62 @@ export function buildPeriodReport(clientId: string, period: Period): PeriodRepor
     });
   }
 
+  const specs = loadFormulaSpecs();
+
+  /*
+    Trailing windows for the liquidity ratios.
+
+    A stock over a rate needs the rate to be a rate, so `avg3.pl.cogs` and friends are
+    resolved here — the engine evaluates one period and cannot see the fact store. Only
+    the windows the active formulas actually ask for are computed, so a registry with no
+    trailing identifiers costs one query that returns nothing.
+  */
+  const trailingDeps = new Set<string>();
+  for (const spec of specs) {
+    if (spec.active === false) continue;
+    for (const dep of extractDependencies(spec.expression)) {
+      if (TRAILING.test(dep)) trailingDeps.add(dep);
+    }
+  }
+
+  let trailing: Map<string, number> | undefined;
+  if (trailingDeps.size > 0) {
+    const longest = Math.max(
+      ...[...trailingDeps].map((dep) => Number(TRAILING.exec(dep)![1])),
+    );
+    const historyRows = db
+      .select({
+        period: schema.facts.period,
+        accountId: schema.facts.accountId,
+        value: schema.facts.value,
+      })
+      .from(schema.facts)
+      .where(
+        and(eq(schema.facts.clientId, clientId), lte(schema.facts.period, period)),
+      )
+      .orderBy(schema.facts.period)
+      .all();
+
+    const byPeriod = new Map<string, Map<string, number>>();
+    for (const row of historyRows) {
+      const bucket = byPeriod.get(row.period) ?? new Map<string, number>();
+      bucket.set(row.accountId, row.value);
+      byPeriod.set(row.period, bucket);
+    }
+
+    const history = [...byPeriod.keys()].sort().slice(-longest).map((p) => {
+      const bucket = new Map(byPeriod.get(p));
+      // The evaluated period is the one whose overrides are already resolved above;
+      // a corrected figure must not be averaged away by the raw fact it replaced.
+      if (p === period) {
+        for (const [id, resolved] of scopeAccounts) bucket.set(id, resolved.value);
+      }
+      return bucket;
+    });
+
+    trailing = buildTrailing(history, trailingDeps);
+  }
+
   const scope: EvaluationScope = {
     accounts: scopeAccounts,
     metricOverrides: new Map(
@@ -160,9 +219,9 @@ export function buildPeriodReport(clientId: string, period: Period): PeriodRepor
         { value: o.value, source: "override" as const },
       ]),
     ),
+    ...(trailing ? { trailing } : {}),
   };
 
-  const specs = loadFormulaSpecs();
   const evaluation = evaluateFormulas(specs, scope);
 
   const missing = new Set(evaluation.missingAccounts);

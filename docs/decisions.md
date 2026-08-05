@@ -141,6 +141,59 @@ Format: **ADR-nnn · date · decision** → why · rejected · consequence.
 
 ---
 
+### ADR-030 · A ratio divides a stock by a rate, and one month is not a rate
+**Date.** 2026-08-05
+
+**Decision.** Liquidity ratios use a trailing three-month base via `avg<N>.<accountId>`
+identifiers in the formula engine. Each keeps a `_point` twin computing the same thing on
+the selected month.
+
+**Why.** Grounding the metrics against a real client's books (the `/finance:reconciliation`
+and `/finance:financial-statements` frameworks) showed the base was arbitrary: 54 days of
+runway on the selected month, 38 on a trailing quarter, 19 on a trailing year, from one
+cash balance. Three months is long enough to survive one lumpy month and short enough that
+a business genuinely running out of money is not reassured by last summer.
+
+**Rejected.** Computing the point-in-time figure in the chart. That is inline metric
+arithmetic, which is what ADR-003 exists to prevent — so the twin is a registry entry.
+
+**Detail.** A trailing window with no supplied history falls back to the period's own
+value. The mean of one month is that month, and the alternative is telling a user that
+`pl.cogs` is missing while it is on screen.
+
+---
+
+### ADR-031 · A shipped correction must reach databases that already exist
+**Date.** 2026-08-05
+
+**Decision.** Seeding upgrades a formula whose stored expression matches one the
+application previously shipped, listed in `SUPERSEDED_EXPRESSIONS`, and records a new
+version row. A user-edited expression is never touched.
+
+**Why.** Seeding skipped anything already present, so corrected definitions only reached
+fresh installs. A fix shipped, tested and reported as done sat unused on every existing
+machine (BUG-025). The list is append-only and is the upgrade path.
+
+**Rejected.** Overwriting unconditionally on version bump — it silently reverts a user's
+own edit, which ADR-003 makes a first-class decision with history.
+
+---
+
+### ADR-032 · The statements must be checked against each other, not only within themselves
+**Date.** 2026-08-05
+
+**Decision.** `checkPeriodAlignment` reconciles the balance sheet's fiscal-year-to-date net
+income against the imported P&L and names the window that matches.
+
+**Why.** `integrity.ts` already checked *within* a period — the accounting equation, GL
+control against ageing subledger, buckets against their total. Nothing checked that the
+two statements covered the same stretch of time, and they routinely do not.
+
+**Consequence.** "Unknown is a first-class result" extended to time: the app can now say
+these two numbers are not comparable, instead of printing both.
+
+---
+
 ## AI
 
 ### ADR-010 · The app must work with no model configured

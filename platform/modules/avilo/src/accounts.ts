@@ -120,6 +120,25 @@ export const CANONICAL_ACCOUNTS: AccountDef[] = [
     unit: "currency",
     sortOrder: 160,
   },
+  {
+    /*
+      The balance sheet's own Net Income line, carried so the two statements can be
+      reconciled against each other.
+
+      It is the *fiscal year to date* figure, and that is the point of importing it. One
+      client's P&L export covered thirteen months (+$275k) while their balance sheet's
+      fiscal year covered six (−$63,953): both correct, both on the same page, describing
+      different windows, with nothing saying so. See `checkPeriodAlignment`.
+    */
+    id: "bs.net_income",
+    label: "Net income (per balance sheet)",
+    statement: "balance_sheet",
+    role: "total",
+    unit: "currency",
+    description:
+      "The retained-earnings movement for the fiscal year to date, as the balance sheet states it. Used to check that the imported P&L covers the same window.",
+    sortOrder: 170,
+  },
 
   // --- A/R ageing buckets
   {
@@ -406,4 +425,5 @@ export const BUILTIN_LABEL_MAPPINGS: BuiltinMapping[] = [
     "Total for Equity",
     "Total Owner's Equity",
   ]),
+  ...seed("balance_sheet", "bs.net_income", ["Net Income", "Net Income (Loss)"]),
 ];

@@ -23,7 +23,13 @@ import {
   type ReportType,
 } from "@avilo/module";
 import { readPdf } from "@avilo/module/pdf";
-import { checkIntegrity, formatPeriod, toCents } from "@avilo/module";
+import {
+  checkIntegrity,
+  checkPeriodAlignment,
+  formatPeriod,
+  toCents,
+  type AlignmentResult,
+} from "@avilo/module";
 import { getDb, newId, nowIso, schema } from "../db.js";
 import { clientFilesDir, ensureDir } from "../paths.js";
 import { buildResolver } from "./labels.js";
@@ -621,6 +627,19 @@ export async function commitFile(
     }
   }
 
+  /*
+    Do the two statements describe the same stretch of time?
+
+    Checked once per commit rather than per period, because it is a question about the
+    import as a whole. A balance sheet's Net Income is its fiscal year to date; a P&L
+    export is whatever range someone selected in QuickBooks, and nothing makes them
+    agree. One real client's dashboard could show +$275,000 over thirteen months of P&L
+    beside their balance sheet's −$63,953 over six, with no hint the two were measuring
+    different things.
+  */
+  const alignment = checkImportedPeriodAlignment(clientId);
+  if (alignment?.finding) integrityWarnings.push(alignment.finding.message);
+
   return {
     factsWritten,
     detailsWritten,
@@ -629,4 +648,72 @@ export async function commitFile(
     notices: resolution.notices,
     warnings: [...parsed.warnings, ...integrityWarnings],
   };
+}
+
+/**
+ * Reconcile the balance sheet's fiscal-year-to-date net income against the imported P&L.
+ *
+ * The P&L's own net income per month is not a stored account — the parser maps revenue,
+ * cost of sales and overhead — so it is reconstructed here from those three. That makes
+ * this an operating figure and the balance sheet's an after-tax one, which is precisely
+ * why `checkPeriodAlignment` looks for the window that reconciles rather than demanding
+ * an exact match: a window that is out by a few months is a different question from one
+ * that is out by depreciation.
+ */
+function checkImportedPeriodAlignment(clientId: string): AlignmentResult | null {
+  const db = getDb();
+
+  const rows = db
+    .select({
+      period: schema.facts.period,
+      accountId: schema.facts.accountId,
+      value: schema.facts.value,
+    })
+    .from(schema.facts)
+    .where(eq(schema.facts.clientId, clientId))
+    .orderBy(schema.facts.period)
+    .all();
+
+  const byPeriod = new Map<string, Map<string, number>>();
+  for (const row of rows) {
+    const bucket = byPeriod.get(row.period) ?? new Map<string, number>();
+    bucket.set(row.accountId, row.value);
+    byPeriod.set(row.period, bucket);
+  }
+
+  const periods = [...byPeriod.keys()].sort();
+  // The balance sheet dates the comparison: its Net Income runs up to its own period end.
+  const anchor = [...periods].reverse().find((p) => byPeriod.get(p)?.has("bs.net_income"));
+  if (!anchor) return null;
+
+  const netIncome = byPeriod.get(anchor)!.get("bs.net_income")!;
+  const monthly: { period: string; value: number }[] = [];
+  for (const period of periods) {
+    if (period > anchor) break;
+    const bucket = byPeriod.get(period)!;
+    const revenue = bucket.get("pl.revenue");
+    if (revenue === undefined) continue;
+
+    /*
+      `pl.other_expense` is the Other Expenses *section total* and already contains
+      `pl.depreciation`, which is carried separately only so Top Expenses can exclude it.
+      Subtracting both double-counts depreciation — which it did, quietly, and pushed a
+      13-month reconstruction $42,000 below the truth so that no window reconciled and
+      the check reported a mismatch that was its own arithmetic.
+    */
+    const belowTheLine =
+      bucket.get("pl.other_expense") ?? bucket.get("pl.depreciation") ?? 0;
+
+    monthly.push({
+      period,
+      value:
+        revenue -
+        (bucket.get("pl.cogs") ?? 0) -
+        (bucket.get("pl.overhead") ?? 0) +
+        (bucket.get("pl.other_income") ?? 0) -
+        belowTheLine,
+    });
+  }
+
+  return checkPeriodAlignment(netIncome, monthly);
 }

@@ -107,6 +107,64 @@ export interface EvaluationScope {
   accounts: Map<string, ResolvedValue>;
   /** formulaId -> override, when the user has overridden a computed metric */
   metricOverrides?: Map<string, ResolvedValue>;
+  /**
+   * Trailing means, keyed `avg<N>.<accountId>` — `avg3.pl.cogs` is the mean of
+   * `pl.cogs` over this period and the two before it. See `TRAILING`.
+   */
+  trailing?: Map<string, number>;
+}
+
+/**
+ * `avg3.pl.cogs` — an account averaged over a trailing window ending at this period.
+ *
+ * A liquidity ratio divides a stock by a flow, and the flow has to be a *rate*. Using one
+ * month as that rate makes the answer hostage to which month is on screen: this client
+ * bills $380,881 in one month and $12,527 in another, and their June operating spend was
+ * the lowest of thirteen, so days-cash-on-hand read 54 days against a trailing-average 19.
+ * Neither number is a lie; one of them is a rate and the other is a coincidence.
+ *
+ * Trailing values are supplied by the caller rather than computed here, because the engine
+ * evaluates one period and has no access to the fact store.
+ */
+export const TRAILING = /^avg(\d+)\.(.+)$/;
+
+/** `avg3.pl.cogs` -> `pl.cogs`; anything else unchanged. */
+export function underlyingAccount(id: string): string {
+  return TRAILING.exec(id)?.[2] ?? id;
+}
+
+/**
+ * Compute the `avg<N>.<accountId>` values a set of expressions asks for.
+ *
+ * `history` runs oldest to newest and ends at the period being evaluated. A window shorter
+ * than N is averaged over what exists rather than refused: a client with four months of
+ * P&L should get a four-month mean, not a blank card. A window with no readings at all is
+ * omitted, which surfaces as a missing input naming the underlying account.
+ */
+export function buildTrailing(
+  history: Map<string, number>[],
+  dependencies: Iterable<string>,
+): Map<string, number> {
+  const out = new Map<string, number>();
+
+  for (const dependency of dependencies) {
+    const match = TRAILING.exec(dependency);
+    if (!match) continue;
+    const window = Number(match[1]);
+    const accountId = match[2]!;
+    if (!Number.isFinite(window) || window < 1) continue;
+
+    const readings: number[] = [];
+    for (const period of history.slice(-window)) {
+      const value = period.get(accountId);
+      if (typeof value === "number" && Number.isFinite(value)) readings.push(value);
+    }
+    if (readings.length === 0) continue;
+
+    out.set(dependency, readings.reduce((sum, v) => sum + v, 0) / readings.length);
+  }
+
+  return out;
 }
 
 export type MetricStatus = "ok" | "missing_inputs" | "error";
@@ -298,6 +356,26 @@ export function evaluateFormulas(
   for (const [accountId, resolved] of scope.accounts) {
     values.set(accountId, resolved.value);
   }
+  for (const [key, value] of scope.trailing ?? []) {
+    values.set(key, value);
+  }
+
+  /*
+    A trailing window with no supplied mean falls back to this period's own value.
+
+    The mean of one month is that month, so this is arithmetically honest — and without
+    it the failure mode is absurd: a client with one month of P&L, or any caller that
+    does not populate `trailing`, would be told `pl.cogs` is a missing input while the
+    figure sits on screen. Degrading to the point-in-time reading is the same answer the
+    metric gave before trailing windows existed.
+  */
+  for (const list of deps.values()) {
+    for (const dependency of list) {
+      if (values.has(dependency) || !TRAILING.test(dependency)) continue;
+      const base = values.get(underlyingAccount(dependency));
+      if (base !== undefined) values.set(dependency, base);
+    }
+  }
 
   const metrics = new Map<string, MetricResult>();
 
@@ -341,7 +419,8 @@ export function evaluateFormulas(
         if (formulaIds.has(dep)) {
           for (const leaf of metrics.get(dep)?.missing ?? [dep]) leaves.add(leaf);
         } else {
-          leaves.add(dep);
+          // `avg3.pl.cogs` is not something a user can supply; `pl.cogs` is.
+          leaves.add(underlyingAccount(dep));
         }
       }
       metrics.set(id, {
@@ -419,7 +498,9 @@ export function requiredAccounts(formulas: FormulaSpec[]): string[] {
   const required = new Set<string>();
   for (const id of formulaIds) {
     for (const dep of transitiveDependencies(id, deps)) {
-      if (!formulaIds.has(dep)) required.add(dep);
+      // The checklist names accounts a person can import. A trailing window is a way of
+      // reading one, not a separate thing to supply.
+      if (!formulaIds.has(dep)) required.add(underlyingAccount(dep));
     }
   }
   return [...required].sort();

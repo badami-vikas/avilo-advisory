@@ -1,6 +1,6 @@
 # Progress
 
-**v1.6.1** — shipping to a first beta user.
+**v1.7.0** — shipping to a first beta user.
 
 ## Done
 
@@ -43,6 +43,8 @@
 | No referral report in the reference set — `ops.referral_total` never populates | **blocked on data** |
 | Transaction Detail by Account misclassifies (BUG-024) | medium |
 | Only one balance sheet — every balance-sheet metric is a single point | **blocked on data** |
+| Point-in-time metric twins exist but the KPI drill-down does not surface them | medium |
+| 13-week forecast runs on P&L run rate, not on A/R and A/P timing | **high** |
 
 ## Windows install and uninstall
 
@@ -56,4 +58,4 @@ Three changes in 1.6.0, none of them verified on Windows by us:
 
 ## Verification budget
 
-246 tests (158 domain + 25 API + 63 web) · 6 packages typecheck · parsers validated against the real client exports in `reference/Reporting data`, asserting against each report's own printed totals rather than against a row count.
+261 tests (168 domain + 30 API + 63 web) · 6 packages typecheck · parsers validated against the real client exports in `reference/Reporting data`, asserting against each report's own printed totals rather than against a row count.

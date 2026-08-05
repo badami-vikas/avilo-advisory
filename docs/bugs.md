@@ -248,6 +248,65 @@ A KPI card showed "no comparison" and "Not enough history" above a confident dow
 
 ---
 
+### BUG-025 · A corrected formula never reached an existing database
+**RESOLVED** 2026-08-05 · v1.7.0 · **the most serious bug found so far**
+
+`seedReferenceData` skipped any formula whose id already existed, and seeding is the only
+path a definition travels. So the days-cash-on-hand fix from v1.5.0 — divisor 365 → 30,
+the one reported as a beta user seeing 10,304 days of runway — reached a *fresh* install
+and nothing else. Verified, not inferred: the working database on the build machine still
+read `bs.cash / ((pl.cogs + pl.overhead) / 365)` at version 1 today.
+
+Exactly the failure CLAUDE.md warns about — "a fresh database is not a test" — and I
+reported the bug fixed without checking the upgrade path.
+
+**Fix.** Seeding now upgrades a stored expression when it matches one this application has
+previously shipped (`SUPERSEDED_EXPRESSIONS`), recording a new `formula_versions` row. An
+expression the user edited is left alone, because an edit is a decision with history.
+
+**Proof.** Run against a copy of the real database: `days_cash_on_hand`, `dso` and `dpo`
+moved to version 2 with the new expressions, the three `_point` formulas were inserted,
+and `gross_margin_pct` — sitting at version 9 from earlier editing — was untouched.
+
+---
+
+### BUG-026 · Liquidity ratios divided a stock by one month rather than by a rate
+**RESOLVED** 2026-08-05 · v1.7.0
+
+Days cash on hand, DSO and DPO each divide a point-in-time balance by a daily rate taken
+from the selected month alone. On a client billing $380,881 in one month and $12,527 in
+another, the month on screen determines the answer. Their June 2026 operating spend was
+the lowest of thirteen, so days cash on hand read **54 days** where a trailing three-month
+base reads **38** and a trailing thirteen-month base reads **19**.
+
+Same family as BUG-018 one layer down: that fixed the unit, this fixes the base.
+
+**Fix.** `avg<N>.<accountId>` identifiers in the formula engine, resolved by the report
+service from the fact store. Headlines use `avg3`; a `_point` twin keeps the single-month
+calculation in the registry so the difference is visible and still has one definition.
+
+---
+
+### BUG-027 · Balance sheet and P&L could describe different periods silently
+**RESOLVED** 2026-08-05 · v1.7.0
+
+A balance sheet's Net Income is its fiscal year to date; a P&L export is whatever range
+was selected. On the reference client these were −$63,953 over six months and roughly
++$275,000 over thirteen — both correct, both on the same page, nothing saying so.
+
+**Fix.** `checkPeriodAlignment` sums monthly P&L net income backwards from the balance
+sheet date and reports the window that reconciles. Fires at import.
+
+**Proof.** On the reference exports: "The balance sheet's fiscal year to date is 6 months,
+but 13 months of P&L are imported." Six is correct.
+
+**Found while fixing it:** the first version subtracted both `pl.other_expense` and
+`pl.depreciation`. `pl.other_expense` is the section total and already contains
+depreciation, so the reconstruction ran $42,000 low over 13 months and no window
+reconciled — the check reported a mismatch that was its own arithmetic.
+
+---
+
 ### BUG-012 · Two stray empty client rows
 **OPEN** · low priority
 

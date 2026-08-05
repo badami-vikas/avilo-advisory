@@ -106,11 +106,12 @@ describe("evaluateFormulas", () => {
     expect(result.metrics.get("gross_margin_pct")?.value).toBe(40);
     expect(result.metrics.get("net_operating_income")?.value).toBe(30_000);
     expect(result.metrics.get("noi_margin_pct")?.value).toBe(15);
-    expect(result.metrics.get("days_cash_on_hand")?.value).toBeCloseTo(
-      // A 30-day month, matching DSO/DPO — the P&L column is one month, not a year.
-      85_000 / ((120_000 + 50_000) / 30),
-      6,
-    );
+    // With no trailing history supplied, a trailing window degrades to this period's own
+    // value, so the headline and its point-in-time twin agree. A 30-day month, matching
+    // DSO/DPO — the P&L column is one month, not a year.
+    const pointInTime = 85_000 / ((120_000 + 50_000) / 30);
+    expect(result.metrics.get("days_cash_on_hand")?.value).toBeCloseTo(pointInTime, 6);
+    expect(result.metrics.get("days_cash_on_hand_point")?.value).toBeCloseTo(pointInTime, 6);
   });
 
   it("reports missing leaf inputs instead of yielding NaN", () => {
@@ -174,8 +175,11 @@ describe("requiredAccounts — the derived checklist", () => {
   });
 
   it("shrinks when a formula is deactivated", () => {
+    // Both the headline and its point-in-time twin read bs.cash, so both have to go.
     const withoutCash = specs.map((f) =>
-      f.id === "days_cash_on_hand" ? { ...f, active: false } : f,
+      f.id === "days_cash_on_hand" || f.id === "days_cash_on_hand_point"
+        ? { ...f, active: false }
+        : f,
     );
     expect(requiredAccounts(withoutCash)).not.toContain("bs.cash");
   });

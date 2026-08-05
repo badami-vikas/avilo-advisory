@@ -26,11 +26,6 @@ export interface FormulaDef {
   sortOrder: number;
 }
 
-/**
- * Days Cash on Hand uses the corrected denominator agreed in the v9 review:
- * cash / ((COGS + overhead) / 365). The prototype originally shipped a different
- * denominator and it was explicitly corrected during the session.
- */
 export const SEED_FORMULAS: FormulaDef[] = [
   {
     id: "gross_profit",
@@ -66,51 +61,84 @@ export const SEED_FORMULAS: FormulaDef[] = [
     benchmark: { min: 10, note: "Below 10% leaves little room for reinvestment." },
     sortOrder: 40,
   },
+  /*
+    Liquidity: a stock over a rate.
+    ------------------------------------------------------------------------------
+    Each of these divides a point-in-time balance by a daily rate of activity, and the
+    rate is where two separate mistakes were made.
+
+    The first was the divisor. These used 365 while every P&L column is a single month,
+    so daily spend came out twelve times too small — a beta user reported 10,304 days of
+    runway. A 30-day month puts numerator and denominator on the same footing.
+
+    The second was the base, and it survived the first fix. One month is not a rate; it
+    is one observation. This client bills $380,881 in one month and $12,527 in another,
+    and their most recent month happened to carry the lowest operating spend of thirteen
+    — so days cash on hand read 54 days where a trailing three-month base reads 19.
+    Neither figure is wrong arithmetic. One of them is a coincidence.
+
+    Three months rather than twelve: long enough to survive one lumpy month, short enough
+    that a business genuinely running out of money is not reassured by last summer.
+
+    Each headline keeps a `_point` twin computing the same thing on the selected month
+    alone. It is not decoration — it is what makes the trailing figure auditable, and it
+    stays in the registry rather than being recomputed in a chart, so there is still one
+    definition of every number on the page (ADR-003).
+  */
   {
     id: "days_cash_on_hand",
-    /**
-     * A 30-day month, for exactly the reason spelled out below for DSO and DPO.
-     *
-     * This divided by 365, treating one month's cost of sales and overhead as if it were
-     * a year's. Every P&L column here is a single month, so daily spend came out roughly
-     * twelve times too small and the runway roughly twelve times too long — a beta user
-     * reported 10,304 days. The numerator is a point-in-time balance and the denominator
-     * is one month's activity; both have to be put on the same footing.
-     */
     label: "Days cash on hand",
-    expression: "bs.cash / ((pl.cogs + pl.overhead) / 30)",
+    expression: "bs.cash / ((avg3.pl.cogs + avg3.pl.overhead) / 30)",
     unit: "days",
     description:
-      "Total cash in bank accounts divided by average daily operating spend, taken from one month's cost of sales and overhead over a 30-day month.",
+      "Total cash in bank accounts divided by average daily operating spend, taken from the trailing three months of cost of sales and overhead over a 30-day month.",
     benchmark: { min: 30, note: "Under 30 days of runway is a liquidity risk." },
     sortOrder: 50,
   },
-  /**
-   * Collection and payment timing.
-   *
-   * Both use a 30-day month rather than 365/12, because the numerator is a
-   * point-in-time balance from an ageing report and the denominator is a single
-   * month's activity from the P&L. Mixing a monthly figure with an annual divisor is
-   * the kind of unit mismatch that produces a plausible-looking number that is wrong
-   * by a factor of twelve.
-   */
+  {
+    id: "days_cash_on_hand_point",
+    label: "Days cash on hand (this month)",
+    expression: "bs.cash / ((pl.cogs + pl.overhead) / 30)",
+    unit: "days",
+    description:
+      "The same calculation on the selected month's spend alone. Shown beside the headline so the effect of an unusual month is visible rather than hidden.",
+    sortOrder: 51,
+  },
   {
     id: "dso",
     label: "Days sales outstanding (DSO)",
-    expression: "ar.total / pl.revenue * 30",
+    expression: "ar.total / avg3.pl.revenue * 30",
     unit: "days",
     description:
-      "Average days to collect. Outstanding receivables divided by one month's revenue.",
+      "Average days to collect. Outstanding receivables divided by trailing three-month average revenue.",
     benchmark: { max: 45, note: "Over 45 days means cash is sitting in customers' hands." },
     sortOrder: 60,
   },
   {
+    id: "dso_point",
+    label: "Days sales outstanding (this month)",
+    expression: "ar.total / pl.revenue * 30",
+    unit: "days",
+    description:
+      "The same calculation on the selected month's revenue alone. A wide gap against the headline means the month was not typical.",
+    sortOrder: 61,
+  },
+  {
     id: "dpo",
     label: "Days payable outstanding (DPO)",
+    expression: "ap.total / ((avg3.pl.cogs + avg3.pl.overhead)) * 30",
+    unit: "days",
+    description:
+      "Average days taken to pay suppliers. Outstanding payables divided by trailing three-month average operating spend.",
+    sortOrder: 70,
+  },
+  {
+    id: "dpo_point",
+    label: "Days payable outstanding (this month)",
     expression: "ap.total / ((pl.cogs + pl.overhead)) * 30",
     unit: "days",
     description:
-      "Average days taken to pay suppliers. Outstanding payables divided by one month's operating spend.",
-    sortOrder: 70,
+      "The same calculation on the selected month's operating spend alone.",
+    sortOrder: 71,
   },
 ];

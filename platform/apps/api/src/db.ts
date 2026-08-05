@@ -66,13 +66,82 @@ export function seedReferenceData(db: Db): void {
         .run();
     }
 
+    /*
+      Every expression this application has ever shipped for a formula, most recent last.
+
+      A stored expression matching one of these is a definition the user inherited and
+      never edited, so replacing it is a correction. Anything else is theirs. Append here
+      whenever a seed expression changes — the list is the upgrade path.
+    */
+    const SUPERSEDED_EXPRESSIONS: Record<string, string[]> = {
+      days_cash_on_hand: [
+        "bs.cash / ((pl.cogs + pl.overhead) / 365)",
+        "bs.cash / ((pl.cogs + pl.overhead) / 30)",
+      ],
+      dso: ["ar.total / pl.revenue * 30", "ar.total / pl.revenue * 365"],
+      dpo: [
+        "ap.total / ((pl.cogs + pl.overhead)) * 30",
+        "ap.total / ((pl.cogs + pl.overhead)) * 365",
+      ],
+    };
+
     for (const formula of SEED_FORMULAS) {
       const existing = tx
-        .select({ id: schema.formulas.id })
+        .select({
+          id: schema.formulas.id,
+          expression: schema.formulas.expression,
+          version: schema.formulas.version,
+        })
         .from(schema.formulas)
         .where(eq(schema.formulas.id, formula.id))
         .all();
-      if (existing.length > 0) continue;
+
+      /*
+        Upgrade a definition the user has never touched.
+
+        Seeding used to skip any formula that already existed, which meant a corrected
+        expression only ever reached a *fresh* database. The days-cash-on-hand divisor was
+        fixed from 365 to 30 and shipped, and every beta machine kept the broken formula,
+        because seeding is the only path a definition travels and that path was closed.
+        Exactly the failure mode CLAUDE.md warns about: a fresh database is not a test.
+
+        Superseded expressions are listed rather than blind-overwriting, so a formula the
+        user has edited themselves is left alone — an edit is a decision with history
+        (ADR-003), not something a release quietly reverts.
+      */
+      const current = existing[0];
+      if (current) {
+        const superseded = SUPERSEDED_EXPRESSIONS[formula.id] ?? [];
+        const untouched = superseded.includes(current.expression.trim());
+        if (current.expression.trim() === formula.expression.trim() || !untouched) continue;
+
+        const nextVersion = current.version + 1;
+        tx.update(schema.formulas)
+          .set({
+            expression: formula.expression,
+            label: formula.label,
+            description: formula.description,
+            benchmark: formula.benchmark ? JSON.stringify(formula.benchmark) : null,
+            unit: formula.unit,
+            sortOrder: formula.sortOrder,
+            version: nextVersion,
+          })
+          .where(eq(schema.formulas.id, formula.id))
+          .run();
+
+        tx.insert(schema.formulaVersions)
+          .values({
+            id: `${formula.id}@${nextVersion}`,
+            formulaId: formula.id,
+            version: nextVersion,
+            expression: formula.expression,
+            author: "system",
+            note: "Corrected definition shipped with the application",
+          })
+          .onConflictDoNothing()
+          .run();
+        continue;
+      }
 
       tx.insert(schema.formulas)
         .values({

@@ -46,7 +46,8 @@ export interface IntegrityFinding {
     | "ar_disagrees_with_ageing"
     | "ap_disagrees_with_ageing"
     | "ageing_buckets_disagree_with_total"
-    | "gross_profit_disagrees";
+    | "gross_profit_disagrees"
+    | "period_window_mismatch";
   message: string;
   /** How far apart the two figures are, in currency units. */
   delta: number;
@@ -170,4 +171,96 @@ export function checkIntegrity(values: Amounts): IntegrityFinding[] {
   }
 
   return findings;
+}
+
+/* ------------------------------------------------- statement articulation */
+
+export interface AlignmentResult {
+  /** Months of P&L, ending at the balance sheet date, that reconcile to its Net Income. */
+  matchedMonths: number | null;
+  /** Months of P&L actually imported and ending at that date. */
+  importedMonths: number;
+  /** Balance sheet Net Income less the P&L sum over `importedMonths`. */
+  deltaOverImported: number;
+  finding: IntegrityFinding | null;
+}
+
+/**
+ * Check that the imported P&L covers the same window the balance sheet is reporting.
+ *
+ * A balance sheet's Net Income line is the fiscal year to date. A P&L export is whatever
+ * range someone happened to select. Nothing forces them to agree, and when they disagree
+ * the dashboard shows two irreconcilable answers to "did this business make money" with
+ * no indication that they are measuring different things — one real client read +$275,000
+ * over thirteen months against −$63,953 over six.
+ *
+ * The method is the articulation between the statements: retained earnings move by net
+ * income, so summing monthly P&L net income backwards from the balance sheet date must
+ * reach its Net Income figure at *some* number of months. The window that reconciles is
+ * the fiscal year, and if it is not the window that was imported, that is worth saying.
+ *
+ * `monthlyNetIncome` runs oldest to newest and must end at the balance sheet's date.
+ */
+export function checkPeriodAlignment(
+  balanceSheetNetIncome: number | null | undefined,
+  monthlyNetIncome: { period: string; value: number }[],
+): AlignmentResult {
+  const importedMonths = monthlyNetIncome.length;
+
+  if (
+    typeof balanceSheetNetIncome !== "number" ||
+    !Number.isFinite(balanceSheetNetIncome) ||
+    importedMonths === 0
+  ) {
+    return {
+      matchedMonths: null,
+      importedMonths,
+      deltaOverImported: 0,
+      finding: null,
+    };
+  }
+
+  // A month of P&L is rarely exact to the cent against a balance sheet — rounding, and
+  // the odd journal posted straight to equity. A dollar a month is generous but still
+  // far tighter than the multi-month mismatch this exists to catch.
+  const tolerance = (months: number) => Math.max(1, months);
+
+  let running = 0;
+  let matchedMonths: number | null = null;
+  let deltaOverImported = balanceSheetNetIncome;
+
+  for (let months = 1; months <= importedMonths; months += 1) {
+    running += monthlyNetIncome[importedMonths - months]!.value;
+    if (months === importedMonths) deltaOverImported = balanceSheetNetIncome - running;
+    if (
+      matchedMonths === null &&
+      Math.abs(balanceSheetNetIncome - running) <= tolerance(months)
+    ) {
+      matchedMonths = months;
+    }
+  }
+
+  if (matchedMonths === importedMonths) {
+    return { matchedMonths, importedMonths, deltaOverImported, finding: null };
+  }
+
+  const message =
+    matchedMonths === null
+      ? `The balance sheet reports net income of ${money(balanceSheetNetIncome)} for its ` +
+        `fiscal year to date, and no run of imported P&L months adds up to it — the ` +
+        `${importedMonths} months imported total ${money(balanceSheetNetIncome - deltaOverImported)}. ` +
+        `The two statements are describing different periods, or a row is mapped to the ` +
+        `wrong section. Figures that mix them cannot be compared.`
+      : `The balance sheet's fiscal year to date is ${matchedMonths} month` +
+        `${matchedMonths === 1 ? "" : "s"}, but ${importedMonths} months of P&L are ` +
+        `imported. Its net income of ${money(balanceSheetNetIncome)} reconciles to the ` +
+        `last ${matchedMonths} months only. Year-to-date figures taken from the P&L ` +
+        `cover a longer window than the balance sheet does, so the two will not agree.`;
+
+  return {
+    matchedMonths,
+    importedMonths,
+    deltaOverImported,
+    finding: { code: "period_window_mismatch", delta: deltaOverImported, message },
+  };
 }
