@@ -24,6 +24,7 @@ import {
 } from "../src/app/report/layout.js";
 import { visibleColumns, defaultViewConfig, type ColumnSpec } from "@avilo/tables";
 import { NeedsData } from "../src/app/dashboard/parts.js";
+import { Sparkline } from "../src/app/dashboard/charts.js";
 import { UploadProvider } from "../src/app/components/upload-context.js";
 
 // `globals: false` keeps the vitest API explicit, which also means testing-library's
@@ -373,5 +374,59 @@ describe("an empty section is a way in, not a dead end", () => {
     // control that swallows a click is worse than a sentence.
     expect(screen.queryByRole("button")).toBeNull();
     expect(screen.getByText("No customer revenue imported")).toBeTruthy();
+  });
+});
+
+/**
+ * Sparklines were drawing conclusions the card was simultaneously disclaiming in words.
+ *
+ * A card reading "no comparison · Not enough history" still showed a confident downward
+ * slope, and the picture is what people believe. Two causes: two readings can only be one
+ * straight segment, and the nulls were filtered out before positioning, so two balance
+ * sheets a year apart drew exactly like two consecutive months.
+ */
+describe("Sparkline draws only what was measured", () => {
+  const paths = (container: HTMLElement) =>
+    [...container.querySelectorAll("path")].map((p) => p.getAttribute("d") ?? "");
+
+  it("draws nothing for fewer than three readings", () => {
+    const { container } = render(<Sparkline values={[100, 60]} width={100} height={20} />);
+    expect(container.querySelector("svg")).toBeNull();
+  });
+
+  it("reserves its space so the card does not change height", () => {
+    const { container } = render(<Sparkline values={[100]} width={100} height={20} />);
+    const placeholder = container.firstElementChild as HTMLElement;
+    expect(placeholder.style.width).toBe("100px");
+    expect(placeholder.style.height).toBe("20px");
+  });
+
+  it("positions a reading by its month, not by its rank among readings", () => {
+    // Two readings a year apart, with a third to clear the minimum. The last reading must
+    // land at the right-hand edge and the first at the left — not bunched together.
+    const values = [10, null, null, null, null, null, null, null, null, null, null, 20, 30];
+    const { container } = render(<Sparkline values={values} width={120} height={20} />);
+    const d = paths(container).join(" ");
+
+    // The pair of adjacent months is a line, at the right-hand end where they belong.
+    expect(d).toContain("M110.0,");
+    expect(d).toContain("L120.0,");
+    // The eleven empty months are a gap, not a straight run from the first reading.
+    expect(d).not.toMatch(/M0\.0,[\d.]+ L110\.0,/);
+    // The lone reading is still shown — as a point at its own month, not as a trend.
+    const dot = container.querySelector("circle");
+    expect(dot?.getAttribute("cx")).toBe("0");
+  });
+
+  it("does not shade an interval it never measured", () => {
+    const gapped = render(
+      <Sparkline values={[10, null, 20, 30]} width={100} height={20} />,
+    );
+    // Stroke only: no closed area path.
+    expect(paths(gapped.container).some((d) => d.endsWith("Z"))).toBe(false);
+    cleanup();
+
+    const solid = render(<Sparkline values={[10, 20, 30]} width={100} height={20} />);
+    expect(paths(solid.container).some((d) => d.endsWith("Z"))).toBe(true);
   });
 });

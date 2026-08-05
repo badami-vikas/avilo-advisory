@@ -1,6 +1,6 @@
 # Progress
 
-**v1.6.0** — shipping to a first beta user.
+**v1.6.1** — shipping to a first beta user.
 
 ## Done
 
@@ -40,6 +40,9 @@
 | No CSP on loopback server (BUG-013) | low while local-only |
 | Two stray empty client rows (BUG-012) | low |
 | Service-line mapping for revenue/COGS | feature request |
+| No referral report in the reference set — `ops.referral_total` never populates | **blocked on data** |
+| Transaction Detail by Account misclassifies (BUG-024) | medium |
+| Only one balance sheet — every balance-sheet metric is a single point | **blocked on data** |
 
 ## Windows install and uninstall
 
@@ -53,4 +56,4 @@ Three changes in 1.6.0, none of them verified on Windows by us:
 
 ## Verification budget
 
-242 tests (158 domain + 25 API + 59 web) · 6 packages typecheck · parsers validated against the real client exports in `reference/Reporting data`, asserting against each report's own printed totals rather than against a row count.
+246 tests (158 domain + 25 API + 63 web) · 6 packages typecheck · parsers validated against the real client exports in `reference/Reporting data`, asserting against each report's own printed totals rather than against a row count.

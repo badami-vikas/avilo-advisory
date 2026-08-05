@@ -260,6 +260,17 @@ export function Donut({
  * strip alone, and seven canvases with their own animation loops to draw seven polylines
  * is a waste of a frame budget that the rest of the page needs.
  */
+/**
+ * Fewer readings than this and no line is drawn.
+ *
+ * Two readings can only ever be one straight segment, and a straight segment reads as a
+ * trend no matter how it is coloured. That is how a card came to say "no comparison" and
+ * "Not enough history" in words while showing a confident decline in pictures — and the
+ * picture is what people believe. Three is the fewest that can show a shape rather than
+ * merely a direction.
+ */
+const MIN_READINGS = 3;
+
 export function Sparkline({
   values,
   tone = "#1570ef",
@@ -271,25 +282,66 @@ export function Sparkline({
   width?: number;
   height?: number;
 }) {
-  const points = values.filter((v): v is number => v !== null && v !== undefined);
-  if (points.length < 2) {
+  const readings = values.filter((v): v is number => v !== null && v !== undefined);
+  // The empty div rather than null: the card's height must not change with its data.
+  if (readings.length < MIN_READINGS) {
     return <div style={{ width, height }} aria-hidden />;
   }
 
-  const min = Math.min(...points);
-  const max = Math.max(...points);
+  const min = Math.min(...readings);
+  const max = Math.max(...readings);
   // A flat series has no range to scale against; draw it down the middle rather than
   // dividing by zero and sending every point to NaN.
   const span = max - min || 1;
-  const step = width / (points.length - 1);
+  const step = values.length > 1 ? width / (values.length - 1) : width;
 
-  const path = points
-    .map((value, index) => {
-      const x = index * step;
-      const y = height - ((value - min) / span) * height;
-      return `${index === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`;
-    })
-    .join(" ");
+  /*
+    Position by index in the SERIES, not in the surviving readings.
+
+    Filtering the nulls out first and then spacing what was left evenly meant two balance
+    sheets a year apart drew exactly like two consecutive months — a smooth twelve-month
+    decline that was really two dots and a guess about everything between them. A month
+    with no reading is now a gap in the line, which is what it is.
+  */
+  const segments: string[] = [];
+  const dots: { x: number; y: number }[] = [];
+  let current: { x: number; y: number }[] = [];
+
+  const flush = () => {
+    // A reading with no neighbour has no line to be part of. Drawn as a dot rather than
+    // dropped: three balance sheets a quarter apart are three real measurements, and
+    // showing them as points says so without inventing the months between.
+    if (current.length > 1) {
+      segments.push(
+        current
+          .map((p, i) => `${i === 0 ? "M" : "L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`)
+          .join(" "),
+      );
+    } else if (current.length === 1) {
+      dots.push(current[0]!);
+    }
+    current = [];
+  };
+
+  values.forEach((value, index) => {
+    if (value === null || value === undefined) {
+      flush();
+      return;
+    }
+    current.push({
+      x: index * step,
+      y: height - ((value - min) / span) * height,
+    });
+  });
+  flush();
+
+  if (segments.length === 0 && dots.length === 0) {
+    return <div style={{ width, height }} aria-hidden />;
+  }
+
+  // The area fill only means something under an unbroken line; under a gapped one it
+  // shades intervals that were never measured.
+  const unbroken = segments.length === 1 && readings.length === values.length;
 
   return (
     <svg
@@ -300,13 +352,27 @@ export function Sparkline({
       aria-hidden
       style={{ overflow: "visible" }}
     >
-      <path
-        d={`${path} L${width},${height} L0,${height} Z`}
-        fill={tone}
-        opacity={0.08}
-        stroke="none"
-      />
-      <path d={path} fill="none" stroke={tone} strokeWidth={1.5} strokeLinejoin="round" />
+      {unbroken ? (
+        <path
+          d={`${segments[0]} L${width},${height} L0,${height} Z`}
+          fill={tone}
+          opacity={0.08}
+          stroke="none"
+        />
+      ) : null}
+      {segments.map((segment, index) => (
+        <path
+          key={index}
+          d={segment}
+          fill="none"
+          stroke={tone}
+          strokeWidth={1.5}
+          strokeLinejoin="round"
+        />
+      ))}
+      {dots.map((dot, index) => (
+        <circle key={`dot-${index}`} cx={dot.x} cy={dot.y} r={1.6} fill={tone} />
+      ))}
     </svg>
   );
 }

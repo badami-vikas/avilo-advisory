@@ -229,6 +229,25 @@ Mapping a row removed it from the "no matching account" list. The mapping is per
 
 ---
 
+### BUG-023 · Sparklines drew trends the card was disclaiming in words
+**RESOLVED** 2026-08-05 · v1.6.1
+
+A KPI card showed "no comparison" and "Not enough history" above a confident downward slope. Two independent causes in `Sparkline`:
+
+1. Two readings were enough to draw. Two readings are one straight segment, which can only look like a trend.
+2. Nulls were filtered out *before* x-positions were computed, so position was rank-among-readings rather than index-in-series. Two balance sheets a year apart rendered identically to two consecutive months.
+
+**Fix.** Minimum three readings; position by series index; gaps break the path; an isolated reading is a dot; the area fill only under an unbroken line. Covered by four assertions in `apps/web/test/regressions.test.tsx`, including the exact x-coordinates.
+
+---
+
+### BUG-024 · Transaction Detail by Account misclassifies as Sales by Customer
+**OPEN** · medium
+
+`classifyGrid` scores `reference/Reporting data/…Transaction Detail by Account (1).xlsx` as `sales_by_customer_l12m` at **0.524**. It is low enough to raise `needsConfirmation`, so the dialog asks — but the offered answer is wrong, and accepting it would write customer facts from a transaction register. The app has no parser for this report and should say so rather than propose the nearest match.
+
+---
+
 ### BUG-012 · Two stray empty client rows
 **OPEN** · low priority
 

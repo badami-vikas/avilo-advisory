@@ -61,7 +61,7 @@ platform/apps/{web,api,desktop}   platform/modules/avilo   platform/packages/tab
 
 ```bash
 pnpm dev                 # web + api
-pnpm test                # 242 tests
+pnpm test                # 246 tests
 pnpm typecheck           # 6 packages
 pnpm --filter @avilo/web build && pnpm app:win   # installer — build web FIRST
 ```
@@ -70,6 +70,6 @@ Data lives in `~/Documents/Bridge/Avilo Advisory/` (`.data/avilo.sqlite` + impor
 
 ## Status
 
-v1.6.0. Shipping to a first beta user. Windows installer is **unsigned** — SmartScreen will warn, and no build of this app has yet been launched on Windows by us (BUG-016 was fixed in 1.4.2 and remains unconfirmed on real hardware).
+v1.6.1. Shipping to a first beta user. Windows installer is **unsigned** — SmartScreen will warn, and no build of this app has yet been launched on Windows by us (BUG-016 was fixed in 1.4.2 and remains unconfirmed on real hardware).
 
 The first beta round returned six data-correctness bugs, all fixed and all validated against the real client exports in `reference/Reporting data` — every parser assertion is against the report's own printed total, never a row count. Open items in [docs/wiki/progress.md](docs/wiki/progress.md).

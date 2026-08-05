@@ -128,6 +128,19 @@ Format: **ADR-nnn · date · decision** → why · rejected · consequence.
 
 ---
 
+### ADR-029 · A sparkline may not out-claim the words beside it
+**Date.** 2026-08-05
+
+**Decision.** No line below three readings; readings positioned by their month rather than by rank; gaps drawn as gaps; an isolated reading drawn as a dot; the area fill only under an unbroken line.
+
+**Why.** A card read "no comparison · Not enough history" and showed a confident decline. Both halves were the component's fault. Two readings can only be one straight segment, and a straight segment reads as a trend however it is coloured. Separately, the nulls were filtered out before the x-positions were computed, so two balance sheets a year apart drew exactly like two consecutive months — a smooth twelve-month slope that was two dots and an assumption.
+
+**Rejected.** A flat line when there is no comparison. Flat is not neutral; it asserts stability, which is a claim about months that were never measured. Nothing is the honest shape of nothing.
+
+**Consequence.** Same rule as ADR-023 and the fabrication guard, applied to pixels: the picture may not assert more than the figures support.
+
+---
+
 ## AI
 
 ### ADR-010 · The app must work with no model configured
