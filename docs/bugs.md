@@ -330,6 +330,21 @@ The key sits unencrypted in the user's local SQLite. Reasonable while everything
 
 ---
 
+### BUG-028 · Packaged app can transiently fail to open its database if another process holds it
+**LIKELY EXPLAINED, not fully proven** · 2026-08-05
+
+**Symptom.** v1.9.0 dmg, freshly built and asar-verified to carry the new code, showed "Avilo Advisory could not start — Module 'avilo' failed to start: unable to open database file" on first launch.
+
+**Investigation.** The packaged app and `pnpm dev` (`apps/api/src/server.ts`) both resolve to the *same* real file when it already exists: `module.ts`'s `legacyDatabase()` adopts `~/Documents/Bridge/Avilo Advisory/.data/avilo.sqlite` ahead of the module-host's own per-module `dataDir`, and `defaultPaths()` used by `pnpm dev` has no override — so a dev server left running against this same real database, and the packaged app launched while it is still alive, are two processes opening one SQLite file at once. Relaunched five times after confirming no other process held the file (`lsof` clean) — four launches succeeded immediately (helper processes spawned, `[avilo] database …` logged); one, launched moments after `pkill`-ing a prior instance rather than letting it quit through the app's own 2.5s graceful-close path, failed the same way with no helper processes spawned. Both point at the same mechanism: an ungraceful second opener while a WAL checkpoint is in flight.
+
+**Not yet proven root cause, because:** the exact moment of the user's original failure was not observed directly — this reconstructs the mechanism from a dev server this session's own `preview_start` had running against the identical file, plus a reproduced-once transient failure under an analogous ungraceful-restart condition.
+
+**Standing guidance until this is fully closed.** Quit any other running copy of the app, and stop `pnpm dev` before launching a packaged build against the real database — the two should never point at the same file concurrently. A retry after confirming no other process holds the file has succeeded every time so far.
+
+**If it recurs** with no dev server and no other copy running, that rules out this explanation and the real cause is still open — capture the exact steps and get a Console.app crash report from the moment of failure.
+
+---
+
 ## Environment
 
 ### BUG-015 · Browser-pane verification is unreliable for pointer-driven UI
