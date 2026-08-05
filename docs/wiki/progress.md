@@ -1,6 +1,6 @@
 # Progress
 
-**v1.9.2** — shipping to a first beta user. macOS ships arm64 only for now (BUG-028). The assistant now **acts**: it applies a configuration change itself and offers Undo, instead of describing a proposal someone else has to approve (ADR-038). It also reads the open client's real data — imported periods, missing required accounts, accounts that never received a fact — so "what is missing for this client" is answered from the books rather than guessed. The report and the assistant scroll independently.
+**v1.9.3** — shipping to a first beta user. macOS ships arm64 only for now (BUG-028). The assistant **acts** on the four things it can configure — formulas, mappings, prompts, default report layout — and refuses everything else out loud. 1.9.2 shipped it claiming to have added UI buttons and silently hiding a report section it was never asked about (BUG-029 to BUG-032); the server now contradicts a claim that does not match what it wrote (ADR-040), and every applied change is described in words the user can check. It also reads the open client's real data, and the report and assistant scroll independently.
 
 ## Done
 
@@ -59,6 +59,6 @@ Three changes in 1.6.0, none of them verified on Windows by us:
 
 ## Verification budget
 
-297 tests (168 domain + 41 API + 63 web + 17 core, up from 294 in 1.9.1 for direct blueprint apply, its refuse-and-write-nothing path, and the layout-undo regression) · 7 packages typecheck · parsers validated against the real client exports in `reference/Reporting data`, asserting against each report's own printed totals rather than against a row count.
+300 tests (168 domain + 44 API + 63 web + 17 core, up from 297 in 1.9.2 for the empty-diff guard and the false-claim detector) · 7 packages typecheck · parsers validated against the real client exports in `reference/Reporting data`, asserting against each report's own printed totals rather than against a row count.
 
-The 1.9.2 assistant changes were verified live against the real database, not only by unit test: asked "what data points are missing for the active client?" on Phoenix Restoration Co. it named the client, its 12 imported periods, and the three canonical accounts that have never received a fact (`pl.other_income`, `pl.other_expense`, `bs.net_income`) — where the same question in 1.9.1 returned a generic list. Asked to hide a report section it applied the change (confirmed in `app_settings.report_layout_default`), and Undo restored the previous layout (confirmed in the same row). That round-trip is what caught ADR-039.
+The 1.9.3 assistant was verified live against the real database, in one session, both ways: "I want the undo button on header of avilo assistant" is refused with nothing written (no layout row, no proposal), and "Hide the top jobs section" applies, shows "Report layout — hid top-jobs", and undoes. In between, the model was caught claiming a layout change it had not made — the red "Nothing was actually changed" correction is a screenshot of the real failure, not a mock. That round-trip is what produced ADR-039 and ADR-040.

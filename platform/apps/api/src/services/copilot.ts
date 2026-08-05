@@ -24,6 +24,7 @@
 // no tool call wired to any of those, only to configuration.
 
 import { eq } from "drizzle-orm";
+import type { BlueprintChange, LayoutOverride } from "@avilo/core";
 import { ACCOUNTS_BY_ID, CANONICAL_ACCOUNTS } from "@avilo/module";
 import { getDb, schema } from "../db.js";
 import { callGroq, groqConfig } from "./ai.js";
@@ -42,26 +43,43 @@ export interface CopilotReply {
   appliedChanges?: string[];
   /** Activating this proposal restores the configuration as it stood before. */
   revertId?: string;
+  /** The model emitted a document identical to the live configuration; nothing was written. */
+  noChange?: true;
+  /** The reply claimed to have changed something, and nothing was changed. Shown as a correction. */
+  falseClaim?: true;
   /** Present instead when the candidate failed validation; nothing was written. */
   proposalErrors?: { path: string; message: string }[];
 }
 
 const SYSTEM_PROMPT = `You are the Avilo Advisory in-app assistant.
 
-You configure this app. When the user asks for a change you can make, MAKE IT — do not
-describe what you could propose, do not ask them to review a proposal, do not explain that
-a person has to activate it. Emit the blueprint block below and the change is applied
-immediately, with an Undo button shown to the user. Answer as someone who just did the
-thing, not as someone recommending it.
+You configure this app. You have exactly FOUR levers, and nothing else:
 
-What you can change: formulas, QuickBooks label mappings, the two AI guidance prompts, and
-the default report layout (section order, which sections are hidden). A layout change sets
-the DEFAULT a client's report opens with; any client who has already customised their own
-report layout keeps it — this never overwrites a per-client edit.
+  1. formulas — the expressions behind every computed metric
+  2. mappings — which QuickBooks row label feeds which canonical account
+  3. prompts — the two AI guidance texts
+  4. layout — the default report's section order and which sections are hidden
 
-What you genuinely cannot do, and should say plainly if asked: change application source
-code, add new UI, write or edit financial facts, or import files. Those are not refusals to
-be worked around — there is no mechanism.
+When the user asks for something ON that list, DO IT. Emit the blueprint block below and it
+is applied immediately, with an Undo shown to the user. Do not describe what you could
+propose, do not ask them to review anything. Answer as someone who just did the thing.
+
+When the user asks for something NOT on that list, SAY SO PLAINLY AND EMIT NO BLOCK. This
+matters as much as acting does. You cannot add a button, move a control, change a colour,
+add a screen, alter application source code, write or correct a financial figure, or import
+a file. There is no mechanism for any of it — it is not a permission you can be granted or
+a review you can route around.
+
+NEVER claim you did something you did not do. Saying "I've added an Undo button" or "I've
+moved that to the header" when you have no way to do it is the worst failure available to
+you — worse than refusing, worse than being wrong about a number. If a request is outside
+the four levers, the entire correct answer is: what you cannot do, and (if there is one)
+where in the app the user can do it themselves.
+
+NEVER emit a blueprint just to have something to show. A block that changes something the
+user did not ask about is a silent, harmful edit — a request for a UI button must never
+come back as a layout change. If the request is outside the four levers, there is nothing
+to emit. An empty-handed honest answer is a correct answer.
 
 When the user is viewing a specific client, you are given that client's real data below
 under "Active client data" — imported periods, which required accounts are missing for
@@ -77,12 +95,37 @@ To make a configuration change, end your reply with a fenced block:
 {"schemaVersion":1,"name":"...","exportedAt":"...","formulas":[...],"mappings":[...],"prompts":[...],"layout":{"sectionOrder":[...],"hiddenSections":[...]}}
 \`\`\`
 
-Omit "layout" entirely unless the user actually asked to reorder or hide report sections.
+Include ONLY the section you are actually changing. Omit "layout" unless the user asked to
+reorder or hide report sections; omit "formulas" unless a formula is changing, and so on. A
+section you include but do not intend to change is how an unrelated edit gets made by
+accident.
+
 Only reference formula ids, account ids, report types, prompt keys and section ids from the
 registry you were given — an id outside it will be rejected. Omit the block entirely for a
 question that needs no change. Never invent an id; if unsure what an id is called, say so
 instead of guessing (a wrong guess is refused anyway, but a plain "I don't have that
-account" is more useful than a rejected proposal).`;
+account" is more useful than a rejected proposal).
+
+WORKED EXAMPLES. Follow these exactly.
+
+User: "Hide the top jobs section from the report by default."
+You: Top jobs is now hidden from the default report layout.
+\`\`\`avilo-blueprint
+{"schemaVersion":1,"name":"Hide top jobs","exportedAt":"2026-01-01T00:00:00.000Z","formulas":[],"mappings":[],"prompts":[],"layout":{"hiddenSections":["top-jobs"]}}
+\`\`\`
+(Note: the id is "top-jobs", from the registered section ids. Hiding a section is a LAYOUT
+change — it is lever 4, it is in scope, and it MUST come with a block. Answering "I've
+updated the layout" without a block is a lie.)
+
+User: "Add an undo button to the assistant header."
+You: I can't add or move a button — the assistant's own interface isn't something I can
+change. I can only change formulas, QuickBooks mappings, AI prompts, and the default report
+layout.
+(No block. Nothing here is one of the four levers.)
+
+User: "What's missing for this client?"
+You: [answer from the Active client data section]
+(No block. A question is not a change.)`;
 
 function buildContext(): string {
   const surface = registeredSurface();
@@ -156,6 +199,66 @@ function clientDataSummary(clientId: string): string {
   ].join("\n");
 }
 
+/**
+ * A change, in words a person can check against what they asked for.
+ *
+ * BUG-031 is the reason this exists rather than `${kind} ${section}: ${key}`. When the
+ * assistant hid a report section in response to a request about a button, the panel
+ * described it as "modify layout: layout" — technically accurate, and completely useless
+ * for noticing that something unrelated had just happened to the report. A change the user
+ * cannot read is a change the user cannot catch.
+ */
+function describeChange(change: BlueprintChange): string {
+  if (change.section === "layout") {
+    const before = (change.before ?? {}) as LayoutOverride;
+    const after = (change.after ?? {}) as LayoutOverride;
+    const wasHidden = new Set(before.hiddenSections ?? []);
+    const nowHidden = new Set(after.hiddenSections ?? []);
+    const hid = [...nowHidden].filter((s) => !wasHidden.has(s));
+    const shown = [...wasHidden].filter((s) => !nowHidden.has(s));
+
+    const parts: string[] = [];
+    if (hid.length > 0) parts.push(`hid ${hid.join(", ")}`);
+    if (shown.length > 0) parts.push(`un-hid ${shown.join(", ")}`);
+
+    const orderChanged =
+      JSON.stringify(before.sectionOrder ?? []) !== JSON.stringify(after.sectionOrder ?? []);
+    // Reordering is implied by hiding, so only call it out when it is the actual change.
+    if (orderChanged && parts.length === 0) parts.push("reordered the sections");
+
+    return `Report layout — ${parts.length > 0 ? parts.join("; ") : "changed"}`;
+  }
+
+  if (change.section === "formulas") {
+    const after = change.after as { expression?: string } | undefined;
+    const before = change.before as { expression?: string } | undefined;
+    if (change.kind === "add") return `Formula ${change.key} added: ${after?.expression ?? ""}`;
+    return `Formula ${change.key}: ${before?.expression ?? "?"} → ${after?.expression ?? "?"}`;
+  }
+
+  if (change.section === "mappings") {
+    const after = change.after as { accountId?: string } | undefined;
+    return `Mapping ${change.key} → ${after?.accountId ?? "?"}`;
+  }
+
+  return `Prompt ${change.key} rewritten`;
+}
+
+/**
+ * Does this reply claim to have changed something?
+ *
+ * The backstop for BUG-032. Prompting alone does not hold: told to act, the model will
+ * write "I've updated the default report layout" and emit no blueprint at all, or one that
+ * changes nothing. The prose is then the only thing the user sees, and it is false. So the
+ * server checks the claim against what it actually wrote, and when they disagree, the
+ * server wins — the reply is annotated with the truth rather than passed through.
+ *
+ * Deliberately loose: a false positive costs one redundant clarifying line under an answer
+ * that changed nothing anyway, while a false negative is an unchallenged lie.
+ */
+export const CLAIMS_AN_ACTION =
+  /\bI(?:'ve|\s+have)?\s+(?:just\s+)?(?:updated|changed|added|removed|hidden|hid|moved|set|configured|applied|modified|created|adjusted|reordered|renamed|enabled|disabled)\b/i;
+
 function extractBlueprintBlock(text: string): { reply: string; candidate: unknown | null } {
   const match = /```avilo-blueprint\s*([\s\S]*?)```/.exec(text);
   if (!match) return { reply: text.trim(), candidate: null };
@@ -193,7 +296,15 @@ export async function converse(history: ChatTurn[], clientId?: string): Promise<
   const raw = await callGroq(config, prompt, 1200);
   const { reply, candidate } = extractBlueprintBlock(raw);
 
-  if (candidate === null) return { text: reply || raw.trim() };
+  /*
+    No blueprint at all. Usually that is right — a question needs no change. But when the
+    reply also claims to have done something, the claim is false and the user has no way to
+    tell: there is no card, no diff, nothing to contradict the prose. Say so outright.
+  */
+  if (candidate === null) {
+    const text = reply || raw.trim();
+    return CLAIMS_AN_ACTION.test(text) ? { text, falseClaim: true } : { text };
+  }
 
   const summary = history[history.length - 1]?.text.slice(0, 120) ?? "Assistant change";
   const outcome = applyBlueprintDirectly("assistant", summary, candidate);
@@ -205,10 +316,20 @@ export async function converse(history: ChatTurn[], clientId?: string): Promise<
     };
   }
 
+  /*
+    The model emitted a document, but it matches what is already live. Nothing was written
+    and nothing is claimed — the reply text stands on its own. Without this the panel would
+    say "Change applied" over an empty diff (BUG-030).
+  */
+  if ("noChange" in outcome) {
+    const text = reply || raw.trim();
+    return CLAIMS_AN_ACTION.test(text) ? { text, falseClaim: true } : { text, noChange: true };
+  }
+
   return {
     text: reply || raw.trim(),
     appliedSummary: outcome.proposal.summary,
-    appliedChanges: outcome.proposal.diff.map((c) => `${c.kind} ${c.section}: ${c.key}`),
+    appliedChanges: outcome.proposal.diff.map(describeChange),
     revertId: outcome.revertId,
   };
 }

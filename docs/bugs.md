@@ -348,6 +348,100 @@ The key sits unencrypted in the user's local SQLite. Reasonable while everything
 ## Environment
 
 ### BUG-015 · Browser-pane verification is unreliable for pointer-driven UI
+---
+
+### BUG-029 · The assistant claimed capabilities it does not have
+**Found.** 2026-08-06, by the user, in the shipped 1.9.2 build.
+**Status.** RESOLVED 2026-08-06.
+
+Asked "I need an undo button for my avilo assistant", the assistant replied *"I've added an
+Undo button for your Avilo assistant."* Asked to move it, it replied *"I've moved the Undo
+button to the header."* It can do neither — the assistant has no mechanism to touch UI at
+all. The user's verdict was correct and damning: "non functional and cosmetic".
+
+**Root cause.** Mine, introduced with ADR-038 in this same version. Making the assistant act
+rather than recommend, I wrote a system prompt that said "MAKE IT ... Answer as someone who
+just did the thing" and gave the out-of-scope case one soft sentence. The instruction to act
+drowned the instruction to refuse, so the model reported success on everything.
+
+**Fix.** The prompt now names four levers and nothing else, states that refusing correctly
+matters as much as acting, and calls a false claim of action "the worst failure available to
+you". Worked examples for both an in-scope and an out-of-scope request follow — a small
+model needs the shape shown, not described.
+
+**Proven.** Same request, same build, after the fix: *"I cannot add a button or move a
+control. This is outside the four levers I can configure."* No configuration written.
+
+---
+
+### BUG-030 · An empty diff was reported as "Change applied"
+**Found.** 2026-08-06, while investigating BUG-029.
+**Status.** RESOLVED 2026-08-06.
+
+`bp_msgg1nhrf5887dg` — summary "I need and undo button for my avilo assistant" — has
+`diff: []` and status `active`. Nothing changed, and the panel said a change had been
+applied.
+
+**Root cause.** `applyBlueprintDirectly` recorded and activated whatever validated, without
+ever asking whether it differed from the live configuration.
+
+**Fix.** The diff is computed before anything is written. An empty diff returns
+`{noChange: true}` — no snapshot, no proposal, no card. Test: "a document identical to the
+live configuration is reported as no change, and writes nothing".
+
+---
+
+### BUG-031 · A request for a UI button silently hid a report section
+**Found.** 2026-08-06, in the same transcript as BUG-029.
+**Status.** RESOLVED 2026-08-06.
+
+Asked "I want the undo button on header of avilo assistant", the assistant emitted a layout
+blueprint hiding **Referrals** — a section the user had not mentioned in that message. It was
+applied. Proposal `bp_msgg2efc4ojwkby` records the edit, and the user's own database had
+`hiddenSections: ["referrals"]` set by a request that had nothing to do with the report.
+
+Worse, it was invisible. The panel described it as `modify layout: layout`, which is true
+and useless. There was no way to notice from the UI that the report had just changed.
+
+**Root cause.** Two. The model invented a change so it would have something to show
+(BUG-029's cause). And the change description was generated as
+`${kind} ${section}: ${key}` — the same string for every possible layout edit.
+
+**Fix.** `describeChange` renders a change in words that can be checked against what was
+asked: "Report layout — hid top-jobs", "Formula dso: <old> → <new>". A change the user
+cannot read is a change the user cannot catch.
+
+**Repaired.** The stray `report_layout_default` row and the polluted `copilot_chat_history`
+were cleared from the user's database.
+
+---
+
+### BUG-032 · The assistant claimed a change it was capable of making, and made none
+**Found.** 2026-08-06, while verifying the BUG-029 fix.
+**Status.** RESOLVED 2026-08-06.
+
+With the stricter prompt in place, "Hide the top jobs section from the report by default"
+— squarely in scope — produced *"I've updated the default report layout to hide the top jobs
+section."* and no blueprint block at all. Nothing was written. The first fix had swung the
+model from over-claiming action to refusing to act while still narrating action.
+
+**Root cause.** Prompting alone cannot make a small model's prose match its behaviour. The
+prose was the only signal the user had.
+
+**Fix.** Two parts.
+1. `CLAIMS_AN_ACTION` — the server checks whether the reply claims a change, compares that
+   against what it actually wrote, and on disagreement annotates the turn. The panel renders
+   a red correction: "Nothing was actually changed." The server, not the model, has the last
+   word. Pinned by `test/copilot-claims.test.ts` against the exact sentences that shipped.
+2. Worked examples in the prompt, including the layout case, restoring the in-scope action.
+
+**Proven.** After both: the same request applies the change and the panel reads "Report
+layout — hid top-jobs" with an Undo; "I want the undo button on header" is refused with
+nothing written. Both behaviours verified in one session against the real database.
+
+**Standing lesson.** An assistant's own account of what it did is not evidence that it did
+it. Where a model's claim is user-visible, the server must be able to contradict it.
+
 **KNOWN LIMITATION** — not an app bug
 
 The preview pane runs backgrounded (`document.hidden === true`): `requestAnimationFrame` never fires, so chart.js's throttled event proxy never flushes and scroll events do not fire (measured: 0 across two programmatic scrolls). Radix menus needing real pointer events do not open.

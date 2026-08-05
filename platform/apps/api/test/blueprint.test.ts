@@ -273,6 +273,22 @@ describe("blueprint propose/activate/reject", () => {
     expect(JSON.parse(layoutKey().value).hiddenSections).toEqual([]);
   });
 
+  it("a document identical to the live configuration is reported as no change, and writes nothing", async () => {
+    const { db, blueprint } = freshApi();
+
+    // BUG-030: a model told to act will sometimes emit a blueprint just to have something
+    // to show. Echoing the current configuration back is not a change and must not be
+    // recorded or announced as one.
+    const outcome = blueprint.applyBlueprintDirectly(
+      "assistant",
+      "Add an undo button",
+      blueprint.exportBlueprint("echo"),
+    );
+
+    expect(outcome).toEqual({ noChange: true });
+    expect(db.getDb().select().from(schema.blueprintProposals).all()).toHaveLength(0);
+  });
+
   it("applying directly writes nothing when the document references an unknown id", async () => {
     const { db, blueprint } = freshApi();
 

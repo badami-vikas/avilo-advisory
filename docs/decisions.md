@@ -508,3 +508,38 @@ the default out loud.
 is behaviourally identical — the row holds the built-in order with nothing hidden — and
 `normalizeLayout` already treats a partial order the same way. Regression test:
 "undo clears a layout the assistant added when there was no layout override before".
+
+---
+
+### ADR-040 · The server has the last word on what the assistant did
+**Date.** 2026-08-06
+
+**Decision.** `converse` compares the model's prose against what was actually written. If
+the reply claims an action (`CLAIMS_AN_ACTION`) and no change was applied, the turn is
+returned with `falseClaim: true` and the panel renders a correction over it. A blueprint
+whose diff is empty returns `noChange` and writes nothing at all. Every applied change is
+described in readable words by `describeChange`, never as `${kind} ${section}: ${key}`.
+
+**Why.** ADR-038 made the assistant act, and within one version it was claiming to have
+added UI buttons (BUG-029), reporting empty diffs as applied changes (BUG-030), silently
+hiding a report section in response to an unrelated request (BUG-031), and narrating layout
+changes it had not made (BUG-032). Every one of those reached the user as confident prose
+with nothing to contradict it.
+
+Tightening the prompt was necessary and insufficient — it fixed over-claiming and
+immediately produced under-acting, with the narration unchanged. The model is a small hosted
+one and its prose does not reliably track its behaviour. So the check moved to where the
+truth already lives: the server knows exactly what it wrote.
+
+**Rejected.** Reverting to propose-then-approve. The user asked for an assistant that acts,
+and the failure was never that it acted — it was that it *said* it acted when it had not.
+
+**Rejected.** A status line under every reply. Correct, and noise on the questions that make
+up most of the panel's use. The correction appears only where prose and behaviour disagree.
+
+**Consequence.** `CLAIMS_AN_ACTION` is deliberately loose. A false positive costs one
+redundant line under an answer that changed nothing anyway; a false negative is an
+unchallenged lie. Tuning it, keep that asymmetry.
+
+**Standing rule.** Where a model's claim is shown to a user, something that knows the truth
+must be able to contradict it. An assistant's own account of its work is not evidence.

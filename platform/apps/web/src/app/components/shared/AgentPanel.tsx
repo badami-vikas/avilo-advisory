@@ -27,6 +27,8 @@ interface ChatTurn {
   appliedSummary?: string;
   appliedChanges?: string[];
   revertId?: string;
+  noChange?: true;
+  falseClaim?: true;
   proposalErrors?: { path: string; message: string }[];
 }
 
@@ -214,6 +216,8 @@ export function AgentPanelBody({ collapsed, clientId }: { collapsed: boolean; cl
           appliedSummary: reply.appliedSummary,
           appliedChanges: reply.appliedChanges,
           revertId: reply.revertId,
+          noChange: reply.noChange,
+          falseClaim: reply.falseClaim,
           proposalErrors: reply.proposalErrors,
         },
       ]);
@@ -258,6 +262,19 @@ export function AgentPanelBody({ collapsed, clientId }: { collapsed: boolean; cl
             >
               {turn.text}
             </div>
+            {turn.falseClaim ? (
+              <div className="mt-2 rounded-lg border border-flag/40 bg-flag/5 p-2.5 text-[11.5px] leading-relaxed text-flag">
+                <span className="font-medium">Nothing was actually changed.</span> The reply
+                above says otherwise, but no configuration was written. The assistant can
+                only change formulas, QuickBooks mappings, AI prompts and the default report
+                layout — never the app's buttons, screens or figures.
+              </div>
+            ) : null}
+            {turn.noChange ? (
+              <p className="mt-1.5 text-[11px] text-ink-faint">
+                No configuration change was made.
+              </p>
+            ) : null}
             {turn.revertId ? (
               <AppliedCard
                 summary={turn.appliedSummary ?? ""}

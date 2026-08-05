@@ -270,9 +270,21 @@ export function applyBlueprintDirectly(
   author: string,
   summary: string,
   candidate: unknown,
-): { proposal: ProposalRecord; revertId: string } | { errors: { path: string; message: string }[] } {
+):
+  | { proposal: ProposalRecord; revertId: string }
+  | { noChange: true }
+  | { errors: { path: string; message: string }[] } {
   const { blueprint, errors } = validateBlueprint(candidate, registeredSurface());
   if (!blueprint) return { errors };
+
+  /*
+    A document that matches the live configuration is not a change, and must not be
+    reported as one. This is the guard for BUG-030: a model that has been told to act will
+    sometimes emit a blueprint simply to have something to show, and an empty diff shown as
+    "Change applied" teaches the user that the panel's claims mean nothing. Nothing is
+    recorded either — not the snapshot, not the proposal.
+  */
+  if (diffBlueprint(blueprint, currentConfiguration()).length === 0) return { noChange: true };
 
   /*
     An absent `layout` in a blueprint means "leave layout alone", not "clear it" — so a
