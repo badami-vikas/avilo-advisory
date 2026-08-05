@@ -1,11 +1,11 @@
 # Progress
 
-**v1.9.1** — shipping to a first beta user. macOS ships arm64 only for now (BUG-028); the assistant's header now shares one row with the app's own header instead of stacking a second one below it.
+**v1.9.2** — shipping to a first beta user. macOS ships arm64 only for now (BUG-028). The assistant now **acts**: it applies a configuration change itself and offers Undo, instead of describing a proposal someone else has to approve (ADR-038). It also reads the open client's real data — imported periods, missing required accounts, accounts that never received a fact — so "what is missing for this client" is answered from the books rather than guessed. The report and the assistant scroll independently.
 
 ## Done
 
 - Multi-client, multi-period fact store; formulas as data; override history
-- Right-panel AI chatbot (blueprint proposals — see below), same Groq key as row mapping and summaries. Chat history persists across a refresh; a blueprint may now also propose the app-wide default report layout (order/hidden sections), applied as a fallback beneath any client's own saved layout — see `docs/wiki/blueprint.md`
+- Right-panel AI chatbot (applies blueprint changes directly, with Undo — see below), same Groq key as row mapping and summaries. Chat history persists across a refresh; a blueprint may now also propose the app-wide default report layout (order/hidden sections), applied as a fallback beneath any client's own saved layout — see `docs/wiki/blueprint.md`
 - Import: Excel/CSV/PDF → one grid → six parsers; deterministic classification at 1.0
 - Label learning — teach once, never asked again; multi-select, and Undo
 - Report view, raw data view, PDF export, interactive dashboard
@@ -59,4 +59,6 @@ Three changes in 1.6.0, none of them verified on Windows by us:
 
 ## Verification budget
 
-294 tests (168 domain + 38 API + 63 web + 17 core, up from 289 in 1.8.0 for blueprint layout diff/apply and chat persistence) · 6 packages typecheck · parsers validated against the real client exports in `reference/Reporting data`, asserting against each report's own printed totals rather than against a row count. 1.9.0 installers (dmg ×2, exe) built and grepped via `asar extract-file` for `report_layout_default`/`copilot_chat_history` on both platforms — the packaged bundle carries the new code, not a stale one (BUG-010's standing rule).
+297 tests (168 domain + 41 API + 63 web + 17 core, up from 294 in 1.9.1 for direct blueprint apply, its refuse-and-write-nothing path, and the layout-undo regression) · 7 packages typecheck · parsers validated against the real client exports in `reference/Reporting data`, asserting against each report's own printed totals rather than against a row count.
+
+The 1.9.2 assistant changes were verified live against the real database, not only by unit test: asked "what data points are missing for the active client?" on Phoenix Restoration Co. it named the client, its 12 imported periods, and the three canonical accounts that have never received a fact (`pl.other_income`, `pl.other_expense`, `bs.net_income`) — where the same question in 1.9.1 returned a generic list. Asked to hide a report section it applied the change (confirmed in `app_settings.report_layout_default`), and Undo restored the previous layout (confirmed in the same row). That round-trip is what caught ADR-039.

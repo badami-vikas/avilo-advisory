@@ -267,6 +267,19 @@ body {
     background: #fff;
   }
 
+  /*
+    On screen the shell is a fixed-height frame with its own scroll regions, so the report
+    and the assistant scroll independently instead of moving the whole page. A print engine
+    has no viewport to scroll — a clipped `h-screen` box would put only the first page in
+    the PDF — so the frame and its scrollers become ordinary flowing blocks here.
+  */
+  .app-shell,
+  .app-shell-scroll {
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+  }
+
   /* The sheet's own frame is a screen affordance; on paper the page *is* the frame. */
   .paper-frame .paper {
     width: auto;

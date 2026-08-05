@@ -24,40 +24,46 @@ import { Button } from "../ui.js";
 interface ChatTurn {
   role: "user" | "assistant";
   text: string;
-  proposalId?: string;
-  proposalSummary?: string;
+  appliedSummary?: string;
+  appliedChanges?: string[];
+  revertId?: string;
   proposalErrors?: { path: string; message: string }[];
 }
 
 /**
- * The panel's own proposal review — no Approvals surface to lean on, so accept/reject
- * happens right where the proposal was made. `blueprint.activate` / `blueprint.reject`
- * are the same procedures the Blueprint export/import screen uses; a chatbot-authored
- * proposal and an imported file are reviewed identically.
+ * What the assistant just did, and the way back.
+ *
+ * The change is already live by the time this renders — the assistant acts rather than
+ * asking. Undo activates the snapshot proposal the server took immediately before applying,
+ * which is an ordinary `blueprint.activate` call: the reversal is itself a recorded,
+ * auditable configuration change, not a hidden rollback.
  */
-function ProposalCard({
-  proposalId,
+function AppliedCard({
   summary,
-  onDecided,
+  changes,
+  revertId,
+  reverted,
+  onReverted,
 }: {
-  proposalId: string;
   summary: string;
-  onDecided: (id: string, outcome: "activated" | "rejected") => void;
+  changes: string[];
+  revertId: string;
+  reverted: boolean;
+  onReverted: (id: string) => void;
 }) {
-  const [busy, setBusy] = useState<"activate" | "reject" | null>(null);
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const decide = async (action: "activate" | "reject") => {
-    setBusy(action);
+  const undo = async () => {
+    setBusy(true);
     setError(null);
     try {
-      if (action === "activate") await api.blueprint.activate.mutate({ id: proposalId });
-      else await api.blueprint.reject.mutate({ id: proposalId });
-      onDecided(proposalId, action === "activate" ? "activated" : "rejected");
+      await api.blueprint.activate.mutate({ id: revertId });
+      onReverted(revertId);
     } catch (cause) {
       setError((cause as Error).message);
     } finally {
-      setBusy(null);
+      setBusy(false);
     }
   };
 
@@ -65,23 +71,24 @@ function ProposalCard({
     <div className="mt-2 rounded-lg border border-accent/30 bg-accent-soft/40 p-2.5">
       <p className="flex items-center gap-1.5 text-[11.5px] font-medium text-ink">
         <Sparkles size={12} className="text-accent" />
-        Proposed change
+        {reverted ? "Change undone" : "Change applied"}
       </p>
       <p className="mt-1 text-[11.5px] leading-relaxed text-ink-muted">{summary}</p>
+      {changes.length > 0 ? (
+        <ul className="mt-1 space-y-0.5 text-[11px] text-ink-faint">
+          {changes.map((c, i) => (
+            <li key={i}>{c}</li>
+          ))}
+        </ul>
+      ) : null}
       {error ? <p className="mt-1.5 text-[11px] text-flag">{error}</p> : null}
-      <div className="mt-2 flex gap-1.5">
-        <Button
-          variant="primary"
-          size="sm"
-          onClick={() => void decide("activate")}
-          disabled={busy !== null}
-        >
-          {busy === "activate" ? "Applying…" : "Apply"}
-        </Button>
-        <Button size="sm" onClick={() => void decide("reject")} disabled={busy !== null}>
-          {busy === "reject" ? "Dismissing…" : "Dismiss"}
-        </Button>
-      </div>
+      {reverted ? null : (
+        <div className="mt-2">
+          <Button size="sm" onClick={() => void undo()} disabled={busy}>
+            {busy ? "Undoing…" : "Undo"}
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
@@ -97,7 +104,7 @@ const CHAT_HISTORY_KEY = "copilot_chat_history";
 
 interface StoredChat {
   turns: ChatTurn[];
-  decided: Record<string, "activated" | "rejected">;
+  decided: Record<string, "reverted">;
 }
 
 /**
@@ -138,12 +145,12 @@ export function AgentPanelHeader({
   );
 }
 
-export function AgentPanelBody({ collapsed }: { collapsed: boolean }) {
+export function AgentPanelBody({ collapsed, clientId }: { collapsed: boolean; clientId?: string }) {
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [decided, setDecided] = useState<Record<string, "activated" | "rejected">>({});
+  const [decided, setDecided] = useState<Record<string, "reverted">>({});
   const [loaded, setLoaded] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -197,14 +204,16 @@ export function AgentPanelBody({ collapsed }: { collapsed: boolean }) {
     try {
       const reply = await api.copilot.converse.mutate({
         history: next.map((t) => ({ role: t.role, text: t.text })),
+        clientId,
       });
       setTurns((current) => [
         ...current,
         {
           role: "assistant",
           text: reply.text,
-          proposalId: reply.proposalId,
-          proposalSummary: reply.proposalSummary,
+          appliedSummary: reply.appliedSummary,
+          appliedChanges: reply.appliedChanges,
+          revertId: reply.revertId,
           proposalErrors: reply.proposalErrors,
         },
       ]);
@@ -228,6 +237,13 @@ export function AgentPanelBody({ collapsed }: { collapsed: boolean }) {
             Ask how a figure is computed, or ask for a change to a formula, a QuickBooks
             mapping, or an AI prompt. A proposed change is recorded here for you to apply
             or dismiss — nothing changes until you say so.
+            {clientId ? (
+              <>
+                {" "}
+                With a client open, it can also see that client's imported periods and
+                which accounts have no data.
+              </>
+            ) : null}
           </div>
         ) : null}
 
@@ -242,21 +258,16 @@ export function AgentPanelBody({ collapsed }: { collapsed: boolean }) {
             >
               {turn.text}
             </div>
-            {turn.proposalId && !decided[turn.proposalId] ? (
-              <ProposalCard
-                proposalId={turn.proposalId}
-                summary={turn.proposalSummary ?? ""}
-                onDecided={(id, outcome) =>
-                  setDecided((current) => ({ ...current, [id]: outcome }))
+            {turn.revertId ? (
+              <AppliedCard
+                summary={turn.appliedSummary ?? ""}
+                changes={turn.appliedChanges ?? []}
+                revertId={turn.revertId}
+                reverted={decided[turn.revertId] === "reverted"}
+                onReverted={(id) =>
+                  setDecided((current) => ({ ...current, [id]: "reverted" }))
                 }
               />
-            ) : null}
-            {turn.proposalId && decided[turn.proposalId] ? (
-              <p className="mt-1.5 text-[11px] text-ink-faint">
-                {decided[turn.proposalId] === "activated"
-                  ? "Applied."
-                  : "Dismissed."}
-              </p>
             ) : null}
             {turn.proposalErrors?.length ? (
               <div className="mt-1.5 rounded-lg border border-flag/30 bg-flag/5 p-2 text-[11px] text-flag">

@@ -454,3 +454,57 @@ verification — see BUG-028's open follow-up.
 **Decision.** Recommendations, warnings and insights are recomputed every render. Only owner, due date, status, notes and summary edits persist.
 
 **Consequence.** The analysis can never go stale relative to the data. ADR-019 is this rule applied to an edit.
+
+---
+
+### ADR-038 · The assistant applies configuration changes itself; Undo replaces the pre-approval
+**Date.** 2026-08-05
+
+**Decision.** A blueprint block in the assistant's reply goes through
+`applyBlueprintDirectly` — validate, snapshot, apply — instead of `proposeBlueprint`.
+The change is live when the reply renders. The configuration as it stood immediately
+before is recorded as its own proposal and returned as `revertId`; the panel's Undo
+activates it.
+
+**Why.** The propose/activate split was the right default when nobody had used the
+panel yet. In practice it produced an assistant that answered every request for a change
+with a paragraph explaining that it could propose one — the user's words: "I want an AI
+agent that acts, not recommends." The pre-approval was buying less than it cost:
+`validateBlueprint` was already the thing preventing a bad write, and it still runs
+unchanged.
+
+**What did NOT change.** An id outside the live registry is refused and nothing is
+written — not even the snapshot (`applyBlueprintDirectly` validates first). Formula edits
+still open a `formula_versions` row, mappings still go through `learnMapping`. The blast
+radius is unchanged: configuration only. Facts, source code, UI and imports remain
+unreachable — there is no mechanism, not a policy.
+
+**Rejected.** A setting to toggle auto-apply. Two behaviours to reason about, and the
+one the user asked for would have been the non-default.
+
+**Consequence.** `CLAUDE.md`'s AI canon changes: "never activated by the model itself"
+becomes "applied by the model, reversible by the user". Undo restores formulas, prompts
+and layout exactly. It does **not** un-learn a label mapping the assistant added —
+`learnMapping` upserts and the snapshot carries only the mappings that existed — so that
+one is corrected in the mapping UI like any other. Known and accepted, not a silent gap.
+
+---
+
+### ADR-039 · An absent `layout` means "leave it alone", so a revert must spell out the empty state
+**Date.** 2026-08-05
+
+**Decision.** When `applyBlueprintDirectly` snapshots a configuration that has no layout
+override, it writes an explicit `{sectionOrder: <all sections>, hiddenSections: []}` rather
+than omitting the field.
+
+**Why.** Caught in live testing, not by the type system: the first Undo of an
+assistant-hidden section did nothing. `activateProposal` writes layout only
+`if (blueprint.layout)`, which is correct for an imported document that shouldn't disturb
+layout — but it makes "layout was unset" and "don't touch layout" the same document. The
+snapshot has to distinguish them, and the only way to say "unset" in this schema is to say
+the default out loud.
+
+**Consequence.** A revert leaves a `report_layout_default` row where there was none. That
+is behaviourally identical — the row holds the built-in order with nothing hidden — and
+`normalizeLayout` already treats a partial order the same way. Regression test:
+"undo clears a layout the assistant added when there was no layout override before".

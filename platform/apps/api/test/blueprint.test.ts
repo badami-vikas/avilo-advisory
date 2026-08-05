@@ -215,6 +215,81 @@ describe("blueprint propose/activate/reject", () => {
     expect(exported.layout).toEqual({ hiddenSections: ["profitability"] });
   });
 
+  it("applying directly changes the live configuration, and the returned revert restores it", async () => {
+    const { db, blueprint } = freshApi();
+
+    const before = blueprint.exportBlueprint("before").formulas.find((f) => f.id === "dso");
+    expect(before).toBeDefined();
+
+    const outcome = blueprint.applyBlueprintDirectly("assistant", "Change DSO", {
+      schemaVersion: 1,
+      name: "t",
+      exportedAt: new Date().toISOString(),
+      formulas: [{ id: "dso", expression: "ar.total / avg3.pl.revenue * 50" }],
+      mappings: [],
+      prompts: [],
+    });
+    if (!("proposal" in outcome)) throw new Error("expected an applied proposal");
+
+    // Applied, not merely recorded: status is active and the live row already moved.
+    expect(outcome.proposal.status).toBe("active");
+    const live = db.getDb().select().from(schema.formulas).all().find((f: { id: string }) => f.id === "dso");
+    expect(live.expression).toBe("ar.total / avg3.pl.revenue * 50");
+
+    // The snapshot taken beforehand puts the original expression back.
+    blueprint.activateProposal(outcome.revertId);
+    const reverted = db.getDb().select().from(schema.formulas).all().find((f: { id: string }) => f.id === "dso");
+    expect(reverted.expression).toBe(before.expression);
+  });
+
+  it("undo clears a layout the assistant added when there was no layout override before", async () => {
+    const { db, blueprint } = freshApi();
+
+    const layoutKey = () =>
+      db
+        .getDb()
+        .select()
+        .from(schema.appSettings)
+        .all()
+        .find((r: { key: string }) => r.key === "report_layout_default");
+
+    expect(layoutKey()).toBeUndefined();
+
+    const outcome = blueprint.applyBlueprintDirectly("assistant", "Hide referrals", {
+      schemaVersion: 1,
+      name: "t",
+      exportedAt: new Date().toISOString(),
+      formulas: [],
+      mappings: [],
+      prompts: [],
+      layout: { hiddenSections: ["referrals"] },
+    });
+    if (!("proposal" in outcome)) throw new Error("expected an applied proposal");
+    expect(JSON.parse(layoutKey().value).hiddenSections).toEqual(["referrals"]);
+
+    // An absent `layout` would mean "leave it alone", so the snapshot must spell out the
+    // empty state — otherwise this undo silently leaves referrals hidden.
+    blueprint.activateProposal(outcome.revertId);
+    expect(JSON.parse(layoutKey().value).hiddenSections).toEqual([]);
+  });
+
+  it("applying directly writes nothing when the document references an unknown id", async () => {
+    const { db, blueprint } = freshApi();
+
+    const outcome = blueprint.applyBlueprintDirectly("assistant", "Invent a formula", {
+      schemaVersion: 1,
+      name: "t",
+      exportedAt: new Date().toISOString(),
+      formulas: [{ id: "not.a.real.formula", expression: "1 + 1" }],
+      mappings: [],
+      prompts: [],
+    });
+
+    expect("errors" in outcome).toBe(true);
+    // Not even the pre-apply snapshot is recorded when validation fails first.
+    expect(db.getDb().select().from(schema.blueprintProposals).all()).toHaveLength(0);
+  });
+
   it("export produces a document that re-validates and diffs to nothing against itself", async () => {
     const { blueprint } = freshApi();
 

@@ -3,6 +3,7 @@ import { Link, Outlet, useLocation } from "react-router";
 
 import { TooltipProvider } from "./components/Tooltip.js";
 import { AgentPanelBody, AgentPanelHeader } from "./components/shared/AgentPanel.js";
+import { desktop } from "../lib/desktop.js";
 
 /**
  * Application shell.
@@ -19,13 +20,20 @@ import { AgentPanelBody, AgentPanelHeader } from "./components/shared/AgentPanel
 export function Shell() {
   const location = useLocation();
   const isDetail = location.pathname.startsWith("/client/");
+  const clientId = isDetail ? location.pathname.split("/")[2] : undefined;
   const [assistantCollapsed, setAssistantCollapsed] = useState(false);
+
+  // macOS `titleBarStyle: "hiddenInset"` insets the traffic lights over our own header,
+  // so the wordmark starts to the right of them rather than underneath.
+  const macTrafficLights = desktop()?.platform === "darwin";
 
   return (
     <TooltipProvider>
-    <div className="flex min-h-full flex-col">
-      <header className="no-print sticky top-0 z-30 flex h-14 items-stretch border-b border-line bg-surface/95 backdrop-blur">
-        <div className="flex min-w-0 flex-1 items-center gap-3 px-6">
+    <div className="app-shell flex h-screen flex-col overflow-hidden">
+      <header className="no-print z-30 flex h-14 flex-shrink-0 items-stretch border-b border-line bg-surface/95 backdrop-blur">
+        <div
+          className={`flex min-w-0 flex-1 items-center gap-3 pr-6 ${macTrafficLights ? "pl-[88px]" : "pl-6"}`}
+        >
           <Link to="/" className="flex items-center gap-2.5">
             <span className="grid h-7 w-7 place-items-center rounded-md bg-ink text-[13px] font-semibold text-white">
               A
@@ -59,13 +67,13 @@ export function Shell() {
         shrinks to make room for it instead of running underneath.
       */}
       <div className="flex min-h-0 flex-1">
-        <main className="min-w-0 flex-1 overflow-y-auto px-6 py-6">
+        <main className="app-shell-scroll min-w-0 flex-1 overflow-y-auto px-6 py-6">
           <div className="mx-auto max-w-[1600px]">
             <Outlet />
           </div>
         </main>
 
-        <AgentPanelBody collapsed={assistantCollapsed} />
+        <AgentPanelBody collapsed={assistantCollapsed} clientId={clientId} />
       </div>
     </div>
     </TooltipProvider>

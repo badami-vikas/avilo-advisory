@@ -34,17 +34,29 @@ chat turn → Groq → reply text (+ optional ```avilo-blueprint block)
                           diffBlueprint (against live config)
                                     │
                                     ▼
-                 blueprint_proposals row, status = "proposed"
+         snapshot of the CURRENT config recorded first,
+              as its own proposal → this is `revertId`
                                     │
-                         person reviews the diff in the panel
+                                    ▼
+              activateProposal — applied immediately, writing
+              through the SAME paths a manual edit uses
+              (learnMapping, a new formula_versions row,
+              app_settings)
                                     │
-                        Apply ──────┴────── Dismiss
-                          │
-                          ▼
-              activateProposal — writes through the SAME
-              paths a manual edit uses (learnMapping,
-              a new formula_versions row, app_settings)
+                        panel shows "Change applied" + Undo
+                                    │
+                   Undo = activate the snapshot proposal
 ```
+
+**The assistant acts (v1.9.2, ADR-038).** It used to stop at a proposal a person had to
+approve; it now applies and offers Undo. What guards the write is unchanged —
+`validateBlueprint` refuses an id this build does not have, and refuses it *before* the
+snapshot is taken, so a rejected document leaves no trace at all. What was removed is the
+click, not a check.
+
+Undo restores formulas, prompts and layout exactly. It does not un-learn a label mapping
+the assistant added: `learnMapping` upserts and the snapshot carries only the mappings that
+already existed. Correct that one in the mapping UI, like any other mapping.
 
 Nothing the model emits executes. `validateBlueprint` is the only path from "text a model
 wrote" to "a typed object the rest of the system trusts", and it has no field for source
@@ -56,14 +68,16 @@ shape of the type.
 `blueprint.export` produces the full live configuration as one JSON document — formulas,
 mappings, prompts. Handing that file to someone else and having them run
 `blueprint.propose` on it is the "replicate my custom local version" path: it becomes a
-proposal on their machine, reviewed and activated exactly like a chatbot's own proposal.
-Nothing is ever auto-applied on import.
+proposal on their machine, reviewed and activated by hand. **Import is still
+propose-then-approve** — only the assistant applies directly, because only the assistant is
+acting on a request the user just typed. A file that arrived from someone else has no such
+context, so it keeps the review step.
 
 ## Where it lives, and why
 
 `platform/packages/core` and `platform/apps/web/src/app/components/shared/AgentPanel.tsx`
 deliberately mirror `relationship-os`'s own paths and `WorkspaceBlueprint` /
-`AgentPanel.tsx` — same location, same propose-then-activate governance, same "a routed
+`AgentPanel.tsx` — same location, same blueprint-validated governance, same "a routed
 action is a real proposal, never fabricated feed content" principle from the upstream
 AgentPanel's own header comment. Avilo has no Chief of Staff or Approvals surface, so the
 chatbot talks to `copilot.converse` instead of `chiefOfStaff.converse`, and a routed action
@@ -72,11 +86,31 @@ screen — narrower, same shape. On integration into relationship-os, `packages/
 `AgentPanel.tsx` move and the local copies are deleted, same as `packages/tables` already
 describes doing.
 
+## What the assistant can see (v1.9.2)
+
+With a client open, `copilot.converse` receives that client's real books alongside the
+configuration registry: how many periods are imported and their range, which accounts an
+active formula needs and is missing for the latest period, which canonical accounts have
+never received a single fact across every imported period, and how many source files
+failed to import.
+
+It is composed from `availablePeriods` / `buildPeriodReport` in `apps/api/src/services/
+report.ts` — the same functions the report view itself calls — so the assistant's answer
+about what is missing cannot drift from what the screen shows. Read-only: there is no path
+from the chat panel to a `facts` row.
+
+Before this, "what data is missing for this client?" produced a generic list of things that
+are *commonly* missing in accounting data, because the model had the account registry but
+no client. That answer was plausible and useless.
+
 ## What it cannot do, on purpose
 
 - Cannot touch application source.
 - Cannot see or emit a Groq API key — `validateBlueprint` refuses a document carrying one.
-- Cannot activate its own proposal — only a person, through the panel or `blueprint.activate`.
+- Cannot write a financial fact, import a file, or add UI. Configuration is the entire
+  surface — there is no mechanism for the rest, not a policy against it.
+- Cannot make a change that is not reversible from the panel (ADR-038), with the one
+  documented exception of an added label mapping.
 - Cannot reference an account, formula, report type, prompt key or layout section this
   build does not have; the whole document is refused, never partially applied.
 

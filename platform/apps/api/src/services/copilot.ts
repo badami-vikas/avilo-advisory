@@ -8,17 +8,27 @@
 // action is a real proposal, never fabricated feed content", scaled to one app's surface.
 //
 // The chatbot answers questions about the running app freely — it is told the current
-// configuration and the registered accounts/formulas/prompts, which is as close to "read
-// access to the codebase" as a model calling out over HTTP can safely have. A Groq chat
-// completion has no filesystem; actually modifying code is not a capability this
-// architecture can grant it, only describe — which the system prompt does explicitly.
-// Anything it proposes changing goes out as a candidate AviloBlueprint JSON block, which
-// the caller runs through `proposeBlueprint` — the same validate-then-diff path an
-// imported file takes. It cannot write a fact, a mapping, or a formula directly; there is
-// no tool call wired to any mutation, only to text.
+// configuration, the registered accounts/formulas/prompts, and (when a client is open) that
+// client's real imported periods and data gaps, so "what is missing for this client" is
+// answered from the same queries the report view runs rather than guessed in the abstract.
+//
+// It ACTS rather than recommends: a candidate AviloBlueprint JSON block in its reply goes
+// through `applyBlueprintDirectly`, which validates against the live registry and then
+// applies. Validation is unchanged from the propose/activate path — an invented formula or
+// account id is refused outright and nothing is written — so what the direct path removes
+// is the human click, not a guard. The configuration as it stood beforehand is snapshotted
+// as its own proposal first and returned as `revertId`, which is what the panel's Undo
+// activates.
+//
+// Still out of reach, structurally: source code, UI, financial facts, file imports. There is
+// no tool call wired to any of those, only to configuration.
 
+import { eq } from "drizzle-orm";
+import { ACCOUNTS_BY_ID, CANONICAL_ACCOUNTS } from "@avilo/module";
+import { getDb, schema } from "../db.js";
 import { callGroq, groqConfig } from "./ai.js";
-import { currentConfiguration, proposeBlueprint, registeredSurface } from "./blueprint.js";
+import { applyBlueprintDirectly, currentConfiguration, registeredSurface } from "./blueprint.js";
+import { availablePeriods, buildPeriodReport } from "./report.js";
 
 export interface ChatTurn {
   role: "user" | "assistant";
@@ -27,24 +37,41 @@ export interface ChatTurn {
 
 export interface CopilotReply {
   text: string;
-  /** Present when the model proposed a configuration change; already recorded, not yet activated. */
-  proposalId?: string;
-  proposalSummary?: string;
+  /** Present when the assistant changed configuration — already applied, not pending. */
+  appliedSummary?: string;
+  appliedChanges?: string[];
+  /** Activating this proposal restores the configuration as it stood before. */
+  revertId?: string;
+  /** Present instead when the candidate failed validation; nothing was written. */
   proposalErrors?: { path: string; message: string }[];
 }
 
 const SYSTEM_PROMPT = `You are the Avilo Advisory in-app assistant.
 
-You can explain how the app works, why a figure is computed the way it is, and what
-configuration exists. You cannot touch application source code, and you cannot write
-directly to the database — the only thing you can change is proposed configuration
-(formulas, QuickBooks label mappings, the two AI guidance prompts, and the default report
-layout — section order and which sections are hidden), and even that is never applied by
-you: it becomes a proposal a person reviews and activates. A layout change sets the
-DEFAULT a client's report opens with; any client who has already customised their own
+You configure this app. When the user asks for a change you can make, MAKE IT — do not
+describe what you could propose, do not ask them to review a proposal, do not explain that
+a person has to activate it. Emit the blueprint block below and the change is applied
+immediately, with an Undo button shown to the user. Answer as someone who just did the
+thing, not as someone recommending it.
+
+What you can change: formulas, QuickBooks label mappings, the two AI guidance prompts, and
+the default report layout (section order, which sections are hidden). A layout change sets
+the DEFAULT a client's report opens with; any client who has already customised their own
 report layout keeps it — this never overwrites a per-client edit.
 
-To propose a configuration change, end your reply with a fenced block:
+What you genuinely cannot do, and should say plainly if asked: change application source
+code, add new UI, write or edit financial facts, or import files. Those are not refusals to
+be worked around — there is no mechanism.
+
+When the user is viewing a specific client, you are given that client's real data below
+under "Active client data" — imported periods, which required accounts are missing for
+the latest period, and which canonical accounts have never received a single fact. Ground
+any answer about that client's data completeness in those figures; never guess or describe
+"common areas where data might be missing" in the abstract when the real answer is right
+there. If no client section is present, you are not looking at a specific client — say so
+rather than inventing one.
+
+To make a configuration change, end your reply with a fenced block:
 
 \`\`\`avilo-blueprint
 {"schemaVersion":1,"name":"...","exportedAt":"...","formulas":[...],"mappings":[...],"prompts":[...],"layout":{"sectionOrder":[...],"hiddenSections":[...]}}
@@ -73,6 +100,62 @@ function buildContext(): string {
   ].join("\n");
 }
 
+/**
+ * Read-only summary of one client's actual books — real periods, real missing-account
+ * gaps for the latest period, and canonical accounts that have never received a fact for
+ * this client at all. Composed from the same queries the report view and dashboard use
+ * (`availablePeriods`/`buildPeriodReport` in report.ts), not a separate source of truth,
+ * so the assistant's answer about "what's missing" can never diverge from what the client
+ * detail page itself shows. This is read-only: nothing here can be written back by the
+ * model, same as every other fact this file feeds it.
+ */
+function clientDataSummary(clientId: string): string {
+  const db = getDb();
+  const client = db.select().from(schema.clients).where(eq(schema.clients.id, clientId)).get();
+  if (!client) return `Active client: unknown client id "${clientId}" (not found).`;
+
+  const periods = availablePeriods(clientId);
+  if (periods.length === 0) {
+    return [
+      `Active client: ${client.name} (id ${clientId}).`,
+      `No periods imported yet — nothing has been uploaded for this client.`,
+    ].join("\n");
+  }
+
+  const latest = periods[0]!;
+  const report = buildPeriodReport(clientId, latest);
+  const missing = report.missingRequired.map(
+    (id) => `${id} (${ACCOUNTS_BY_ID.get(id)?.label ?? id})`,
+  );
+
+  const everHad = new Set<string>(
+    db
+      .selectDistinct({ accountId: schema.facts.accountId })
+      .from(schema.facts)
+      .where(eq(schema.facts.clientId, clientId))
+      .all()
+      .map((r) => r.accountId),
+  );
+  const neverPopulated = CANONICAL_ACCOUNTS.filter((a) => !everHad.has(a.id)).map(
+    (a) => `${a.id} (${a.label}, ${a.statement})`,
+  );
+
+  const files = db
+    .select({ filename: schema.sourceFiles.filename, status: schema.sourceFiles.status, reportType: schema.sourceFiles.reportType })
+    .from(schema.sourceFiles)
+    .where(eq(schema.sourceFiles.clientId, clientId))
+    .all();
+  const failedFiles = files.filter((f) => f.status === "failed");
+
+  return [
+    `Active client: ${client.name} (id ${clientId}).`,
+    `Imported periods: ${periods.length} (${periods[periods.length - 1]} through ${latest}).`,
+    `Latest period ${latest}: ${report.complete ? "complete — every account an active formula needs has a value" : `INCOMPLETE — missing ${missing.length} required account(s): ${missing.join(", ")}`}.`,
+    `Canonical accounts that have NEVER received a single fact for this client, across all ${periods.length} imported period(s) (${neverPopulated.length} of ${CANONICAL_ACCOUNTS.length}): ${neverPopulated.length > 0 ? neverPopulated.join("; ") : "none — every canonical account has data at least once"}.`,
+    `Imported files: ${files.length} total${failedFiles.length > 0 ? `, ${failedFiles.length} FAILED (${failedFiles.map((f) => f.filename).join(", ")})` : ""}.`,
+  ].join("\n");
+}
+
 function extractBlueprintBlock(text: string): { reply: string; candidate: unknown | null } {
   const match = /```avilo-blueprint\s*([\s\S]*?)```/.exec(text);
   if (!match) return { reply: text.trim(), candidate: null };
@@ -91,7 +174,7 @@ function extractBlueprintBlock(text: string): { reply: string; candidate: unknow
  * proposal. Returns `null` when no model is configured — callers must handle that
  * (AI is additive everywhere, ADR-010), not fall back to a canned reply.
  */
-export async function converse(history: ChatTurn[]): Promise<CopilotReply | null> {
+export async function converse(history: ChatTurn[], clientId?: string): Promise<CopilotReply | null> {
   const config = groqConfig();
   if (!config) return null;
 
@@ -100,6 +183,7 @@ export async function converse(history: ChatTurn[]): Promise<CopilotReply | null
     "",
     "--- Current configuration ---",
     buildContext(),
+    ...(clientId ? ["", "--- Active client data ---", clientDataSummary(clientId)] : []),
     "",
     "--- Conversation ---",
     ...history.map((turn) => `${turn.role === "user" ? "User" : "Assistant"}: ${turn.text}`),
@@ -111,8 +195,8 @@ export async function converse(history: ChatTurn[]): Promise<CopilotReply | null
 
   if (candidate === null) return { text: reply || raw.trim() };
 
-  const summary = history[history.length - 1]?.text.slice(0, 120) ?? "Chatbot proposal";
-  const outcome = proposeBlueprint("chatbot", summary, candidate);
+  const summary = history[history.length - 1]?.text.slice(0, 120) ?? "Assistant change";
+  const outcome = applyBlueprintDirectly("assistant", summary, candidate);
 
   if ("errors" in outcome) {
     return {
@@ -123,7 +207,8 @@ export async function converse(history: ChatTurn[]): Promise<CopilotReply | null
 
   return {
     text: reply || raw.trim(),
-    proposalId: outcome.proposal.id,
-    proposalSummary: outcome.proposal.summary,
+    appliedSummary: outcome.proposal.summary,
+    appliedChanges: outcome.proposal.diff.map((c) => `${c.kind} ${c.section}: ${c.key}`),
+    revertId: outcome.revertId,
   };
 }

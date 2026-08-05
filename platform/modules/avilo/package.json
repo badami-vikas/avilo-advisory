@@ -1,6 +1,6 @@
 {
   "name": "@avilo/module",
-  "version": "1.9.1",
+  "version": "1.9.2",
   "private": true,
   "type": "module",
   "description": "Avilo Advisory module domain layer: schema, canonical accounts, period algebra, formula registry + engine, deterministic file classification, QuickBooks importers, derived checklist. No I/O, no framework \u2014 liftable into relationship-os platform/modules/avilo.",

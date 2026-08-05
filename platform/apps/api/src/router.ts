@@ -1163,9 +1163,14 @@ const settingsRouter = router({
  */
 const copilotRouter = router({
   converse: procedure
-    .input(z.object({ history: z.array(z.object({ role: z.enum(["user", "assistant"]), text: z.string() })).max(40) }))
+    .input(
+      z.object({
+        history: z.array(z.object({ role: z.enum(["user", "assistant"]), text: z.string() })).max(40),
+        clientId: z.string().optional(),
+      }),
+    )
     .mutation(async ({ input }) => {
-      const reply = await converse(input.history);
+      const reply = await converse(input.history, input.clientId);
       if (!reply) {
         throw new TRPCError({
           code: "PRECONDITION_FAILED",

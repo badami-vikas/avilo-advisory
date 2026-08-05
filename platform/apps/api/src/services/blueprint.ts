@@ -250,6 +250,52 @@ export function activateProposal(id: string, note?: string): ProposalRecord {
   return rowToRecord(db.select().from(schema.blueprintProposals).where(eq(schema.blueprintProposals.id, id)).get()!);
 }
 
+/**
+ * Validate, record, and apply in one step — the assistant acting rather than recommending.
+ *
+ * Every guard that governed propose/activate still runs: `validateBlueprint` refuses an id
+ * outside the live registry, so a hallucinated formula or account is rejected outright and
+ * nothing is written. What changes is only who presses the button. Formula edits still open
+ * a new `formula_versions` row and mappings still go through `learnMapping`, so the audit
+ * trail is identical to a human activation, just with `author: "assistant"`.
+ *
+ * Reversibility replaces the pre-approval: the configuration as it stood a moment before is
+ * captured as its own `proposed` blueprint first, and its id comes back as `revertId`, so
+ * "undo that" is one activation away. The one thing an undo does not take back is a newly
+ * learned label mapping — `learnMapping` upserts and the snapshot only carries the mappings
+ * that existed, so a mapping the assistant added survives the revert and has to be corrected
+ * in the mapping UI like any other. Formulas, prompts and layout revert exactly.
+ */
+export function applyBlueprintDirectly(
+  author: string,
+  summary: string,
+  candidate: unknown,
+): { proposal: ProposalRecord; revertId: string } | { errors: { path: string; message: string }[] } {
+  const { blueprint, errors } = validateBlueprint(candidate, registeredSurface());
+  if (!blueprint) return { errors };
+
+  /*
+    An absent `layout` in a blueprint means "leave layout alone", not "clear it" — so a
+    snapshot of a configuration that had no layout override could never undo one being
+    added. The snapshot spells the empty state out instead: the full default order with
+    nothing hidden, which is behaviourally identical to unset.
+  */
+  const before = exportBlueprint(`Before: ${summary}`.slice(0, 120));
+  const snapshot = proposeBlueprint("revert", `Configuration before: ${summary}`, {
+    ...before,
+    layout: before.layout ?? { sectionOrder: [...LAYOUT_SECTION_IDS], hiddenSections: [] },
+  });
+  if ("errors" in snapshot) return snapshot;
+
+  const recorded = proposeBlueprint(author, summary, blueprint);
+  if ("errors" in recorded) return recorded;
+
+  return {
+    proposal: activateProposal(recorded.proposal.id, "Applied by the assistant"),
+    revertId: snapshot.proposal.id,
+  };
+}
+
 export function rejectProposal(id: string, note?: string): ProposalRecord {
   const db = getDb();
   const row = db.select().from(schema.blueprintProposals).where(eq(schema.blueprintProposals.id, id)).get();
