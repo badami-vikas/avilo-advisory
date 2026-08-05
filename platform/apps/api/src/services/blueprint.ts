@@ -10,6 +10,7 @@ import {
   validateBlueprint,
   type AviloBlueprint,
   type BlueprintChange,
+  type LayoutOverride,
   type RegisteredSurface,
 } from "@avilo/core";
 import {
@@ -39,6 +40,16 @@ export const LAYOUT_SECTION_IDS = [
   "top-jobs", "job-performance", "referrals", "gross-overhead", "top-customers", "flags",
 ] as const;
 
+/**
+ * Where a blueprint's `layout` lands: the report format panel's own DEFAULT, not any
+ * client's saved layout. `ClientDetailPage.loadLayout` reads this only when a client has
+ * no `report.layout` saved_views row of its own — a per-client edit always wins, matching
+ * `normalizeLayout`'s existing "stored beats default" rule. Stored in the same
+ * `sectionOrder`/`hiddenSections` shape the blueprint carries; the web layer's own
+ * `normalizeLayout` fills in whatever sections a partial order omits.
+ */
+export const REPORT_LAYOUT_DEFAULT_KEY = "report_layout_default";
+
 export function registeredSurface(): RegisteredSurface {
   const db = getDb();
   const formulaIds = db.select({ id: schema.formulas.id }).from(schema.formulas).all();
@@ -56,6 +67,7 @@ export function currentConfiguration(): {
   formulas: AviloBlueprint["formulas"];
   mappings: AviloBlueprint["mappings"];
   prompts: AviloBlueprint["prompts"];
+  layout?: LayoutOverride;
 } {
   const db = getDb();
   const formulas = db.select().from(schema.formulas).all().map((f) => ({
@@ -72,7 +84,16 @@ export function currentConfiguration(): {
   const prompts = PROMPT_KEYS.map((key) => ({ key, body: readSetting(key) ?? "" })).filter(
     (p) => p.body !== "",
   );
-  return { formulas, mappings, prompts };
+  const storedLayout = readSetting(REPORT_LAYOUT_DEFAULT_KEY);
+  let layout: LayoutOverride | undefined;
+  if (storedLayout) {
+    try {
+      layout = JSON.parse(storedLayout) as LayoutOverride;
+    } catch {
+      // A corrupt stored value must not block export or diffing — treat as unset.
+    }
+  }
+  return { formulas, mappings, prompts, ...(layout ? { layout } : {}) };
 }
 
 /** The full current configuration as an exportable blueprint. */
@@ -210,6 +231,14 @@ export function activateProposal(id: string, note?: string): ProposalRecord {
     db.insert(schema.appSettings)
       .values({ key: prompt.key, value: prompt.body })
       .onConflictDoUpdate({ target: schema.appSettings.key, set: { value: prompt.body } })
+      .run();
+  }
+
+  if (blueprint.layout) {
+    const value = JSON.stringify(blueprint.layout);
+    db.insert(schema.appSettings)
+      .values({ key: REPORT_LAYOUT_DEFAULT_KEY, value })
+      .onConflictDoUpdate({ target: schema.appSettings.key, set: { value } })
       .run();
   }
 

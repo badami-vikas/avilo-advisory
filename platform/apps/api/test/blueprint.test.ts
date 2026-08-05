@@ -183,6 +183,38 @@ describe("blueprint propose/activate/reject", () => {
     expect(() => blueprint.activateProposal(outcome.proposal.id)).toThrow(/already active/);
   });
 
+  it("activating a layout proposal writes the app-wide default, readable back via settings", async () => {
+    const { db, blueprint } = freshApi();
+
+    const outcome = blueprint.proposeBlueprint("chatbot", "Hide profitability", {
+      schemaVersion: 1,
+      name: "t",
+      exportedAt: new Date().toISOString(),
+      formulas: [],
+      mappings: [],
+      prompts: [],
+      layout: { hiddenSections: ["profitability"] },
+    });
+    if (!("proposal" in outcome)) throw new Error("expected a proposal");
+    expect(outcome.proposal.diff).toEqual([
+      { section: "layout", key: "layout", kind: "add", after: { hiddenSections: ["profitability"] } },
+    ]);
+
+    blueprint.activateProposal(outcome.proposal.id);
+
+    const row = db
+      .getDb()
+      .select()
+      .from(schema.appSettings)
+      .all()
+      .find((r: { key: string }) => r.key === "report_layout_default");
+    expect(row && JSON.parse(row.value)).toEqual({ hiddenSections: ["profitability"] });
+
+    // Exported again, the layout now round-trips through `currentConfiguration`.
+    const exported = blueprint.exportBlueprint("after");
+    expect(exported.layout).toEqual({ hiddenSections: ["profitability"] });
+  });
+
   it("export produces a document that re-validates and diffs to nothing against itself", async () => {
     const { blueprint } = freshApi();
 

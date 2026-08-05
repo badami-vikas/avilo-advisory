@@ -84,6 +84,20 @@ function ProposalCard({
   );
 }
 
+/**
+ * Same key on both `settings.get`/`settings.set` — the generic app_settings reader every
+ * other runtime override in this app already goes through (ADR-013's one existing
+ * override path, reused rather than a new table). Chat history is not a blueprint: it
+ * never goes through `validateBlueprint`, because a stored turn is just text, never
+ * something the app treats as a proposed change until the model re-emits it.
+ */
+const CHAT_HISTORY_KEY = "copilot_chat_history";
+
+interface StoredChat {
+  turns: ChatTurn[];
+  decided: Record<string, "activated" | "rejected">;
+}
+
 export function AgentPanel() {
   const [collapsed, setCollapsed] = useState(false);
   const [turns, setTurns] = useState<ChatTurn[]>([]);
@@ -91,11 +105,47 @@ export function AgentPanel() {
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [decided, setDecided] = useState<Record<string, "activated" | "rejected">>({});
+  const [loaded, setLoaded] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, [turns]);
+
+  // Restore on mount. Gated by `loaded` below so this read never gets clobbered by the
+  // save effect firing first on an empty initial state.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const row = await api.settings.get.query({ key: CHAT_HISTORY_KEY });
+        if (cancelled) return;
+        if (row) {
+          const saved = JSON.parse(row.value) as StoredChat;
+          setTurns(saved.turns ?? []);
+          setDecided(saved.decided ?? {});
+        }
+      } catch {
+        // No history, or a corrupt row from an older shape — start fresh rather than
+        // block the panel from opening.
+      } finally {
+        if (!cancelled) setLoaded(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Persist after the initial load, and on every turn/decision change after that.
+  useEffect(() => {
+    if (!loaded) return;
+    const value = JSON.stringify({ turns, decided } satisfies StoredChat);
+    void api.settings.set.mutate({ key: CHAT_HISTORY_KEY, value }).catch(() => {
+      // A failed save must not surface as a chat error — the conversation itself still
+      // worked; only its persistence across a refresh is at risk.
+    });
+  }, [loaded, turns, decided]);
 
   const send = async () => {
     const text = draft.trim();

@@ -12,6 +12,7 @@ import {
   defaultLayout,
   normalizeLayout,
   type ReportLayout,
+  type ReportSectionId,
 } from "../report/layout.js";
 import { ReportView } from "../components/ReportView.js";
 import { RawDataView } from "../components/RawDataView.js";
@@ -292,7 +293,30 @@ export function ClientDetailPage() {
       const rows = await api.views.list.query({ tableId: LAYOUT_TABLE_ID });
       const mine = rows.find((row) => row.name === clientId);
       setLayoutRowId(mine?.id ?? null);
-      setLayout(normalizeLayout(mine ? JSON.parse(mine.config) : null));
+      if (mine) {
+        setLayout(normalizeLayout(JSON.parse(mine.config)));
+        return;
+      }
+      // No per-client layout yet: fall back to the app-wide default, which a blueprint
+      // (chatbot proposal or an imported one) may have set. A per-client edit above always
+      // wins over this — the fallback is only reached when `mine` is absent. Stored under
+      // the key `report_layout_default` (must match REPORT_LAYOUT_DEFAULT_KEY in
+      // apps/api/src/services/blueprint.ts) in the blueprint's own `sectionOrder`/
+      // `hiddenSections` naming; converted here to the `order`/`hidden` shape this page uses.
+      const fallback = await api.settings.get.query({ key: "report_layout_default" });
+      const parsed = fallback
+        ? (JSON.parse(fallback.value) as { sectionOrder?: string[]; hiddenSections?: string[] })
+        : null;
+      setLayout(
+        normalizeLayout(
+          parsed
+            ? {
+                order: parsed.sectionOrder as ReportSectionId[] | undefined,
+                hidden: parsed.hiddenSections as ReportSectionId[] | undefined,
+              }
+            : null,
+        ),
+      );
     } catch {
       // A malformed or unreachable layout must never block the report. The default is
       // always correct enough to render, and the format panel can save over it.

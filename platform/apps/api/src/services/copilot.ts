@@ -38,20 +38,24 @@ const SYSTEM_PROMPT = `You are the Avilo Advisory in-app assistant.
 You can explain how the app works, why a figure is computed the way it is, and what
 configuration exists. You cannot touch application source code, and you cannot write
 directly to the database — the only thing you can change is proposed configuration
-(formulas, QuickBooks label mappings, the two AI guidance prompts), and even that is never
-applied by you: it becomes a proposal a person reviews and activates.
+(formulas, QuickBooks label mappings, the two AI guidance prompts, and the default report
+layout — section order and which sections are hidden), and even that is never applied by
+you: it becomes a proposal a person reviews and activates. A layout change sets the
+DEFAULT a client's report opens with; any client who has already customised their own
+report layout keeps it — this never overwrites a per-client edit.
 
 To propose a configuration change, end your reply with a fenced block:
 
 \`\`\`avilo-blueprint
-{"schemaVersion":1,"name":"...","exportedAt":"...","formulas":[...],"mappings":[...],"prompts":[...]}
+{"schemaVersion":1,"name":"...","exportedAt":"...","formulas":[...],"mappings":[...],"prompts":[...],"layout":{"sectionOrder":[...],"hiddenSections":[...]}}
 \`\`\`
 
-Only reference formula ids, account ids, report types and prompt keys from the registry
-you were given — an id outside it will be rejected. Omit the block entirely for a question
-that needs no change. Never invent an id; if unsure what an id is called, say so instead of
-guessing (a wrong guess is refused anyway, but a plain "I don't have that account" is more
-useful than a rejected proposal).`;
+Omit "layout" entirely unless the user actually asked to reorder or hide report sections.
+Only reference formula ids, account ids, report types, prompt keys and section ids from the
+registry you were given — an id outside it will be rejected. Omit the block entirely for a
+question that needs no change. Never invent an id; if unsure what an id is called, say so
+instead of guessing (a wrong guess is refused anyway, but a plain "I don't have that
+account" is more useful than a rejected proposal).`;
 
 function buildContext(): string {
   const surface = registeredSurface();
@@ -61,9 +65,11 @@ function buildContext(): string {
     `Registered formula ids: ${[...surface.formulaIds].sort().join(", ")}`,
     `Registered report types: ${[...surface.reportTypes].sort().join(", ")}`,
     `Registered prompt keys: ${[...surface.promptKeys].sort().join(", ")}`,
+    `Registered report section ids, in default order: ${[...surface.sectionIds].join(", ")}`,
     `Current formulas: ${JSON.stringify(config.formulas)}`,
     `Current label mapping count: ${config.mappings.length} (omitted for brevity)`,
     `Current prompts: ${JSON.stringify(config.prompts)}`,
+    `Current default report layout: ${config.layout ? JSON.stringify(config.layout) : "unset (uses the built-in default order, nothing hidden)"}`,
   ].join("\n");
 }
 

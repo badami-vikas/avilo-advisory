@@ -138,4 +138,37 @@ describe("diffBlueprint", () => {
     const proposed = { ...emptyBlueprint("noop"), formulas: current.formulas };
     expect(diffBlueprint(proposed, current)).toHaveLength(0);
   });
+
+  it("reports an added layout when none is set yet", () => {
+    const proposed = {
+      ...emptyBlueprint("layout"),
+      layout: { hiddenSections: ["profitability"] },
+    };
+    expect(diffBlueprint(proposed, current)).toEqual([
+      { section: "layout", key: "layout", kind: "add", after: proposed.layout },
+    ]);
+  });
+
+  it("reports a modified layout against a stored one, with before/after", () => {
+    const withLayout = { ...current, layout: { hiddenSections: ["profitability"] } };
+    const proposed = {
+      ...emptyBlueprint("layout"),
+      layout: { hiddenSections: ["profitability", "customers"] },
+    };
+    expect(diffBlueprint(proposed, withLayout)).toEqual([
+      {
+        section: "layout",
+        key: "layout",
+        kind: "modify",
+        before: withLayout.layout,
+        after: proposed.layout,
+      },
+    ]);
+  });
+
+  it("reports nothing when the proposed layout matches the stored one", () => {
+    const withLayout = { ...current, layout: { hiddenSections: ["profitability"] } };
+    const proposed = { ...emptyBlueprint("noop"), layout: { hiddenSections: ["profitability"] } };
+    expect(diffBlueprint(proposed, withLayout)).toHaveLength(0);
+  });
 });

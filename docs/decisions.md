@@ -265,6 +265,30 @@ an Approvals entry — narrower, same principle.
 
 ---
 
+### ADR-036 · A layout blueprint sets the app-wide default, never a per-client edit
+**Date.** 2026-08-05
+
+**Decision.** `blueprint.layout` (`sectionOrder`/`hiddenSections`) is applied by writing
+`app_settings["report_layout_default"]`. `ClientDetailPage.loadLayout` reads it only as a
+fallback, when a client has no `report.layout` row of its own in `saved_views` — a
+per-client edit always wins and this write path never touches it.
+
+**Why.** The report layout was already "views as data" (`apps/web/src/app/report/
+layout.ts`'s own header), stored per client because "two clients rarely want the same
+report." A blueprint proposing a layout change is necessarily global — it has no client in
+scope — so it can only sensibly mean "change the default," never "overwrite every client's
+customization." Chat persistence (below) follows the same instinct in miniature: extend the
+existing mechanism rather than add a parallel one.
+
+**Consequence.** `diffBlueprint`'s `current` parameter grew an optional `layout` field so a
+second proposed layout diffs against the first rather than always reading as a fresh
+`"add"`. `AgentPanel` chat history persists through the same generic `settings.get`/
+`settings.set` pair every other runtime override already uses (ADR-013), under
+`copilot_chat_history` — no new table, because a chat transcript is exactly the kind of
+single JSON blob that path already exists to hold.
+
+---
+
 ## AI
 
 ### ADR-010 · The app must work with no model configured

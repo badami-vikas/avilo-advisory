@@ -1,6 +1,6 @@
 {
   "name": "@avilo/tables",
-  "version": "1.8.0",
+  "version": "1.9.0",
   "private": true,
   "type": "module",
   "description": "Local port of relationship-os @bridge/tables. Schema-driven table contract: columns and views are data, not hardcoded UI branches. Delete this package on integration and repoint imports at @bridge/tables.",

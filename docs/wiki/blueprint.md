@@ -79,3 +79,20 @@ describes doing.
 - Cannot activate its own proposal — only a person, through the panel or `blueprint.activate`.
 - Cannot reference an account, formula, report type, prompt key or layout section this
   build does not have; the whole document is refused, never partially applied.
+
+## Layout changes (v1.9.0)
+
+`blueprint.layout` (`sectionOrder`, `hiddenSections`) activates by writing
+`app_settings["report_layout_default"]` — the app-wide default a client's report opens
+with. It is a fallback only: `ClientDetailPage.loadLayout` reads it exclusively when that
+client has no `report.layout` row of its own in `saved_views`. A per-client edit, made
+through the format panel, always wins — a blueprint has no client in scope, so it cannot
+mean anything more specific than "the default." See ADR-036.
+
+## Chat persistence (v1.9.0)
+
+The panel's turns and proposal decisions survive a refresh, stored under
+`app_settings["copilot_chat_history"]` — the same generic `settings.get`/`settings.set`
+pair every other runtime override in this app already goes through (ADR-013), not a new
+table. A stored turn is inert text; it is never re-validated or re-applied on load, only
+displayed.

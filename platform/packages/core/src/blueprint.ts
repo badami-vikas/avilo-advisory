@@ -276,7 +276,12 @@ export interface BlueprintChange {
  */
 export function diffBlueprint(
   proposed: AviloBlueprint,
-  current: { formulas: FormulaOverride[]; mappings: LabelMappingEntry[]; prompts: PromptOverride[] },
+  current: {
+    formulas: FormulaOverride[];
+    mappings: LabelMappingEntry[];
+    prompts: PromptOverride[];
+    layout?: LayoutOverride;
+  },
 ): BlueprintChange[] {
   const changes: BlueprintChange[] = [];
 
@@ -313,7 +318,16 @@ export function diffBlueprint(
   }
 
   if (proposed.layout) {
-    changes.push({ section: "layout", key: "layout", kind: "modify", after: proposed.layout });
+    const same = JSON.stringify(proposed.layout) === JSON.stringify(current.layout ?? {});
+    if (!same) {
+      changes.push({
+        section: "layout",
+        key: "layout",
+        kind: current.layout ? "modify" : "add",
+        ...(current.layout ? { before: current.layout } : {}),
+        after: proposed.layout,
+      });
+    }
   }
 
   return changes;
