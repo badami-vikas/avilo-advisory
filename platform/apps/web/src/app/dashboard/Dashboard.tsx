@@ -1232,6 +1232,3 @@ function CustomerDrill({
     </Drill>
   );
 }
-
-/** Movement is used by the strip's verdicts; re-exported for the tests. */
-export { movement };

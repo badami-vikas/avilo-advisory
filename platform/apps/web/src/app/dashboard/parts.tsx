@@ -8,11 +8,10 @@
  */
 
 import { useEffect, useState, type ReactNode } from "react";
-import { ChevronDown, Info, Minus, TrendingDown, TrendingUp, Upload, X } from "lucide-react";
+import { ChevronDown, Upload, X } from "lucide-react";
 
-import { Tip } from "../components/Tooltip.js";
 import { useUpload } from "../components/upload-context.js";
-import type { Movement, Severity } from "./insights.js";
+import type { Severity } from "./insights.js";
 
 /* ----------------------------------------------------------------- panel */
 
@@ -110,90 +109,6 @@ export function Panel({
       </header>
       {open ? <div className="px-5 py-4">{children}</div> : null}
     </section>
-  );
-}
-
-/* -------------------------------------------------------------- kpi card */
-
-const TONE: Record<"positive" | "negative" | "neutral", string> = {
-  positive: "text-positive",
-  negative: "text-flag",
-  neutral: "text-ink-muted",
-};
-
-/**
- * One headline figure, its movement, and what it means.
- *
- * Three layers, as specified: the number at rest, the explanation on hover, the working
- * on click. The hover text says what the figure *is* rather than repeating it — a tooltip
- * that reads "Revenue: $482,000" over a card that reads "$482,000" is noise.
- */
-export function KpiCard({
-  label,
-  value,
-  movement,
-  unit,
-  hint,
-  onOpen,
-  tone,
-}: {
-  label: string;
-  value: string;
-  movement?: Movement;
-  unit?: string;
-  hint: string;
-  onOpen?: () => void;
-  /** Overrides the direction-derived colour, for figures where up is not good. */
-  tone?: "positive" | "negative" | "neutral";
-}) {
-  const direction = movement?.direction ?? "unknown";
-  const derived =
-    direction === "up" ? "positive" : direction === "down" ? "negative" : "neutral";
-  const resolved = tone ?? derived;
-
-  const Icon =
-    direction === "up" ? TrendingUp : direction === "down" ? TrendingDown : Minus;
-
-  return (
-    <Tip content={hint}>
-      <button
-        onClick={onOpen}
-        disabled={!onOpen}
-        className="group flex w-full flex-col items-start rounded-xl border border-line bg-surface px-4 py-3.5 text-left transition-all hover:border-ink-faint hover:shadow-[0_2px_8px_rgba(16,24,40,0.07)] disabled:cursor-default disabled:hover:border-line disabled:hover:shadow-none"
-      >
-        <span className="flex w-full items-center gap-1.5">
-          <span className="text-[10.5px] font-semibold uppercase tracking-[0.07em] text-ink-faint">
-            {label}
-          </span>
-          <Info
-            size={11}
-            className="text-ink-faint opacity-0 transition-opacity group-hover:opacity-100"
-          />
-        </span>
-        <span className="num mt-1 text-[22px] font-semibold tracking-tight text-ink">
-          {value}
-        </span>
-        {movement && movement.direction !== "unknown" ? (
-          <span
-            className={`mt-0.5 inline-flex items-center gap-1 text-[11.5px] font-medium ${TONE[resolved]}`}
-          >
-            <Icon size={12} />
-            {movement.changePct === null
-              ? "no comparable month"
-              : `${movement.changePct >= 0 ? "+" : ""}${movement.changePct.toFixed(1)}%${
-                  unit === "percent" && movement.change !== null
-                    ? ` (${movement.change >= 0 ? "+" : ""}${movement.change.toFixed(1)} pts)`
-                    : ""
-                }`}
-            <span className="font-normal text-ink-faint">vs last month</span>
-          </span>
-        ) : (
-          <span className="mt-0.5 text-[11.5px] text-ink-faint">
-            No prior month to compare
-          </span>
-        )}
-      </button>
-    </Tip>
   );
 }
 

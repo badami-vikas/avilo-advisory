@@ -2,7 +2,7 @@ import Database from "better-sqlite3";
 import { drizzle, type BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import { dirname } from "node:path";
-import { eq, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 
 import { schema } from "@avilo/module";
 import {
@@ -210,4 +210,4 @@ export function nowIso(): string {
   return new Date().toISOString();
 }
 
-export { schema, sql };
+export { schema };

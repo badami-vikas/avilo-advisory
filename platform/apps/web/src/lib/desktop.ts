@@ -24,8 +24,6 @@ export function desktop(): DesktopBridge | null {
   return typeof window !== "undefined" && window.desktop ? window.desktop : null;
 }
 
-export const isDesktop = (): boolean => desktop() !== null;
-
 /**
  * Produce a PDF of the current view.
  *

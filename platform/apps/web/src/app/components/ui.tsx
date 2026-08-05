@@ -125,14 +125,6 @@ export function StatTile({
   );
 }
 
-export function Pill({ children }: { children: ReactNode }) {
-  return (
-    <span className="inline-flex items-center rounded-md border border-line bg-line-soft px-2 py-[3px] text-[11px] font-medium text-ink-muted">
-      {children}
-    </span>
-  );
-}
-
 /** Empty state: honest and metadata-generated, never dummy rows. */
 export function EmptyState({
   title,

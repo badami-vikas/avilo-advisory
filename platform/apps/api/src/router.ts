@@ -1221,5 +1221,3 @@ export const appRouter = router({
   copilot: copilotRouter,
   blueprint: blueprintRouter,
 });
-
-export type AppRouter = typeof appRouter;

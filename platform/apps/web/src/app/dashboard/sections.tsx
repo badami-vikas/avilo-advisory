@@ -23,9 +23,7 @@ import {
   movement,
   movements,
   periodEnd,
-  trailingMean,
   trendPct,
-  type Action,
   type ForecastAssumptions,
   type HealthScore,
   type Warning,
@@ -1332,65 +1330,3 @@ export function WarningsSection({
   );
 }
 
-const EFFORT_LABEL: Record<Action["effort"], string> = {
-  low: "Quick",
-  medium: "Some work",
-  high: "Structural",
-};
-
-export function ActionsSection({
-  actions,
-  onGo,
-}: {
-  actions: Action[];
-  onGo: (section: string) => void;
-}) {
-  return (
-    <Panel
-      id="actions"
-      title="Recommended actions"
-      subtitle="Generated from this month's conditions, with the arithmetic behind each"
-    >
-      {actions.length === 0 ? (
-        <p className="py-4 text-[12.5px] text-ink-muted">
-          No condition in this month's data calls for an intervention.
-        </p>
-      ) : (
-        <ol className="space-y-2.5">
-          {actions.map((action, index) => (
-            <li key={action.id}>
-              <button
-                onClick={() => onGo(action.section)}
-                className="flex w-full items-start gap-3 rounded-xl border border-line px-4 py-3 text-left transition-all hover:border-ink-faint hover:shadow-[0_2px_8px_rgba(16,24,40,0.06)]"
-              >
-                <span className="num mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full bg-ink text-[11px] font-semibold text-white">
-                  {index + 1}
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="flex flex-wrap items-center gap-2">
-                    <span className="text-[13px] font-medium text-ink">{action.title}</span>
-                    <span className="rounded-md border border-line bg-line-soft px-1.5 py-[2px] text-[10px] font-medium uppercase tracking-[0.05em] text-ink-muted">
-                      {EFFORT_LABEL[action.effort]}
-                    </span>
-                  </span>
-                  <span className="mt-1 block text-[12px] leading-relaxed text-ink-muted">
-                    {action.why}
-                  </span>
-                  {action.impact ? (
-                    <span className="mt-1 block text-[12px] font-medium text-positive">
-                      {action.impact}
-                    </span>
-                  ) : null}
-                </span>
-                <ArrowRight size={13} className="mt-1 shrink-0 text-ink-faint" />
-              </button>
-            </li>
-          ))}
-        </ol>
-      )}
-    </Panel>
-  );
-}
-
-/** Trailing-mean helper re-exported for the shell's summary strip. */
-export { trailingMean };

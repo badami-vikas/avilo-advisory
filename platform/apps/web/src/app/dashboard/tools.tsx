@@ -18,7 +18,6 @@ import {
   collectionPriority,
   growthQuality,
   money,
-  trailingMean,
   type GrowthQualityPoint,
 } from "./insights.js";
 import { BubbleMatrix } from "./charts.js";
@@ -680,6 +679,3 @@ function Outcome({
     </div>
   );
 }
-
-/** Re-exported so the shell can build its summary strip from the same helper. */
-export { trailingMean };
