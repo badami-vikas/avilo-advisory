@@ -100,9 +100,18 @@ dmg:
       path: /Applications
 
 win:
+  # x64 only.
+  #
+  # Two architectures means two installers with near-identical names, and the person
+  # downloading has no way to tell which one their machine wants. Windows on ARM runs x64
+  # under emulation, so one file works everywhere and the wrong-installer failure mode
+  # stops existing. Revisit when there is a reason to pay for the second artifact.
   target:
     - target: nsis
-      arch: [x64, arm64]
+      arch: [x64]
+  # Says which build a file is without opening it — worth more than brevity when a beta
+  # user is being asked whether their copy is the current one.
+  artifactName: ${productName} Setup ${version}.${ext}
 
 nsis:
   oneClick: false
@@ -113,6 +122,14 @@ nsis:
   # Uninstalling removes the application. It does not touch ~/Documents/Bridge, which is
   # where the user's own uploads and exports live.
   deleteAppDataOnUninstall: false
+  # Install and uninstall end a running copy themselves rather than failing on one. See
+  # build/installer.nsh for why that is the right trade here.
+  include: build/installer.nsh
+  # Reinstalling the same version overwrites in place instead of refusing.
+  allowElevation: true
+  # An install that leaves a half-removed previous version behind is the mess being fixed;
+  # let the uninstaller of the old version run to completion first.
+  differentialPackage: false
 
 linux:
   target:

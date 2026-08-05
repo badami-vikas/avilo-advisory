@@ -212,6 +212,57 @@ describe("ageing", () => {
     expect(result.facts.every((f) => f.accountId.startsWith("ap."))).toBe(true);
   });
 
+  /*
+    Customers with sub-jobs, which is how every real restoration ageing report is shaped
+    and how none of the fixtures above were. Two variants appear in the wild and both are
+    here: a parent that bills nothing directly (Andrea) and one that carries a credit of
+    its own alongside a job (Michael).
+
+    Read without grouping this is five customers owing 461,000 between them.
+  */
+  const QBO_AR_AGING_WITH_JOBS: Grid = [
+    ["Phoenix Restoration Co."],
+    ["A/R Aging Summary"],
+    ["As of October 31, 2024"],
+    [null, "Current", "1 - 30", "31 - 60", "61 - 90", "91 and over", "Total"],
+    ["Andrea Anthony"],
+    ["02MO0226-027WTR [Water]", null, null, null, null, 18_000, 18_000],
+    ["Total for Andrea Anthony", 0, 0, 0, 0, 18_000, 18_000],
+    ["Dan Casey", null, null, 10_000, null, null, 10_000],
+    ["Michael Hutchinson", null, null, null, null, -184_000, -184_000],
+    ["STL0925-070WTR [Water]", null, null, null, null, 375_000, 375_000],
+    ["Total for Michael Hutchinson", 0, 0, 0, 0, 191_000, 191_000],
+    ["Total", 0, 0, 10_000, 0, 209_000, 219_000],
+  ];
+
+  it("folds job lines into the customer they belong to", () => {
+    const result = parseAging(QBO_AR_AGING_WITH_JOBS, {
+      period: "2024-10",
+      reportType: "ar_aging",
+    });
+
+    expect(result.entities.map((e) => e.label)).toEqual([
+      "Andrea Anthony",
+      "Dan Casey",
+      "Michael Hutchinson",
+    ]);
+    // The group total, not the job line and not the parent's own credit.
+    expect(result.entities.find((e) => e.label === "Michael Hutchinson")?.total).toBe(
+      191_000,
+    );
+    // Nothing is counted twice: the entity list reconciles to the report's own total.
+    expect(result.entities.reduce((sum, e) => sum + e.total, 0)).toBe(219_000);
+  });
+
+  it("never presents a job code as a customer", () => {
+    const result = parseAging(QBO_AR_AGING_WITH_JOBS, {
+      period: "2024-10",
+      reportType: "ar_aging",
+    });
+    expect(result.entities.map((e) => e.label).join(" ")).not.toMatch(/\[Water\]/);
+    expect(result.entities.map((e) => e.label).join(" ")).not.toMatch(/^Total for/);
+  });
+
   it("reports a clear failure when no bucket columns exist", () => {
     const result = parseAging([["Customer", "Amount"], ["A", 1]], {
       period: "2024-10",
@@ -287,6 +338,47 @@ describe("sales by customer", () => {
     expect(result.facts.find((f) => f.accountId === "ops.job_count")?.value).toBe(21);
   });
 
+  /*
+    The export an advisor actually downloads: a month column per month, a trailing Total,
+    and customers with sub-jobs.
+
+    This shape defeated the parser completely. The label column was chosen by skipping
+    blank headers, so it landed on "Jul 2025" and every customer was labelled with their
+    July figure — the grand total row became a customer called "20200" worth $1.3m, and
+    the ranking a beta user saw was job codes and stray numbers.
+  */
+  const QBO_SALES_BY_MONTH: Grid = [
+    ["Phoenix Restoration Co."],
+    ["Sales by Customer Summary"],
+    ["November 2023 - October 2024"],
+    ["", "Jul 2025", "Aug 2025", "Sep 2025", "Total"],
+    ["Andrea Anthony"],
+    ["02MO0226-027WTR [Water]", null, 18_000, null, 18_000],
+    ["Total for Andrea Anthony", 0, 18_000, 0, 18_000],
+    ["Harbor Property Group", 20_200, null, null, 20_200],
+    ["Total", 20_200, 18_000, 0, 38_200],
+  ];
+
+  it("reads the label column when the amount columns are months", () => {
+    const result = parseEntityReport(QBO_SALES_BY_MONTH, {
+      period: "2024-10",
+      reportType: "sales_by_customer_l12m",
+    });
+
+    expect(result.entities.map((e) => e.label)).toEqual([
+      "Harbor Property Group",
+      "Andrea Anthony",
+    ]);
+    expect(result.entities[0]?.value).toBe(20_200);
+    // The last column is the 12-month total, not the first month.
+    expect(result.entities[1]?.value).toBe(18_000);
+    // The grand total row is not a customer.
+    expect(result.entities.reduce((sum, e) => sum + e.value, 0)).toBe(38_200);
+    expect(
+      result.facts.find((f) => f.accountId === "ops.customer_count")?.value,
+    ).toBe(2);
+  });
+
   it("writes a total account for a referral report", () => {
     const referrals: Grid = [
       ["Referral Report"],
@@ -349,5 +441,54 @@ describe("P&L detail lines for the Top Expenses panel", () => {
     const result = parseProfitAndLoss(PL, { resolveLabel: builtinResolver });
     const payroll = result.detailLines.find((l) => l.label.trim() === "Payroll");
     expect(payroll?.amounts).toEqual([{ period: "2024-10", value: 34_000 }]);
+  });
+
+  /*
+    A real expense list is not flat: QuickBooks nests sub-groups and prints a total for
+    each one. Any total row used to close the section, so the section closed at the FIRST
+    sub-group and every line below it was discarded. Top Expenses showed two rows, one of
+    them a negative credit-card rebate — reported by a beta user, and invisible to the
+    flat fixture above.
+  */
+  const NESTED_PL: Grid = [
+    ["Phoenix Restoration Co."],
+    ["Profit and Loss"],
+    [null, "Oct 2024", "Total"],
+    ["Expenses"],
+    ["  Advertising & Marketing", 120, 120],
+    ["  Bank Charges & Fees", 44, 44],
+    ["    Credit Card rewards", -29.25, -29.25],
+    ["  Total for Bank Charges & Fees", 14.75, 14.75],
+    ["  Wages", 23_641.32, 23_641.32],
+    ["  Workers Comp", 211, 211],
+    ["  Total for Payroll Expenses", 23_852.32, 23_852.32],
+    ["  Insurance", 1_172, 1_172],
+    ["Total for Expenses", 25_159.07, 25_159.07],
+  ];
+
+  it("keeps reading expenses after a sub-group total", () => {
+    const result = parseProfitAndLoss(NESTED_PL, { resolveLabel: () => null });
+    const expenses = result.detailLines.filter((l) => l.section === "expense");
+
+    expect(expenses.map((l) => l.label.trim())).toEqual([
+      "Advertising & Marketing",
+      "Bank Charges & Fees",
+      "Credit Card rewards",
+      "Wages",
+      "Workers Comp",
+      "Insurance",
+    ]);
+    // The largest expense is Wages, not whatever survived the truncation.
+    const largest = [...expenses].sort(
+      (a, b) => Math.abs(b.amounts[0]!.value) - Math.abs(a.amounts[0]!.value),
+    )[0];
+    expect(largest?.label.trim()).toBe("Wages");
+  });
+
+  it("excludes sub-group totals so children are not double-counted", () => {
+    const result = parseProfitAndLoss(NESTED_PL, { resolveLabel: () => null });
+    expect(
+      result.detailLines.some((l) => /^total/i.test(l.label.trim())),
+    ).toBe(false);
   });
 });

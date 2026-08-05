@@ -91,6 +91,43 @@ Format: **ADR-nnn · date · decision** → why · rejected · consequence.
 
 ---
 
+### ADR-026 · A group total replaces the rows it covers, everywhere
+**Date.** 2026-08-05
+
+**Decision.** `import/grouping.ts` is the one implementation of QuickBooks' `parent / children / Total for parent` shape, shared by the ageing and entity parsers. The P&L applies the same rule through its own ranking.
+
+**Why.** ADR-008 established this for balance-sheet accounts and it was never generalised, so every list-shaped report shipped the naive reading. Three separate beta complaints — job codes listed as customers, receivables counted twice, a customer called "20200" worth $1.3m — were one missing rule applied in three places (BUG-020, BUG-021).
+
+**Detail.** A parent that bills nothing directly prints as a bare label with no figures. It has to be carried into the collapse as a marker: without it there is nothing for the children to be spliced away from, and the group's job lines survive alongside their own total. This was the second half of the fix and the non-obvious half.
+
+**Rejected.** Detecting groups from indentation. Indentation survives Excel and dies in PDF; the total row is present in both.
+
+**Consequence.** Every entity list reconciles to its report's own grand total, and that is the assertion the tests make rather than a row count.
+
+---
+
+### ADR-027 · Only a section's own total closes it
+**Date.** 2026-08-05
+
+**Decision.** The P&L walker closes a section when it meets the total *for that section*, not on any total row.
+
+**Why.** An expense list nests. Closing on the first `Total for Bank Charges & Fees` discarded every line below it, and Top Expenses rendered two rows out of nineteen (BUG-019).
+
+**Consequence.** Sub-group totals now fall inside an open section, so they are separately excluded from `detailLines` — a total and its children in the same list would double-count. Both halves are needed; either alone is a different wrong answer.
+
+---
+
+### ADR-028 · A permanent decision needs a visible undo
+**Date.** 2026-08-05
+
+**Decision.** A mapped row stays in the list showing what it was mapped to, with Undo. Rows can be multi-selected and mapped together, and the copy states that a mapping applies to future uploads.
+
+**Why.** ADR-002 makes a mapping durable, which is the feature. Removing the row on success made it also unreversible, and left the durability invisible — people re-mapped the same rows every month and reported it as the app forgetting. The stronger a stored decision is, the more it needs a way back.
+
+**Detail.** `forgetMapping` deletes only the `origin = 'user'` row, so undoing falls back to the built-in dialect table rather than to nothing.
+
+---
+
 ## AI
 
 ### ADR-010 · The app must work with no model configured

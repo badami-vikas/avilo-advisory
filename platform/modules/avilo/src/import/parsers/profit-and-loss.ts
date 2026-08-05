@@ -20,6 +20,7 @@
 import { normalizeLabel } from "../../accounts.js";
 import { parsePeriodHeader, type Period } from "../../periods.js";
 import { cellText, isBlank, parseNumber, rowLabel } from "../cells.js";
+import { totalRowSubject } from "../grouping.js";
 import type {
   ExtractedFact,
   Grid,
@@ -164,13 +165,22 @@ export function parseProfitAndLoss(
     { period: Period; accountId: string; rank: number; label: string; columnLabel: string; value: number }[]
   >();
 
-  /** A "Total …" row is a section total (rank 2); anything else is a detail line. */
-  const rankOf = (normalized: string): number =>
-    /^total\b/.test(normalized) || /^total for /.test(normalized) ? 2 : 1;
+  /*
+    Tracks which section of the statement the walker is currently inside, so a detail line
+    can be attributed to Income, COGS or Expenses without matching its own label.
 
-  // Tracks which section of the statement the walker is currently inside, so a detail
-  // line can be attributed to Income, COGS or Expenses without matching its own label.
+    `sectionLabel` is what closes it, and it has to be: ANY total row used to close the
+    section, but an expense list is full of sub-group totals —
+
+        Bank Charges & Fees / Credit Card rewards / Total for Bank Charges & Fees
+        Car & Truck / Repair & Maintenance        / Total for Car & Truck
+
+    — so the section closed at the first sub-group and the thirty expense lines below it
+    were never captured. Top Expenses showed two rows, one of them a negative credit-card
+    rebate ranked as the smallest expense. Only "Total for Expenses" closes Expenses.
+  */
   let section: PLSection = null;
+  let sectionLabel = "";
 
   for (let r = columnMap.headerRow + 1; r < grid.length; r += 1) {
     const row = grid[r];
@@ -183,9 +193,19 @@ export function parseProfitAndLoss(
     if (normalized === "") continue;
 
     const sectionHeader = SECTION_HEADERS.find((s) => s.pattern.test(normalized));
-    if (sectionHeader) section = sectionHeader.section;
-    // A "Total for X" row closes its section.
-    else if (/^total for /.test(normalized) || /^total /.test(normalized)) section = null;
+    const totalSubject = totalRowSubject(normalized);
+
+    if (sectionHeader) {
+      section = sectionHeader.section;
+      sectionLabel = normalized;
+    } else if (
+      totalSubject !== null &&
+      (totalSubject === "" || totalSubject === sectionLabel)
+    ) {
+      // Only the section's own total closes it; a sub-group total does not.
+      section = null;
+      sectionLabel = "";
+    }
 
     const accountId = options.resolveLabel(normalized, "profit_and_loss");
 
@@ -207,7 +227,14 @@ export function parseProfitAndLoss(
     // Detail lines are captured regardless of whether the row also maps to a canonical
     // account: "Depreciation & Amortization" is both a mapped account and an expense
     // line the Top Expenses panel needs to know about in order to exclude it.
-    if (section !== null && !sectionHeader) {
+    // A sub-group total (`Total for Payroll Expenses`) would double-count against the
+    // children it covers, and a structural row (`Gross Profit`) is not an expense at all.
+    if (
+      section !== null &&
+      !sectionHeader &&
+      totalSubject === null &&
+      !STRUCTURAL_ROW.test(normalized)
+    ) {
       detailLines.push({
         label,
         section,
@@ -216,7 +243,8 @@ export function parseProfitAndLoss(
     }
 
     if (accountId) {
-      const rank = rankOf(normalized);
+      /** A "Total …" row is a section total (rank 2); anything else is a detail line. */
+      const rank = totalSubject === null ? 1 : 2;
       for (const entry of values) {
         const key = `${entry.period}|${accountId}`;
         const list = candidates.get(key) ?? [];

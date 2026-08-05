@@ -12,6 +12,7 @@
 import { matchAgingBucket, type AgingBucketId } from "../../accounts.js";
 import type { Period } from "../../periods.js";
 import { cellText, isBlank, parseNumber, rowLabel } from "../cells.js";
+import { collapseTotalGroups, isGrandTotalRow } from "../grouping.js";
 import type { ExtractedFact, Grid, ParseResult, ReportType } from "../types.js";
 
 export interface AgingEntity {
@@ -68,7 +69,11 @@ export function findBucketColumns(grid: Grid, scanRows = 25): BucketColumns | nu
   return best;
 }
 
-const TOTAL_ROW = /^total$/i;
+/**
+ * Rows are buffered rather than emitted, because a customer with sub-jobs occupies three
+ * or more rows and only the group total describes them (see `../grouping.ts`).
+ */
+type BufferedRow = { label: string; row: AgingEntity | null };
 
 export interface ParseAgingOptions {
   /** The period this ageing snapshot belongs to. */
@@ -96,7 +101,7 @@ export function parseAging(grid: Grid, options: ParseAgingOptions): AgingParseRe
   }
 
   const headerCells = grid[columns.headerRow] ?? [];
-  const entities: AgingEntity[] = [];
+  const buffered: BufferedRow[] = [];
   const bucketTotals = new Map<AgingBucketId, number>();
   let grandTotal: number | null = null;
   let totalRowLabel = "";
@@ -131,9 +136,13 @@ export function parseAging(grid: Grid, options: ParseAgingOptions): AgingParseRe
       }
     }
 
-    if (!sawValue) continue;
+    // A bare label with no figures is a parent heading; keep it as a group marker.
+    if (!sawValue) {
+      buffered.push({ label, row: null });
+      continue;
+    }
 
-    if (TOTAL_ROW.test(label.trim())) {
+    if (isGrandTotalRow(label)) {
       grandTotal = rowTotal;
       totalRowLabel = label;
       for (const [bucket, amount] of Object.entries(bucketAmounts)) {
@@ -153,8 +162,14 @@ export function parseAging(grid: Grid, options: ParseAgingOptions): AgingParseRe
       }
     }
 
-    entities.push({ label, bucket: worst, bucketAmounts, total: rowTotal });
+    buffered.push({ label, row: { label, bucket: worst, bucketAmounts, total: rowTotal } });
   }
+
+  // One entry per customer or vendor: job lines fold into the parent they belong to.
+  const entities = collapseTotalGroups(buffered).map(({ label, row }) => ({
+    ...row,
+    label,
+  }));
 
   // No Total row: derive bucket totals by summing the entities.
   if (bucketTotals.size === 0) {

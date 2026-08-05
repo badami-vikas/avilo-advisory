@@ -21,7 +21,7 @@ import {
   readSetting,
   DEFAULT_GROQ_MODEL,
 } from "./services/ai.js";
-import { learnMapping } from "./services/labels.js";
+import { forgetMapping, learnMapping } from "./services/labels.js";
 import { commitFile, stageFile } from "./services/import.js";
 import {
   availablePeriods,
@@ -825,6 +825,25 @@ const importRouter = router({
         accountId: input.accountId,
       });
       return { ok: true };
+    }),
+
+  /** Undo a taught mapping, so a mis-click is one click to reverse rather than permanent. */
+  unmapLabel: procedure
+    .input(
+      z.object({
+        clientId: z.string().nullable(),
+        reportType: z.string(),
+        rawLabel: z.string(),
+        scope: z.enum(["client", "global"]).default("client"),
+      }),
+    )
+    .mutation(({ input }) => {
+      const removed = forgetMapping({
+        clientId: input.scope === "global" ? null : input.clientId,
+        reportType: input.reportType as ReportType,
+        normalizedLabel: normalizeLabel(input.rawLabel),
+      });
+      return { ok: true, removed };
     }),
 
   commit: procedure

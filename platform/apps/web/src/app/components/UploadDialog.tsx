@@ -89,6 +89,13 @@ export function UploadDialog({
     [clientId],
   );
 
+  /*
+    Mapping a row used to delete it from the list, which read as progress and was in fact
+    a trapdoor: a mis-click was unreversible from the interface, because the row you needed
+    to correct was the one that had just disappeared. The row now stays put and shows what
+    it was mapped to, and the card offers Undo. The mapping is applied at commit either
+    way — the resolver re-reads the file — so nothing is lost by keeping it visible.
+  */
   const mapLabel = useCallback(
     async (file: Staged, rawLabel: string, accountId: string) => {
       if (!accountId) return;
@@ -99,29 +106,18 @@ export function UploadDialog({
         accountId,
         scope: "client",
       });
-      // Re-stage from the stored copy so the preview reflects the new mapping.
-      const refreshed = await api.import.stage.mutate({
+    },
+    [clientId],
+  );
+
+  const unmapLabel = useCallback(
+    async (file: Staged, rawLabel: string) => {
+      await api.import.unmapLabel.mutate({
         clientId,
-        files: [],
+        reportType: file.classification.reportType as string,
+        rawLabel,
+        scope: "client",
       });
-      void refreshed;
-      setStaged((current) =>
-        current.map((entry) =>
-          entry.sourceFileId === file.sourceFileId
-            ? {
-                ...entry,
-                preview: entry.preview
-                  ? {
-                      ...entry.preview,
-                      unmatched: entry.preview.unmatched.filter(
-                        (u) => u.rawLabel !== rawLabel,
-                      ),
-                    }
-                  : null,
-              }
-            : entry,
-        ),
-      );
     },
     [clientId],
   );
@@ -236,6 +232,7 @@ export function UploadDialog({
               file={file}
               accounts={accounts}
               onMapLabel={(raw, account) => void mapLabel(file, raw, account)}
+              onUnmapLabel={(raw) => void unmapLabel(file, raw)}
               onChangeType={(type) =>
                 setStaged((current) =>
                   current.map((entry) =>
@@ -315,15 +312,18 @@ const STATEMENT_FOR_REPORT: Record<string, string> = {
   referral_l90d: "referral",
 };
 
-function StagedFileCard({
+/** Exported for the mapping regression tests; rendered only by `UploadDialog`. */
+export function StagedFileCard({
   file,
   accounts,
   onMapLabel,
+  onUnmapLabel,
   onChangeType,
 }: {
   file: Staged;
   accounts: Account[];
   onMapLabel: (rawLabel: string, accountId: string) => void;
+  onUnmapLabel: (rawLabel: string) => void;
   onChangeType: (type: ReportType) => void;
 }) {
   const { classification, preview } = file;
@@ -347,6 +347,53 @@ function StagedFileCard({
   );
 
   const suggested = Object.entries(suggestions).filter(([, s]) => s.accountId);
+
+  /** rawLabel -> accountId for every mapping made from this card, so Undo has a target. */
+  const [mapped, setMapped] = useState<Record<string, string>>({});
+
+  /*
+    Multi-select, because the rows that need mapping arrive in families: eleven Mitigation
+    expense lines that are all overhead, six income lines that are all revenue. Mapping
+    them one dropdown at a time was the single most-repeated complaint from the first beta,
+    and each repetition is another chance to pick the wrong neighbour by mistake.
+  */
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkAccount, setBulkAccount] = useState("");
+
+  const toggleSelected = (rawLabel: string) => {
+    setSelected((current) => {
+      const next = new Set(current);
+      if (next.has(rawLabel)) next.delete(rawLabel);
+      else next.add(rawLabel);
+      return next;
+    });
+  };
+
+  const applyMapping = (rawLabel: string, accountId: string) => {
+    onMapLabel(rawLabel, accountId);
+    setMapped((current) => ({ ...current, [rawLabel]: accountId }));
+  };
+
+  const undoMapping = (rawLabel: string) => {
+    onUnmapLabel(rawLabel);
+    setMapped((current) => {
+      const next = { ...current };
+      delete next[rawLabel];
+      return next;
+    });
+    setSuggestions((current) => {
+      const next = { ...current };
+      delete next[rawLabel];
+      return next;
+    });
+  };
+
+  const mapSelected = () => {
+    if (!bulkAccount) return;
+    for (const rawLabel of selected) applyMapping(rawLabel, bulkAccount);
+    setSelected(new Set());
+    setBulkAccount("");
+  };
 
   /*
     Only the accounts this report could legitimately produce. Falls back to the full list
@@ -381,9 +428,8 @@ function StagedFileCard({
 
   const applyAll = () => {
     for (const [rawLabel, s] of suggested) {
-      if (s.accountId) onMapLabel(rawLabel, s.accountId);
+      if (s.accountId) applyMapping(rawLabel, s.accountId);
     }
-    setSuggestions({});
   };
 
   return (
@@ -467,14 +513,28 @@ function StagedFileCard({
                         a bug that was not there.
                       */}
                       <p className="text-[12px] font-medium text-ink">
-                        {preview.unmatched.length} row
-                        {preview.unmatched.length === 1 ? " has" : "s have"} no matching
-                        account
+                        {preview.unmatched.length - Object.keys(mapped).length} row
+                        {preview.unmatched.length - Object.keys(mapped).length === 1
+                          ? " has"
+                          : "s have"}{" "}
+                        no matching account
+                        {Object.keys(mapped).length > 0 ? (
+                          <span className="ml-1.5 font-normal text-accent">
+                            · {Object.keys(mapped).length} mapped
+                          </span>
+                        ) : null}
                       </p>
+                      {/*
+                        Spelling out that a mapping is permanent, because it is the whole
+                        point of the feature and nobody could tell. "Remembered" was read
+                        as "remembered for this upload"; people re-mapped the same thirty
+                        rows every month and reported it as the app forgetting.
+                      */}
                       <p className="mt-0.5 text-[11.5px] leading-relaxed text-ink-muted">
                         Usually fine — subtotals and sub-accounts have nowhere to map, and
-                        skipping them is correct. Map the ones that matter; each choice is
-                        remembered.
+                        skipping them is correct. Tick several rows to map them together.
+                        Every mapping is saved for this client and applied automatically to
+                        next month's upload.
                       </p>
                     </div>
                     <Button onClick={askModel} disabled={suggesting}>
@@ -501,15 +561,55 @@ function StagedFileCard({
                       </Button>
                     </div>
                   ) : null}
+                  {selected.size > 0 ? (
+                    <div className="mt-2 flex items-center gap-2 rounded-md border border-accent/30 bg-accent-soft/40 px-2.5 py-1.5">
+                      <span className="shrink-0 text-[11.5px] text-ink">
+                        {selected.size} selected →
+                      </span>
+                      <select
+                        aria-label="Account for selected rows"
+                        value={bulkAccount}
+                        onChange={(event) => setBulkAccount(event.target.value)}
+                        className="h-7 min-w-0 flex-1 rounded-md border border-line bg-surface px-2 text-[11.5px] outline-none focus:border-accent"
+                      >
+                        <option value="">Choose an account…</option>
+                        {relevantAccounts.map((account) => (
+                          <option key={account.id} value={account.id}>
+                            {account.label}
+                          </option>
+                        ))}
+                      </select>
+                      <Button
+                        variant="primary"
+                        onClick={mapSelected}
+                        disabled={!bulkAccount}
+                      >
+                        Map {selected.size}
+                      </Button>
+                      <Button onClick={() => setSelected(new Set())}>Clear</Button>
+                    </div>
+                  ) : null}
+
                   <div className="mt-2 max-h-44 space-y-1.5 overflow-y-auto">
                     {preview.unmatched.map((row) => {
                       const hint = suggestions[row.rawLabel];
+                      const appliedTo = mapped[row.rawLabel];
                       return (
                         <div
                           key={row.normalizedLabel}
                           className="flex items-center gap-2"
                         >
-                          <span className="min-w-0 flex-1 truncate text-[12px] text-ink">
+                          <input
+                            type="checkbox"
+                            aria-label={`Select ${row.rawLabel}`}
+                            checked={selected.has(row.rawLabel)}
+                            disabled={appliedTo !== undefined}
+                            onChange={() => toggleSelected(row.rawLabel)}
+                            className="shrink-0 accent-[var(--accent,#1570ef)] disabled:opacity-30"
+                          />
+                          <span
+                            className={`min-w-0 flex-1 truncate text-[12px] ${appliedTo ? "text-ink-faint line-through" : "text-ink"}`}
+                          >
                             {row.rawLabel}
                             {row.sampleValues[0] ? (
                               <span className="num ml-2 text-ink-faint">
@@ -525,30 +625,43 @@ function StagedFileCard({
                               </span>
                             ) : null}
                           </span>
-                          <select
-                            value={hint?.accountId ?? ""}
-                            onChange={(event) => {
-                              const value = event.target.value;
-                              setSuggestions((current) => ({
-                                ...current,
-                                [row.rawLabel]: {
-                                  accountId: value || null,
-                                  reason: current[row.rawLabel]?.reason ?? "",
-                                },
-                              }));
-                              if (value) onMapLabel(row.rawLabel, value);
-                            }}
-                            className={`h-7 w-52 shrink-0 rounded-md border bg-surface px-2 text-[11.5px] outline-none focus:border-accent ${
-                              hint?.accountId ? "border-accent text-accent" : "border-line"
-                            }`}
-                          >
-                            <option value="">Skip</option>
-                            {relevantAccounts.map((account) => (
-                              <option key={account.id} value={account.id}>
-                                {account.label}
-                              </option>
-                            ))}
-                          </select>
+                          {appliedTo ? (
+                            <>
+                              <span className="w-52 shrink-0 truncate text-right text-[11.5px] text-accent">
+                                {relevantAccounts.find((a) => a.id === appliedTo)?.label ??
+                                  appliedTo}
+                              </span>
+                              <Button onClick={() => undoMapping(row.rawLabel)}>
+                                Undo
+                              </Button>
+                            </>
+                          ) : (
+                            <select
+                              aria-label={`Account for ${row.rawLabel}`}
+                              value={hint?.accountId ?? ""}
+                              onChange={(event) => {
+                                const value = event.target.value;
+                                setSuggestions((current) => ({
+                                  ...current,
+                                  [row.rawLabel]: {
+                                    accountId: value || null,
+                                    reason: current[row.rawLabel]?.reason ?? "",
+                                  },
+                                }));
+                                if (value) applyMapping(row.rawLabel, value);
+                              }}
+                              className={`h-7 w-52 shrink-0 rounded-md border bg-surface px-2 text-[11.5px] outline-none focus:border-accent ${
+                                hint?.accountId ? "border-accent text-accent" : "border-line"
+                              }`}
+                            >
+                              <option value="">Skip</option>
+                              {relevantAccounts.map((account) => (
+                                <option key={account.id} value={account.id}>
+                                  {account.label}
+                                </option>
+                              ))}
+                            </select>
+                          )}
                         </div>
                       );
                     })}

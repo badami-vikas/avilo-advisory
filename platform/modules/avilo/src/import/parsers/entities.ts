@@ -11,6 +11,7 @@
 
 import type { Period } from "../../periods.js";
 import { cellText, isBlank, parseNumber, rowLabel } from "../cells.js";
+import { collapseTotalGroups, isGrandTotalRow } from "../grouping.js";
 import type { ExtractedFact, Grid, ParseResult, ReportType } from "../types.js";
 
 export interface EntityRow {
@@ -28,7 +29,6 @@ export interface EntityParseResult extends ParseResult {
 
 const AMOUNT_HEADER = /^(total|amount|sales|income|revenue|balance)$/i;
 const COUNT_HEADER = /^(count|transactions|# of jobs|jobs|no\.? of jobs|invoices)$/i;
-const TOTAL_ROW = /^(total|grand total)$/i;
 
 interface Layout {
   headerRow: number;
@@ -48,21 +48,29 @@ function findLayout(grid: Grid, scanRows = 25): Layout | null {
     let labelColumn: number | null = null;
     const ignored: string[] = [];
 
+    /*
+      The label column is the leftmost column that is not an amount or a count — and it
+      is almost always the one with a BLANK header, because QuickBooks does not name it.
+
+      Skipping blank headers before choosing the label column is what broke the customer
+      ranking: on a Sales by Customer Summary the header is ["", "Jul 2025", …, "Total"],
+      so the label column became "Jul 2025" and every customer was labelled with their
+      July figure. The grand total row read as a customer called "20200" worth $1.3m.
+    */
     for (let c = 0; c < row.length; c += 1) {
       const text = cellText(row[c] ?? null);
-      if (text === "") continue;
-      if (COUNT_HEADER.test(text)) {
+      if (text !== "" && COUNT_HEADER.test(text)) {
         countColumn = c;
         continue;
       }
-      if (AMOUNT_HEADER.test(text)) {
+      if (text !== "" && AMOUNT_HEADER.test(text)) {
         // Prefer the leftmost amount column: QuickBooks puts "Total" last and a
         // percentage column after it.
         if (amountColumn === null) amountColumn = c;
         continue;
       }
       if (labelColumn === null) labelColumn = c;
-      else ignored.push(text);
+      else if (text !== "") ignored.push(text);
     }
 
     if (amountColumn !== null) {
@@ -131,7 +139,7 @@ export function parseEntityReport(
   }
 
   const headerCells = grid[Math.max(layout.headerRow, 0)] ?? [];
-  const entities: EntityRow[] = [];
+  const buffered: { label: string; row: EntityRow | null }[] = [];
   let statedTotal: number | null = null;
 
   for (let r = Math.max(layout.headerRow, 0) + 1; r < grid.length; r += 1) {
@@ -141,12 +149,16 @@ export function parseEntityReport(
     const label = cellText(row[layout.labelColumn] ?? null) || rowLabel(row);
     if (label === "") continue;
 
+    // A bare label with no figures is a parent heading; keep it as a group marker so the
+    // job lines beneath it have something to collapse into.
     const cell = row[layout.amountColumn] ?? null;
-    if (isBlank(cell)) continue;
-    const value = parseNumber(cell);
-    if (value === null) continue;
+    const value = isBlank(cell) ? null : parseNumber(cell);
+    if (value === null) {
+      buffered.push({ label, row: null });
+      continue;
+    }
 
-    if (TOTAL_ROW.test(label.trim())) {
+    if (isGrandTotalRow(label)) {
       statedTotal = value;
       continue;
     }
@@ -156,8 +168,15 @@ export function parseEntityReport(
         ? null
         : parseNumber(row[layout.countColumn] ?? null);
 
-    entities.push({ label, value, count });
+    buffered.push({ label, row: { label, value, count } });
   }
+
+  // One row per customer or partner: a job line belongs to the customer above it, and
+  // "Total for <customer>" is that customer's real figure. See `../grouping.ts`.
+  const entities = collapseTotalGroups(buffered).map(({ label, row }) => ({
+    ...row,
+    label,
+  }));
 
   entities.sort((a, b) => b.value - a.value);
 

@@ -71,6 +71,39 @@ export function learnMapping(input: {
     .run();
 }
 
+/**
+ * Undo a taught mapping.
+ *
+ * A mapping is remembered forever and applied to every future import, which is the point
+ * of it — and exactly why a wrong one has to be reversible. Until this existed, a mis-click
+ * in the mapping list was permanent from the interface: the row vanished from "no matching
+ * account" and never came back, so there was nothing left to correct.
+ *
+ * Only the user-taught row is deleted. The built-in dialect table is a seed, not a
+ * correction, and removing a client mapping should fall back to it rather than to nothing.
+ */
+export function forgetMapping(input: {
+  clientId: string | null;
+  reportType: ReportType;
+  normalizedLabel: string;
+}): boolean {
+  const db = getDb();
+  const result = db
+    .delete(schema.labelMappings)
+    .where(
+      and(
+        input.clientId === null
+          ? isNull(schema.labelMappings.clientId)
+          : eq(schema.labelMappings.clientId, input.clientId),
+        eq(schema.labelMappings.reportType, input.reportType),
+        eq(schema.labelMappings.normalizedLabel, input.normalizedLabel),
+        eq(schema.labelMappings.origin, "user"),
+      ),
+    )
+    .run();
+  return result.changes > 0;
+}
+
 export function listMappings(clientId: string) {
   const db = getDb();
   return db

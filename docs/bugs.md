@@ -167,6 +167,68 @@ Ordered newest first within each section.
 
 ## Data
 
+### BUG-017 · P&L first-match-wins produced a plausible wrong revenue
+**RESOLVED** 2026-08-05 · v1.5.0
+
+`profit-and-loss.ts` kept the first row that mapped to each account and discarded the rest. A chart of accounts feeds many rows into one canonical account, so revenue came out as the `Discounts given` line (−1,000) rather than `Total for Income` (380,881.41), and overhead read about a thousand pounds with every expense row mapped to it. Gross profit and NOI were wrong downstream, and `Amortization` / `Depreciation` both claiming `pl.depreciation` produced a duplicate warning per month.
+
+**Fix.** Rank and resolve after the walk, matching the balance sheet (ADR-008): a section total wins outright, and with no total the detail rows are summed.
+
+**Proof.** Against `reference/Reporting data/…Profit and Loss by Month (1).xlsx`, 2025-08: revenue 380,881.41, COGS 49,033.39, overhead 35,727.10 — each equal to the file's own total row. Computed gross profit 331,848.02 and NOI 296,120.92 match the P&L's printed rows 25 and 63 to the cent. Zero duplicate warnings.
+
+---
+
+### BUG-018 · Days cash on hand was twelve times too long
+**RESOLVED** 2026-08-05 · v1.5.0
+
+`days_cash_on_hand` divided by 365 while every P&L column is a single month, so daily spend came out roughly twelve times too small. A beta user reported 10,304 days of runway. The same unit mismatch is called out in the DSO/DPO comment directly below it, which is what makes this one embarrassing rather than subtle.
+
+**Fix.** A 30-day month, as DSO and DPO already used.
+
+---
+
+### BUG-019 · Top Expenses stopped reading at the first sub-group total
+**RESOLVED** 2026-08-05 · v1.6.0
+
+The P&L walker closed the current section on *any* total row. A real expense list nests — `Bank Charges & Fees` / `Credit Card rewards` / `Total for Bank Charges & Fees` — so the section closed at the first sub-group and the thirty lines below it were never captured as detail lines. Top Expenses showed two rows, one of them a negative credit-card rebate.
+
+**Fix.** Only the section's own total closes it (`Total for Expenses` closes Expenses). Sub-group totals are additionally excluded from `detailLines`, so they cannot double-count against the children they cover.
+
+**Proof.** Against the reference P&L, 2025-08: 19 expense lines, 6 COGS, 4 income, 3 other — where the parser previously produced 4 expense lines and nothing after `Total for Bank Charges & Fees`. `phase2-parsers.test.ts` covers it with a nested fixture; the test fails against the previous parser.
+
+---
+
+### BUG-020 · A/R and A/P ageing counted job lines as customers
+**RESOLVED** 2026-08-05 · v1.6.0
+
+QuickBooks prints a customer, their jobs, and a `Total for <customer>` row. The parser emitted all three as separate entities, so one customer owing 190,957.75 appeared as a −184,107.55 credit, a job code owing 375,065.30, and a total — and the same money was counted twice on the same page. The reference A/R report has 13 customers; the parser returned 20 entities, seven of them job codes or duplicated totals.
+
+**Fix.** `import/grouping.ts` collapses `parent / children / Total for parent` runs into one entry. A parent that bills nothing directly prints as a bare label with no figures and is passed in as a marker, otherwise there is nothing for the children to be spliced away from.
+
+**Proof.** 13 entities, summing to 329,593.77 — the report's own TOTAL row, to the cent.
+
+---
+
+### BUG-021 · Sales by Customer read the wrong column as the customer name
+**RESOLVED** 2026-08-05 · v1.6.0
+
+`findLayout` chose the label column by skipping blank headers. A Sales by Customer Summary is headed `["", "Jul 2025", …, "Total"]`, so the label column became `Jul 2025` and every customer was labelled with their July figure. The grand total row was not recognised as one and entered the ranking as a customer called `20200` worth $1.3m. Top customers was unusable, which is what the beta user reported as "not populating".
+
+**Fix.** The label column is the leftmost column that is not an amount or a count — blank header included, since QuickBooks never names it. Group collapsing (BUG-020) applies here too.
+
+**Proof.** 65 customers with real names, summing to 1,309,617.08 — the file's grand total, to the cent. Previously 119 entities led by `20200`, `0` and a job code.
+
+---
+
+### BUG-022 · A taught mapping could not be undone
+**RESOLVED** 2026-08-05 · v1.6.0
+
+Mapping a row removed it from the "no matching account" list. The mapping is permanent and applied to every future import, so a mis-click was unreversible from the interface — the row you needed to correct was the one that had just disappeared.
+
+**Fix.** The row stays, shows what it was mapped to, and offers Undo (`import.unmapLabel` → `forgetMapping`, which deletes only the user-taught row so the built-in dialect table remains as a fallback). Covered by `apps/web/test/mapping.test.tsx`.
+
+---
+
 ### BUG-012 · Two stray empty client rows
 **OPEN** · low priority
 
