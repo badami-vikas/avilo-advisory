@@ -68,11 +68,20 @@ export const SEED_FORMULAS: FormulaDef[] = [
   },
   {
     id: "days_cash_on_hand",
+    /**
+     * A 30-day month, for exactly the reason spelled out below for DSO and DPO.
+     *
+     * This divided by 365, treating one month's cost of sales and overhead as if it were
+     * a year's. Every P&L column here is a single month, so daily spend came out roughly
+     * twelve times too small and the runway roughly twelve times too long — a beta user
+     * reported 10,304 days. The numerator is a point-in-time balance and the denominator
+     * is one month's activity; both have to be put on the same footing.
+     */
     label: "Days cash on hand",
-    expression: "bs.cash / ((pl.cogs + pl.overhead) / 365)",
+    expression: "bs.cash / ((pl.cogs + pl.overhead) / 30)",
     unit: "days",
     description:
-      "Total cash in bank accounts divided by average daily operating spend.",
+      "Total cash in bank accounts divided by average daily operating spend, taken from one month's cost of sales and overhead over a 30-day month.",
     benchmark: { min: 30, note: "Under 30 days of runway is a liquidity risk." },
     sortOrder: 50,
   },

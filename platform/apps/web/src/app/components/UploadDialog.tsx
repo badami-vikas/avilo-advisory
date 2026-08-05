@@ -299,6 +299,22 @@ export function UploadDialog({
   );
 }
 
+/**
+ * Which canonical statement each report's accounts belong to.
+ *
+ * A P&L row can only ever be a P&L account, so offering the A/R ageing buckets in its
+ * dropdown is fifty options of noise in front of the dozen that could be right — and a
+ * longer list is a slower mapping and a likelier mis-click.
+ */
+const STATEMENT_FOR_REPORT: Record<string, string> = {
+  profit_and_loss: "pl",
+  balance_sheet: "balance_sheet",
+  ar_aging: "ar_aging",
+  ap_aging: "ap_aging",
+  sales_by_customer_l12m: "sales_by_customer",
+  referral_l90d: "referral",
+};
+
 function StagedFileCard({
   file,
   accounts,
@@ -331,6 +347,18 @@ function StagedFileCard({
   );
 
   const suggested = Object.entries(suggestions).filter(([, s]) => s.accountId);
+
+  /*
+    Only the accounts this report could legitimately produce. Falls back to the full list
+    when the report type is unknown, because an unfiltered list is merely long whereas a
+    wrongly filtered one hides the option the user needs.
+  */
+  const statement = classification.reportType
+    ? STATEMENT_FOR_REPORT[classification.reportType]
+    : undefined;
+  const relevantAccounts = statement
+    ? accounts.filter((account) => account.statement === statement)
+    : accounts;
 
   const askModel = async () => {
     if (!preview || !classification.reportType) return;
@@ -515,7 +543,7 @@ function StagedFileCard({
                             }`}
                           >
                             <option value="">Skip</option>
-                            {accounts.map((account) => (
+                            {relevantAccounts.map((account) => (
                               <option key={account.id} value={account.id}>
                                 {account.label}
                               </option>

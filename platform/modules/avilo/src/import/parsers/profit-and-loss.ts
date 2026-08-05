@@ -143,7 +143,30 @@ export function parseProfitAndLoss(
   const facts: ExtractedFact[] = [];
   const unmatchedByLabel = new Map<string, UnmatchedRow>();
   const detailLines: PLDetailLine[] = [];
-  const seen = new Set<string>();
+
+  /*
+    Candidates per (period, account), resolved after the walk rather than during it.
+
+    First-match-wins was wrong, and wrong in a way that quietly produced a plausible
+    number. A chart of accounts has many rows feeding one canonical account — several
+    income lines, dozens of expense lines — and QuickBooks prints a section total
+    alongside them. Keeping whichever row happened to appear first meant revenue could
+    come out as the "Discounts given" line (-1,000) while the real total sat ten rows
+    below, and overhead could read a few hundred pounds when every expense row had been
+    mapped to it.
+
+    The rule, matching the balance-sheet parser: a section total is authoritative and
+    wins outright; failing that, the detail rows are SUMMED, because that is what a set
+    of sibling accounts under one heading means.
+  */
+  const candidates = new Map<
+    string,
+    { period: Period; accountId: string; rank: number; label: string; columnLabel: string; value: number }[]
+  >();
+
+  /** A "Total …" row is a section total (rank 2); anything else is a detail line. */
+  const rankOf = (normalized: string): number =>
+    /^total\b/.test(normalized) || /^total for /.test(normalized) ? 2 : 1;
 
   // Tracks which section of the statement the walker is currently inside, so a detail
   // line can be attributed to Income, COGS or Expenses without matching its own label.
@@ -193,25 +216,19 @@ export function parseProfitAndLoss(
     }
 
     if (accountId) {
+      const rank = rankOf(normalized);
       for (const entry of values) {
         const key = `${entry.period}|${accountId}`;
-        if (seen.has(key)) {
-          // Two rows mapped to the same account in the same period. Keep the first and
-          // say so, rather than letting a later row silently overwrite a correct value —
-          // exactly the failure the balance-sheet parser hit in v9.
-          warnings.push(
-            `Ignored duplicate value for ${accountId} in ${entry.period} from row "${label}"; the first matching row was kept.`,
-          );
-          continue;
-        }
-        seen.add(key);
-        facts.push({
+        const list = candidates.get(key) ?? [];
+        list.push({
           period: entry.period,
           accountId,
+          rank,
+          label,
+          columnLabel: entry.columnLabel,
           value: entry.value,
-          sourceRowLabel: label,
-          sourceColumnLabel: entry.columnLabel,
         });
+        candidates.set(key, list);
       }
       continue;
     }
@@ -224,6 +241,43 @@ export function parseProfitAndLoss(
       rawLabel: label,
       normalizedLabel: normalized,
       sampleValues: values.slice(0, 3).map(({ period, value }) => ({ period, value })),
+    });
+  }
+
+  /*
+    Resolve each account's value from the rows that claimed it.
+
+    A section total wins outright — it already includes its children, so adding them
+    would double-count. With no total present, the details are summed, which is what a
+    group of sibling accounts under one heading adds up to. Two competing totals is a
+    genuine ambiguity and is reported rather than guessed at.
+  */
+  for (const list of candidates.values()) {
+    const totals = list.filter((c) => c.rank === 2);
+    const chosen = totals.length > 0 ? totals : list;
+    const first = chosen[0]!;
+
+    if (totals.length > 1) {
+      warnings.push(
+        `Two section totals both map to ${first.accountId} in ${first.period} ` +
+          `("${totals.map((t) => t.label).join('", "')}"). The first was used.`,
+      );
+    }
+
+    const value =
+      totals.length > 0
+        ? first.value
+        : chosen.reduce((sum, candidate) => sum + candidate.value, 0);
+
+    facts.push({
+      period: first.period,
+      accountId: first.accountId,
+      value,
+      sourceRowLabel:
+        chosen.length > 1 && totals.length === 0
+          ? `${chosen.length} rows summed (${chosen.map((c) => c.label).slice(0, 3).join(", ")}${chosen.length > 3 ? ", …" : ""})`
+          : first.label,
+      sourceColumnLabel: first.columnLabel,
     });
   }
 

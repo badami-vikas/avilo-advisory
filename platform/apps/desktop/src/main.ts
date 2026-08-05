@@ -347,7 +347,39 @@ app.on("before-quit", (event) => {
   if (closing || !running) return;
   event.preventDefault();
   closing = true;
-  void running.close().finally(() => app.quit());
+
+  /*
+    A clean close, but never an unbounded one.
+
+    Deferring the quit until the server has closed is right, and it was also the reason
+    the Windows installer could not upgrade in place: Fastify's `close()` waits for open
+    connections to drain, and a websocket or a request that never completes leaves it
+    pending forever. The process stayed alive with no window, NSIS reported "Avilo
+    Advisory cannot be closed", and the only way out was Task Manager.
+
+    Two and a half seconds is far longer than a loopback server with a local SQLite file
+    needs, and short enough that a user never waits on it. Whichever finishes first, the
+    process exits.
+  */
+  const graceMs = 2500;
+  let settled = false;
+  const finish = () => {
+    if (settled) return;
+    settled = true;
+    app.exit(0);
+  };
+
+  const timer = setTimeout(finish, graceMs);
+  // `unref` so a pending timer is never itself the thing holding the process open.
+  timer.unref?.();
+
+  void running
+    .close()
+    .catch(() => {})
+    .finally(() => {
+      clearTimeout(timer);
+      finish();
+    });
 });
 
 /** The renderer asks for its own export path when the report page owns the button. */

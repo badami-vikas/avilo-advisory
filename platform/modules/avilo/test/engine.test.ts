@@ -107,7 +107,8 @@ describe("evaluateFormulas", () => {
     expect(result.metrics.get("net_operating_income")?.value).toBe(30_000);
     expect(result.metrics.get("noi_margin_pct")?.value).toBe(15);
     expect(result.metrics.get("days_cash_on_hand")?.value).toBeCloseTo(
-      85_000 / ((120_000 + 50_000) / 365),
+      // A 30-day month, matching DSO/DPO — the P&L column is one month, not a year.
+      85_000 / ((120_000 + 50_000) / 30),
       6,
     );
   });

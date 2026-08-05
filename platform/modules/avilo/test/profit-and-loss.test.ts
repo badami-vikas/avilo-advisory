@@ -160,17 +160,51 @@ describe("parseProfitAndLoss", () => {
     );
   });
 
-  it("keeps the first match and warns when two rows map to the same account", () => {
+  /**
+   * Several detail rows mapped to one account are SUMMED, not raced.
+   *
+   * Keeping whichever row appeared first is how a beta user's revenue came out as the
+   * "Discounts given" line while the real income sat ten rows below, and how overhead
+   * read a few hundred when every expense row had been mapped to it. Sibling accounts
+   * under one heading add up; that is what the heading means.
+   */
+  it("sums detail rows that map to the same account", () => {
+    // Targeting depreciation: the fixture has no "Total …" row for it, so nothing
+    // outranks the detail rows and the sum is observable.
     const learned = {
-      [normalizeLabel("Restoration Services")]: "pl.revenue",
-      [normalizeLabel("Reconstruction")]: "pl.revenue",
+      [normalizeLabel("Restoration Services")]: "pl.depreciation",
+      [normalizeLabel("Reconstruction")]: "pl.depreciation",
     };
     const result = parse(resolverWithLearned(learned));
-    const octRevenue = result.facts.filter(
+    const oct = result.facts.filter(
+      (f) => f.period === "2024-10" && f.accountId === "pl.depreciation",
+    );
+    expect(oct).toHaveLength(1);
+
+    const one = parse(
+      resolverWithLearned({ [normalizeLabel("Restoration Services")]: "pl.depreciation" }),
+    ).facts.find((f) => f.period === "2024-10" && f.accountId === "pl.depreciation");
+
+    expect(oct[0]!.value).toBeGreaterThan(one!.value);
+    expect(oct[0]!.sourceRowLabel).toMatch(/rows summed/);
+    expect(result.warnings.join(" ")).not.toMatch(/duplicate value/);
+  });
+
+  /**
+   * A section total already contains its children, so it wins outright — summing it with
+   * them would double-count. Same rule as the balance-sheet parser (ADR-008).
+   */
+  it("prefers a section total over the detail rows beneath it", () => {
+    const learned = {
+      [normalizeLabel("Restoration Services")]: "pl.revenue",
+    };
+    const result = parse(resolverWithLearned(learned));
+    const fact = result.facts.find(
       (f) => f.period === "2024-10" && f.accountId === "pl.revenue",
     );
-    expect(octRevenue).toHaveLength(1);
-    expect(result.warnings.join(" ")).toMatch(/duplicate value for pl\.revenue/);
+    // "Total Income" is a seeded total for pl.revenue; it must not be added to the
+    // detail line that was also mapped there.
+    expect(fact?.sourceRowLabel).not.toMatch(/rows summed/);
   });
 
   it("honours a period restriction", () => {
