@@ -330,18 +330,18 @@ The key sits unencrypted in the user's local SQLite. Reasonable while everything
 
 ---
 
-### BUG-028 · Packaged app can transiently fail to open its database if another process holds it
-**LIKELY EXPLAINED, not fully proven** · 2026-08-05
+### BUG-028 · The x64 macOS build cannot open the database when run under Rosetta on Apple Silicon
+**CONFIRMED, OPEN** · 2026-08-05 · caught live, on the user's own machine
 
-**Symptom.** v1.9.0 dmg, freshly built and asar-verified to carry the new code, showed "Avilo Advisory could not start — Module 'avilo' failed to start: unable to open database file" on first launch.
+**Symptom.** v1.9.0 install showed "Avilo Advisory could not start — Module 'avilo' failed to start: unable to open database file" on an Apple Silicon Mac.
 
-**Investigation.** The packaged app and `pnpm dev` (`apps/api/src/server.ts`) both resolve to the *same* real file when it already exists: `module.ts`'s `legacyDatabase()` adopts `~/Documents/Bridge/Avilo Advisory/.data/avilo.sqlite` ahead of the module-host's own per-module `dataDir`, and `defaultPaths()` used by `pnpm dev` has no override — so a dev server left running against this same real database, and the packaged app launched while it is still alive, are two processes opening one SQLite file at once. Relaunched five times after confirming no other process held the file (`lsof` clean) — four launches succeeded immediately (helper processes spawned, `[avilo] database …` logged); one, launched moments after `pkill`-ing a prior instance rather than letting it quit through the app's own 2.5s graceful-close path, failed the same way with no helper processes spawned. Both point at the same mechanism: an ungraceful second opener while a WAL checkpoint is in flight.
+**First theory, ruled out.** Suspected a dev server (`pnpm dev`, left running earlier this session) holding the same real `~/Documents/Bridge/Avilo Advisory/.data/avilo.sqlite` file the packaged app also opens via `module.ts`'s `legacyDatabase()`. Relaunching the **arm64** build repeatedly, with no other process holding the file, always succeeded — that theory does not explain a *sustained* failure.
 
-**Not yet proven root cause, because:** the exact moment of the user's original failure was not observed directly — this reconstructs the mechanism from a dev server this session's own `preview_start` had running against the identical file, plus a reproduced-once transient failure under an analogous ungraceful-restart condition.
+**Actual root cause, caught live.** The user's copy was `release/mac/Avilo Advisory.app` — the **x64** dmg (`Avilo Advisory-1.9.0.dmg`) — running under Rosetta 2 on an arm64 machine, still open and reproducing the exact reported error at the moment of investigation. `ps`/`lsof` on the live process showed `better-sqlite3/prebuilds/darwin-x64.node` loaded through Rosetta's AOT translator (`/private/var/db/oah/.../darwin-x64.node.aot`), 0% CPU, and `sample` confirmed it parked in `-[NSAlert runModal]` — the error dialog itself, stuck. The **arm64** dmg, tested repeatedly against the same real database on the same machine, never failed once.
 
-**Standing guidance until this is fully closed.** Quit any other running copy of the app, and stop `pnpm dev` before launching a packaged build against the real database — the two should never point at the same file concurrently. A retry after confirming no other process holds the file has succeeded every time so far.
+**Fix, until root-caused further.** Two dmgs ship because `electron-builder.yml` targets `arch: [arm64, x64]` and nothing in the install flow tells a user which one their Mac needs. On Apple Silicon, only `Avilo Advisory-1.9.0-arm64.dmg` is known good. The x64 dmg exists for genuine Intel Macs; whether it is *also* broken there, or only under Rosetta emulation, is not yet tested on real Intel hardware.
 
-**If it recurs** with no dev server and no other copy running, that rules out this explanation and the real cause is still open — capture the exact steps and get a Console.app crash report from the moment of failure.
+**Open follow-up.** Decide whether to keep shipping the x64 dmg at all (BUG-016's Windows precedent — "no content check reveals a platform-divergent native dependency problem, launch on the target or don't ship it" — argues for dropping x64 unless it is verified working on real Intel hardware, not just building without error), or make the two dmgs unmistakably named so a Rosetta launch never happens by accident.
 
 ---
 

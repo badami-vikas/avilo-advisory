@@ -1,6 +1,6 @@
 # Progress
 
-**v1.9.0** — shipping to a first beta user.
+**v1.9.1** — shipping to a first beta user. macOS ships arm64 only for now (BUG-028); the assistant's header now shares one row with the app's own header instead of stacking a second one below it.
 
 ## Done
 

@@ -289,6 +289,26 @@ single JSON blob that path already exists to hold.
 
 ---
 
+### ADR-037 · The macOS installer ships arm64 only, until x64 is verified on real hardware
+**Date.** 2026-08-05
+
+**Decision.** `electron-builder.yml`'s `mac.target` dropped `x64`. Only
+`Avilo Advisory-<version>-arm64.dmg` is built and distributed.
+
+**Why.** BUG-028: the x64 dmg, run under Rosetta on the user's own Apple Silicon Mac,
+could not open the database — caught live, with the process parked in the OS error
+dialog and `better-sqlite3`'s `darwin-x64` prebuild loaded through Rosetta's AOT
+translator. The arm64 dmg, tested repeatedly against the same real database on the same
+machine, never failed. This is BUG-016's rule again, on the other platform: a
+cross-built (or emulated) installer proves nothing the build host can check, and no
+content inspection reveals it — launch on the actual target, or don't ship it.
+
+**Consequence.** Intel Mac users have no installer until x64 is verified on real Intel
+hardware, not just built without error. Re-add `x64` to `mac.target` only after that
+verification — see BUG-028's open follow-up.
+
+---
+
 ## AI
 
 ### ADR-010 · The app must work with no model configured

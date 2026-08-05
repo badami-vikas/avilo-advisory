@@ -1,6 +1,8 @@
 /**
- * AI chat — persistent right panel, mounted once in <Shell> alongside the main content
- * Outlet (content | AI chat).
+ * AI chat — persistent right panel, mounted in <Shell>: `AgentPanelHeader` inside the
+ * shared top header (so "Avilo Advisory" and "Avilo Assistant" sit on the same line, at
+ * the same height — one header element, not two stacked ones), `AgentPanelBody` beside
+ * the main content Outlet, below it.
  *
  * Path and shape deliberately match `relationship-os/platform/apps/web/src/app/
  * components/shared/AgentPanel.tsx`: same location in the tree, same collapse/expand
@@ -98,8 +100,45 @@ interface StoredChat {
   decided: Record<string, "activated" | "rejected">;
 }
 
-export function AgentPanel() {
-  const [collapsed, setCollapsed] = useState(false);
+/**
+ * The panel's title and collapse toggle, rendered by `<Shell>` inside its own top
+ * header — not inside `<aside>` below. That is what puts "Avilo Advisory" and "Avilo
+ * Assistant" on the same line, at the same height: one `<header>` element, not two
+ * stacked ones. `AgentPanelBody` below owns the actual conversation and stays mounted
+ * (just width-collapsed) whether or not this reads as expanded, so chat state and its
+ * restore-on-mount effect are never lost by toggling.
+ */
+export function AgentPanelHeader({
+  collapsed,
+  onToggle,
+}: {
+  collapsed: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <div
+      className={`no-print flex flex-shrink-0 items-center border-l border-line ${
+        collapsed ? "w-10 justify-center" : "w-[320px] justify-between px-3"
+      }`}
+    >
+      {collapsed ? null : (
+        <span className="flex items-center gap-1.5 text-[12.5px] font-semibold text-ink">
+          <Sparkles size={13} className="text-accent" />
+          Avilo Assistant
+        </span>
+      )}
+      <button
+        onClick={onToggle}
+        aria-label={collapsed ? "Open AI chat" : "Collapse AI chat"}
+        className="rounded p-1 text-ink-faint hover:bg-line-soft hover:text-ink"
+      >
+        {collapsed ? <ChevronsLeft size={14} /> : <ChevronsRight size={14} />}
+      </button>
+    </div>
+  );
+}
+
+export function AgentPanelBody({ collapsed }: { collapsed: boolean }) {
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
@@ -176,34 +215,13 @@ export function AgentPanel() {
     }
   };
 
-  if (collapsed) {
-    return (
-      <button
-        onClick={() => setCollapsed(false)}
-        aria-label="Open AI chat"
-        className="no-print fixed right-0 top-1/2 z-40 -translate-y-1/2 rounded-l-lg border border-r-0 border-line bg-surface px-1.5 py-3 text-ink-faint shadow-sm hover:text-ink"
-      >
-        <ChevronsLeft size={14} />
-      </button>
-    );
-  }
-
   return (
-    <aside className="no-print fixed right-0 top-0 z-40 flex h-full w-[320px] flex-col border-l border-line bg-surface shadow-[-4px_0_16px_rgba(16,24,40,0.04)]">
-      <div className="flex items-center justify-between border-b border-line px-3 py-2.5">
-        <span className="flex items-center gap-1.5 text-[12.5px] font-semibold text-ink">
-          <Sparkles size={13} className="text-accent" />
-          Avilo Assistant
-        </span>
-        <button
-          onClick={() => setCollapsed(true)}
-          aria-label="Collapse AI chat"
-          className="rounded p-1 text-ink-faint hover:bg-line-soft hover:text-ink"
-        >
-          <ChevronsRight size={14} />
-        </button>
-      </div>
-
+    <aside
+      className={`no-print flex flex-shrink-0 flex-col overflow-hidden border-l border-line bg-surface ${
+        collapsed ? "w-0 border-l-0" : "w-[320px]"
+      }`}
+    >
+      <div className="flex h-full w-[320px] flex-shrink-0 flex-col">
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 py-3">
         {turns.length === 0 ? (
           <div className="rounded-lg border border-dashed border-line p-3 text-[11.5px] leading-relaxed text-ink-muted">
@@ -280,6 +298,7 @@ export function AgentPanel() {
             Send
           </Button>
         </div>
+      </div>
       </div>
     </aside>
   );

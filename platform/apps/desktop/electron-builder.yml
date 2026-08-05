@@ -78,8 +78,12 @@ mac:
   category: public.app-category.finance
   target:
     - target: dmg
-      arch: [arm64, x64]
-  # Apple Silicon and Intel builds are both produced; the DMG names carry the arch.
+      arch: [arm64]
+  # arm64 only, for now (BUG-028): the x64 dmg, run under Rosetta on an Apple Silicon
+  # Mac, could not open the database — the process parked in the OS error dialog with
+  # better-sqlite3's darwin-x64 prebuild loaded through Rosetta's AOT translator. Nothing
+  # in the build catches this (BUG-016's rule again: a cross-built installer proves
+  # nothing on the build host). Re-add x64 only once it is verified on a real Intel Mac.
   darkModeSupport: true
   # No Developer ID certificate is configured, so the build is unsigned and macOS will
   # refuse it on first open until the user right-clicks and chooses Open. Set
