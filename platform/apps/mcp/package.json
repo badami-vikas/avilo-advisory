@@ -1,0 +1,28 @@
+{
+  "name": "@avilo/mcp",
+  "version": "1.10.0",
+  "private": true,
+  "type": "module",
+  "description": "Model Context Protocol server over Avilo's configuration surface. Reaches configuration only; no client data, no fact, no figure.",
+  "main": "./src/server.ts",
+  "bin": {
+    "avilo-mcp": "./src/server.ts"
+  },
+  "scripts": {
+    "start": "tsx src/server.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@avilo/api": "workspace:*",
+    "@avilo/core": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.5"
+  }
+}

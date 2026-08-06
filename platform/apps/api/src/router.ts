@@ -35,7 +35,9 @@ import {
   listProposals,
   proposeBlueprint,
   rejectProposal,
+  restoreVersion,
 } from "./services/blueprint.js";
+import { getVersion, listVersions } from "./services/versions.js";
 import { converse } from "./services/copilot.js";
 
 const t = initTRPC.create();
@@ -1212,7 +1214,40 @@ const blueprintRouter = router({
     .mutation(({ input }) => rejectProposal(input.id, input.note)),
 });
 
+/**
+ * Configuration history, and the way back to any point in it.
+ *
+ * Read-only apart from `restore`, and `restore` cannot introduce a state that has not
+ * already been live — it names a recorded version, never a document. That is what makes
+ * the same surface safe to expose to a person and to an external agent over MCP.
+ */
+const versionsRouter = router({
+  list: procedure
+    .input(z.object({ limit: z.number().int().min(1).max(200).optional() }).optional())
+    .query(({ input }) => listVersions(input?.limit ?? 100)),
+
+  get: procedure.input(z.object({ id: z.string() })).query(({ input }) => {
+    const version = getVersion(input.id);
+    if (!version) throw new TRPCError({ code: "NOT_FOUND", message: `No version ${input.id}` });
+    return version;
+  }),
+
+  restore: procedure
+    .input(z.object({ id: z.string(), author: z.string().default("user") }))
+    .mutation(({ input }) => {
+      const outcome = restoreVersion(input.id, input.author);
+      if ("errors" in outcome) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: outcome.errors.map((e) => `${e.path}: ${e.message}`).join("; "),
+        });
+      }
+      return outcome;
+    }),
+});
+
 export const appRouter = router({
+  versions: versionsRouter,
   views: viewsRouter,
   stickyNotes: stickyNotesRouter,
   actions: actionsRouter,

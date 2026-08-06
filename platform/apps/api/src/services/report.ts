@@ -41,21 +41,14 @@ export interface PeriodReport {
   complete: boolean;
 }
 
-export function loadFormulaSpecs(): FormulaSpec[] {
-  const db = getDb();
-  return db
-    .select()
-    .from(schema.formulas)
-    .orderBy(schema.formulas.sortOrder)
-    .all()
-    .map((f) => ({
-      id: f.id,
-      label: f.label,
-      expression: f.expression,
-      unit: f.unit,
-      active: f.active,
-    }));
-}
+/*
+  Re-exported, not defined here. It moved to `formula-specs.ts` so that `blueprint.ts` can
+  read the formula list without importing this file — see that module's header for why the
+  MCP server's data-isolation guarantee depends on the split. Callers that already import
+  it from here keep working.
+*/
+import { loadFormulaSpecs } from "./formula-specs.js";
+export { loadFormulaSpecs };
 
 function loadOverrides(clientId: string, period: Period): OverrideRecord[] {
   const db = getDb();

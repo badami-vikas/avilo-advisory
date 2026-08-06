@@ -55,6 +55,17 @@ extraResources:
     to: web
   - from: dist/modules
     to: modules
+  # Shipped so an installed copy carries its own instructions rather than pointing at a
+  # repository the user may not have. AGENTS.md describes what an external agent may change
+  # in THIS build, and the wiki explains the same ground for a person; a build and its
+  # documentation going out of step is the failure this prevents. Read-only, outside the
+  # asar, so both are ordinary files a user or an agent can open.
+  - from: ../../../AGENTS.md
+    to: AGENTS.md
+  - from: ../../../docs
+    to: docs
+  - from: ../../apps/mcp/src
+    to: mcp
 
 asar: true
 asarUnpack:

@@ -1,8 +1,11 @@
-// Read the live configuration into an AviloBlueprint, and apply an activated one.
+// Record, activate and revert configuration changes.
 //
 // This is the boundary between "database rows" and "the portable document a chatbot
 // proposes and someone else's copy of the app can import" (per @avilo/core/blueprint —
 // see that file for why the document may hold configuration and never source or a key).
+//
+// The registry and the current-state reader live in `configuration.ts`; everything here is
+// about the transitions between states. `versions.ts` records the states themselves.
 
 import { eq } from "drizzle-orm";
 import {
@@ -10,150 +13,49 @@ import {
   validateBlueprint,
   type AviloBlueprint,
   type BlueprintChange,
-  type CustomView,
-  type LayoutOverride,
-  type RegisteredSurface,
 } from "@avilo/core";
 import {
   CANONICAL_ACCOUNTS,
   normalizeLabel,
-  REPORT_TYPES,
-  SEED_FORMULAS,
   TRAILING,
   extractDependencies,
 } from "@avilo/module";
 import { getDb, newId, schema } from "../db.js";
-import { readSetting } from "./ai.js";
 import { learnMapping } from "./labels.js";
-import { loadFormulaSpecs } from "./report.js";
+import { loadFormulaSpecs } from "./formula-specs.js";
+import {
+  CUSTOM_VIEWS_KEY,
+  LAYOUT_SECTION_IDS,
+  REPORT_LAYOUT_DEFAULT_KEY,
+  currentConfiguration,
+  exportBlueprint,
+  registeredSurface,
+} from "./configuration.js";
+import {
+  ensureBaseline,
+  getVersion,
+  listVersions,
+  normalizeVersionDocument,
+  recordVersion,
+  type VersionRecord,
+} from "./versions.js";
 
-/** The two prompts actually read at runtime (see suggest.ts / narrative.ts / router.ts). */
-export const PROMPT_KEYS = ["accounting_guidance", "narrative_guidance"] as const;
-
-/**
- * Section ids the report layout understands, mirrored from `apps/web/src/app/report/layout.ts`.
- *
- * Not imported from there: the web package pulls in React and Vite-only assets, and this
- * file runs in apps/api. Kept as a flat list rather than re-exported from a shared
- * package because it changes rarely and the cost of drift is a rejected blueprint, not a
- * silently wrong one — `validateBlueprint` refuses an id outside this list.
- */
-export const LAYOUT_SECTION_IDS = [
-  "key-insights", "revenue-trend", "top-expenses", "at-a-glance", "profitability",
-  "cash-position", "ar-customers", "ap-vendors", "ar-ap-timing", "service-lines",
-  "top-jobs", "job-performance", "referrals", "gross-overhead", "top-customers", "flags",
-] as const;
-
-/**
- * Where a blueprint's `layout` lands: the report format panel's own DEFAULT, not any
- * client's saved layout. `ClientDetailPage.loadLayout` reads this only when a client has
- * no `report.layout` saved_views row of its own — a per-client edit always wins, matching
- * `normalizeLayout`'s existing "stored beats default" rule. Stored in the same
- * `sectionOrder`/`hiddenSections` shape the blueprint carries; the web layer's own
- * `normalizeLayout` fills in whatever sections a partial order omits.
- */
-export const REPORT_LAYOUT_DEFAULT_KEY = "report_layout_default";
-
-/** Where user-defined views live — one JSON array, same `app_settings` path as the layout default. */
-export const CUSTOM_VIEWS_KEY = "custom_views";
-
-/**
- * Detail sets a generated `table` may bind to, mirrored from `report.detail`'s own keys
- * (see `ReportView.tsx`, which reads exactly these). A table names one of these; it never
- * carries rows, so the figures in a generated table are the imported ones.
- */
-export const DETAIL_KINDS = [
-  "pl_income", "pl_expense", "ar_customer", "ap_vendor", "customer_sales", "referral_partner",
-] as const;
-
-/**
- * Actions a generated button may invoke.
- *
- * Closed on purpose, and small on purpose: every entry maps to something the application
- * already does and already tests. This is the answer to "can the assistant add a button" —
- * it can place one, from this list. It cannot invent an action, because a button is a
- * binding to a handler that exists, not a piece of behaviour the model authors.
- */
-export const VIEW_ACTIONS = [
-  "export-pdf", "upload", "open-report", "open-raw-data", "open-dashboard", "open-standard",
-] as const;
-
-export function registeredSurface(): RegisteredSurface {
-  const db = getDb();
-  const formulaIds = db.select({ id: schema.formulas.id }).from(schema.formulas).all();
-  return {
-    accountIds: new Set(CANONICAL_ACCOUNTS.map((a) => a.id)),
-    formulaIds: new Set([...formulaIds.map((f) => f.id), ...SEED_FORMULAS.map((f) => f.id)]),
-    reportTypes: new Set(REPORT_TYPES),
-    promptKeys: new Set(PROMPT_KEYS),
-    sectionIds: new Set(LAYOUT_SECTION_IDS),
-    detailKinds: new Set(DETAIL_KINDS),
-    actionIds: new Set(VIEW_ACTIONS),
-  };
-}
-
-/** The current live configuration, in the same shape a blueprint carries. */
-export function currentConfiguration(): {
-  formulas: AviloBlueprint["formulas"];
-  mappings: AviloBlueprint["mappings"];
-  prompts: AviloBlueprint["prompts"];
-  layout?: LayoutOverride;
-  views?: CustomView[];
-} {
-  const db = getDb();
-  const formulas = db.select().from(schema.formulas).all().map((f) => ({
-    id: f.id,
-    expression: f.expression,
-    label: f.label,
-    ...(f.description ? { description: f.description } : {}),
-  }));
-  const mappings = db.select().from(schema.labelMappings).all().map((m) => ({
-    reportType: m.reportType,
-    rawLabel: m.rawLabel,
-    accountId: m.accountId,
-  }));
-  const prompts = PROMPT_KEYS.map((key) => ({ key, body: readSetting(key) ?? "" })).filter(
-    (p) => p.body !== "",
-  );
-  const storedLayout = readSetting(REPORT_LAYOUT_DEFAULT_KEY);
-  let layout: LayoutOverride | undefined;
-  if (storedLayout) {
-    try {
-      layout = JSON.parse(storedLayout) as LayoutOverride;
-    } catch {
-      // A corrupt stored value must not block export or diffing — treat as unset.
-    }
-  }
-  const storedViews = readSetting(CUSTOM_VIEWS_KEY);
-  let views: CustomView[] | undefined;
-  if (storedViews) {
-    try {
-      views = JSON.parse(storedViews) as CustomView[];
-    } catch {
-      // Same rule as the layout above — a corrupt row must not block export or diffing.
-    }
-  }
-
-  return {
-    formulas,
-    mappings,
-    prompts,
-    ...(layout ? { layout } : {}),
-    ...(views ? { views } : {}),
-  };
-}
-
-/** The full current configuration as an exportable blueprint. */
-export function exportBlueprint(name: string, description?: string): AviloBlueprint {
-  const config = currentConfiguration();
-  return {
-    schemaVersion: 1,
-    name,
-    ...(description ? { description } : {}),
-    exportedAt: new Date().toISOString(),
-    ...config,
-  };
-}
+/*
+  Re-exported so every existing importer of these from `blueprint.js` keeps working. They
+  are defined in `configuration.ts` because `versions.ts` needs them too, and a single file
+  holding both the surface and the transitions made that a dependency cycle.
+*/
+export {
+  CUSTOM_VIEWS_KEY,
+  DETAIL_KINDS,
+  LAYOUT_SECTION_IDS,
+  PROMPT_KEYS,
+  REPORT_LAYOUT_DEFAULT_KEY,
+  VIEW_ACTIONS,
+  currentConfiguration,
+  exportBlueprint,
+  registeredSurface,
+} from "./configuration.js";
 
 export interface ProposalRecord {
   id: string;
@@ -231,11 +133,21 @@ export function listProposals(): ProposalRecord[] {
  * indistinguishable in the audit trail from one a person typed by hand. Prompt changes
  * write to `app_settings`, the one existing runtime-override path (ADR-013).
  */
-export function activateProposal(id: string, note?: string): ProposalRecord {
+export function activateProposal(
+  id: string,
+  note?: string,
+  version?: { author?: string; restoredFrom?: string },
+): ProposalRecord {
   const db = getDb();
   const row = db.select().from(schema.blueprintProposals).where(eq(schema.blueprintProposals.id, id)).get();
   if (!row) throw new Error(`No proposal with id ${id}`);
   if (row.status !== "proposed") throw new Error(`Proposal ${id} is already ${row.status}`);
+
+  /*
+    Capture where we are BEFORE writing, so the first change on an installation upgraded
+    from a build without history still has a state to go back to. No-op once history exists.
+  */
+  ensureBaseline();
 
   const blueprint = JSON.parse(row.blueprint) as AviloBlueprint;
 
@@ -345,7 +257,68 @@ export function activateProposal(id: string, note?: string): ProposalRecord {
     .where(eq(schema.blueprintProposals.id, id))
     .run();
 
+  /*
+    The single place a version is written. Every route into the live configuration — the
+    assistant, a person activating an imported document, an external agent over MCP —
+    passes through here, so none of them can change the configuration without leaving a
+    state a restore can return to.
+  */
+  recordVersion({
+    author: version?.author ?? row.author,
+    summary: row.summary,
+    proposalId: id,
+    ...(version?.restoredFrom ? { restoredFrom: version.restoredFrom } : {}),
+  });
+
   return rowToRecord(db.select().from(schema.blueprintProposals).where(eq(schema.blueprintProposals.id, id)).get()!);
+}
+
+/**
+ * Put the configuration back into a state it has already been in.
+ *
+ * Goes through `proposeBlueprint` + `activateProposal` rather than writing rows directly,
+ * so a restore is validated, diffed and audited on exactly the same path as any other
+ * change — a formula it brings back opens a new `formula_versions` row like any edit, and
+ * the restore itself becomes the newest version. The one asymmetry worth knowing: a label
+ * mapping learned after the target version survives the restore, because `learnMapping`
+ * upserts and the stored document only carries the mappings that existed. Same limitation
+ * the assistant's Undo has always had.
+ *
+ * Returns `noChange` when the target state is the state you are already in, so a restore
+ * that would do nothing writes nothing — the guard BUG-030 established for the assistant.
+ */
+export function restoreVersion(
+  id: string,
+  author: string,
+): { version: VersionRecord } | { noChange: true } | { errors: { path: string; message: string }[] } {
+  const target = getVersion(id);
+  if (!target) throw new Error(`No configuration version with id ${id}`);
+
+  const document = normalizeVersionDocument(target.blueprint);
+
+  /*
+    Compare like with like. A stored version always spells `layout` and `views` out, while
+    `currentConfiguration()` omits them when nothing is stored — diffing one against the
+    other reports a change every time, so "restore the state you are already in" would
+    write a pointless version instead of reporting `noChange`. Normalize both sides.
+  */
+  const liveNow = currentConfiguration();
+  const live = {
+    ...liveNow,
+    layout: liveNow.layout ?? { sectionOrder: [...LAYOUT_SECTION_IDS], hiddenSections: [] },
+    views: liveNow.views ?? [],
+  };
+  if (diffBlueprint(document, live).length === 0) return { noChange: true };
+
+  const recorded = proposeBlueprint(author, `Restored version ${target.seq} — ${target.summary}`, document);
+  if ("errors" in recorded) return recorded;
+
+  activateProposal(recorded.proposal.id, `Restore of version ${target.seq}`, {
+    author,
+    restoredFrom: target.id,
+  });
+
+  return { version: listVersions(1)[0]! };
 }
 
 /**

@@ -17,9 +17,10 @@
  * file gives: collapse/expand with a CSS transition, not a drag-resizable panel.
  */
 import { useEffect, useRef, useState } from "react";
-import { ChevronsLeft, ChevronsRight, Sparkles } from "lucide-react";
+import { ChevronsLeft, ChevronsRight, History, Sparkles } from "lucide-react";
 import { api } from "../../../lib/trpc.js";
 import { Button } from "../ui.js";
+import { ConfigurationHistoryDialog } from "../ConfigurationHistoryDialog.js";
 
 interface ChatTurn {
   role: "user" | "assistant";
@@ -154,6 +155,7 @@ export function AgentPanelBody({ collapsed, clientId }: { collapsed: boolean; cl
   const [error, setError] = useState<string | null>(null);
   const [decided, setDecided] = useState<Record<string, "reverted">>({});
   const [loaded, setLoaded] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -315,6 +317,15 @@ export function AgentPanelBody({ collapsed, clientId }: { collapsed: boolean; cl
       ) : null}
 
       <div className="border-t border-line p-2.5">
+        <div className="mb-1.5 flex justify-end">
+          <button
+            onClick={() => setHistoryOpen(true)}
+            className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-ink-faint hover:bg-line-soft hover:text-ink"
+          >
+            <History size={11} />
+            History
+          </button>
+        </div>
         <div className="flex items-end gap-1.5">
           <textarea
             value={draft}
@@ -335,6 +346,7 @@ export function AgentPanelBody({ collapsed, clientId }: { collapsed: boolean; cl
         </div>
       </div>
       </div>
+      {historyOpen ? <ConfigurationHistoryDialog onClose={() => setHistoryOpen(false)} /> : null}
     </aside>
   );
 }

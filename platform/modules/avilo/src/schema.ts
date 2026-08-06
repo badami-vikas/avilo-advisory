@@ -510,6 +510,48 @@ export const blueprintProposals = sqliteTable(
   (t) => [index("blueprint_proposals_status_idx").on(t.status)],
 );
 
+/**
+ * Every configuration state this installation has actually been in.
+ *
+ * A proposal is a *request*; a version is a state that was *live*. Keeping them in one
+ * table is what made "undo" mean only "undo the last assistant action" — the snapshot
+ * taken by `applyBlueprintDirectly` was a `proposed` row indistinguishable from a pending
+ * request, and `activateProposal` refuses to run twice, so an already-applied state could
+ * never be returned to. This table answers a different question: what states existed, in
+ * what order, and can I go back to one.
+ *
+ * `blueprint` is the full configuration AFTER the change, normalized so `layout` and
+ * `views` are always spelled out. That matters because an absent key in a blueprint means
+ * "leave alone" (ADR-039), which would make restoring a state that had no views incapable
+ * of removing one added later.
+ *
+ * Append-only, and restore is forward-only: returning to seq 3 writes a NEW row at the
+ * head rather than truncating to 3. History is therefore never destroyed by using it, and
+ * an undo is itself undoable — the property that makes handing restore to an external
+ * agent safe (ADR-043).
+ */
+export const configurationVersions = sqliteTable(
+  "configuration_versions",
+  {
+    id: text("id").primaryKey(),
+    /** 1-based and monotonic. Ordering that survives identical timestamps. */
+    seq: integer("seq").notNull(),
+    /** "user", "assistant", "mcp:<client>", "restore" — who caused this state to exist. */
+    author: text("author").notNull(),
+    summary: text("summary").notNull(),
+    /** Full configuration after this change. */
+    blueprint: text("blueprint").notNull(),
+    /** Change from the previous version. Empty array for the baseline. */
+    diff: text("diff").notNull(),
+    /** The proposal this came from, when there was one. Null for the baseline. */
+    proposalId: text("proposal_id"),
+    /** Set when this version was produced by restoring an earlier one. */
+    restoredFrom: text("restored_from"),
+    createdAt: text("created_at").notNull().default(now),
+  },
+  (t) => [index("configuration_versions_seq_idx").on(t.seq)],
+);
+
 /* ----------------------------------------------------------- app settings */
 
 /** Simple key-value store for app-wide configuration (e.g., AI provider keys). */

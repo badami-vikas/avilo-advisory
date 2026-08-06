@@ -1,10 +1,16 @@
 {
   "name": "@avilo/api",
-  "version": "1.9.4",
+  "version": "1.10.0",
   "private": true,
   "type": "module",
   "description": "Local Fastify + tRPC surface over SQLite. Binds to 127.0.0.1 only; makes no outbound requests.",
   "main": "./src/server.ts",
+  "exports": {
+    ".": "./src/server.ts",
+    "./services/*": "./src/services/*.ts",
+    "./src/*.js": "./src/*.ts",
+    "./*": "./*"
+  },
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "start": "tsx src/server.ts",

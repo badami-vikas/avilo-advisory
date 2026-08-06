@@ -6,6 +6,8 @@ Terse takeaways. Depth lives in [../raw/](../raw/).
 - [ai.md](ai.md) — where a model is allowed, and the guards on it
 - [import.md](import.md) — file → grid → facts, and why rows go unmapped
 - [dashboard.md](dashboard.md) — insight engine, charts, editable summary
+- [blueprint.md](blueprint.md) — what the assistant may change, and how a change is applied
+- [mcp.md](mcp.md) — the MCP server: external agents, and configuration history
 - [packaging.md](packaging.md) — building installers without shipping a stale bundle
 - [progress.md](progress.md) — what is done, what is open
 

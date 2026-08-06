@@ -607,3 +607,89 @@ refused whole.
 **Consequence.** The expression check runs on creations only. Re-checking edits would reject
 seeded definitions that legitimately use `avgN.` windows, which `validateExpression` does
 not model — a pre-existing limitation this ADR does not attempt to fix.
+
+---
+
+### ADR-043 · An MCP server for external agents: propose-only, restore-allowed, data-free
+**Date.** 2026-08-06
+
+**Decision.** Ship `@avilo/mcp`, a stdio Model Context Protocol server exposing six tools
+over the configuration surface: `describe_surface`, `get_configuration`, `list_versions`,
+`get_version`, `propose_change`, `restore_version`. An external agent can read the registry,
+read the configuration, record a proposal, read history, and return the app to a state it
+has already been in. It cannot activate a new state, and it cannot read client data.
+
+**Why an inbound door at all.** The assistant panel could already change configuration, but
+only through a Groq model, only in prose, and only for whoever was sitting at the app. The
+user wanted Claude Code and other external agents to build views and edit the financial
+model directly. Reusing the blueprint pipeline made that nearly free: the validation, diff,
+audit and history all already existed, and an MCP tool is a second front door onto them
+rather than a second implementation.
+
+**This changes a product claim, and that is stated rather than glossed.** "No account, no
+cloud, no network required" stays true of the application; it is no longer true that
+nothing outside the app can reach it. The transport is stdio — nothing is bound, opened or
+listened on, and only a process the user launched can talk to it — but an external program
+can now read and change configuration. `AGENTS.md` and `docs/wiki/mcp.md` say so plainly.
+
+**Why propose-only.** The propose/activate split already existed. An agent records; a person
+activates. A state nobody has approved should not become live because a model decided it
+should, and making activation structurally absent is stronger than making it policy-denied
+— there is no tool to misuse.
+
+**Why restore IS allowed without a human.** Restoring names a version that was already live,
+so it cannot introduce anything new; and history is append-only, so a restore appends rather
+than truncating and is itself restorable. "Move the configuration to a state it has already
+been in" is strictly weaker than "put it in a state of my choosing". That asymmetry is what
+lets an agent revert — which the user asked for — without letting it decide anything.
+
+**Why the data boundary is a test and not a check.** Every tool could have called a
+`assertNoClientData()` helper; that guards the tools that exist, not the one someone adds in
+six months. Instead `tools.ts` imports only configuration services, and
+`test/mcp-isolation.test.ts` walks the transitive import graph from `server.ts` and fails if
+any reachable file names a client-data table. This required splitting `loadFormulaSpecs` out
+of `report.ts` — importing it dragged every fact and override query into the graph.
+
+**Rejected: routing through the running app's loopback API.** Would have made the boundary
+an OS-level one rather than a code-level one, but requires the app to be running to use the
+agent, which is exactly backwards for an agent doing setup work. Revisit if this ever runs
+unattended.
+
+**Consequence, stated honestly.** The server process opens the same SQLite file the
+application does, because configuration lives there. The isolation guarantee is at the level
+of code, verified by a test, not enforced by the operating system. A stronger claim needs
+configuration in its own file or the loopback route above.
+
+---
+
+### ADR-044 · Configuration history is a table of states, not a list of requests
+**Date.** 2026-08-06
+
+**Decision.** Add `configuration_versions`: one row per state the configuration has actually
+been in, holding the full normalized document and the diff from its predecessor.
+`activateProposal` is the single writer, so every route into the live configuration —
+assistant, person, external agent — appends a version. `restoreVersion` returns to any of
+them, appending rather than truncating.
+
+**Why.** A proposal is a *request*; a version is a state that was *live*. Keeping only
+proposals meant "go back" could only mean "activate the one snapshot `applyBlueprintDirectly`
+happened to take before the last assistant action" — one step, on one path, and unavailable
+entirely after a human activated an imported document, because `activateProposal` refuses to
+run twice. Asking for multi-step revert on top of that structure was asking the wrong table
+a question it could not answer.
+
+**Forward-only.** Restoring seq 3 writes a new version at the head; it does not delete 4 and
+5. Nothing is destroyed by using the feature, an undo is undoable, and the UI says so
+("Restoring adds a new entry rather than deleting the ones after it"). This property is
+load-bearing for ADR-043: it is why an external agent may restore unsupervised.
+
+**Normalized, not delta.** A stored version spells `layout` and `views` out, because an
+absent key means "leave alone" (ADR-039) — a state captured before any view existed could
+otherwise never remove one added later. The `noChange` guard normalizes both sides before
+diffing; comparing a normalized document against a raw `currentConfiguration()` reported a
+change every time and was caught by the tests before it shipped.
+
+**A baseline is written before the first change.** On an installation upgraded from an
+earlier build, history starts empty while the configuration is already whatever the user
+built up. Without it, the first change would be seq 1 with nothing earlier to restore — the
+user would lose the ability to undo precisely the change they were making.

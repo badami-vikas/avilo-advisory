@@ -49,6 +49,19 @@ The app works fully with **no model configured**. AI is additive, never load-bea
 - **Only a formula may introduce a new id** (ADR-042), and only if its expression compiles against real accounts and formulas. Every other id — accounts, report types, prompt keys, section ids, view bindings — is closed.
 - **The server has the last word on what the Assistant did.** Its prose is not evidence. A reply claiming a change that was not written is corrected on screen; a blueprint whose diff is empty writes nothing and reports nothing; every applied change is described in words the user can check against what they asked for (ADR-040, BUG-029 to BUG-032). Where a model's claim is user-visible, something that knows the truth must be able to contradict it.
 - **The Assistant sees the open client's data, read-only.** With a client open it is given that client's real imported periods, the accounts an active formula needs and is missing, and the canonical accounts that have never received a fact — composed from the same `report.ts` queries the report view runs, so its answer can never diverge from the screen. It reads; it cannot write a fact.
+- **An external agent reaches configuration, never the books.** `@avilo/mcp` is a stdio MCP
+  server exposing the same blueprint pipeline to Claude Code and other agents. It can
+  describe the surface, read configuration, record a **proposal**, read history, and
+  **restore** a version — it cannot activate a new state, and it cannot read a client, a
+  fact or a figure. The data boundary is the module graph, checked by
+  `test/mcp-isolation.test.ts`, not a rule in a prompt (ADR-043). This is an inbound door:
+  the app still makes no outbound request without a button press, but "nothing outside can
+  reach it" is no longer true, and `AGENTS.md` says so.
+- **Every change to the configuration leaves a state you can return to.**
+  `configuration_versions`, written by `activateProposal` alone, so no path can change
+  configuration without recording the result. Restore is forward-only — it appends rather
+  than truncating, so an undo is itself undoable, which is what makes it safe to let an
+  agent revert unsupervised (ADR-044).
 - **The deterministic narrative is the source of truth.** `insights.ts` is pure functions. Generated prose is a rewrite of it for sending to a client, never a replacement.
 - **Prompts are data.** `ACCOUNTING_GUIDANCE` and `NARRATIVE_GUIDANCE` are overridable at runtime via `app_settings` — mapping accuracy is tuned by editing text, not by shipping a binary.
 - **New data supersedes a custom edit.** An edited summary is stored with a fingerprint of the findings it was written against; when the figures move, the edit is set aside.
@@ -58,7 +71,7 @@ The app works fully with **no model configured**. AI is additive, never load-bea
 pnpm workspace monorepo. React 18 + Vite 6 + TypeScript 5.7 + Tailwind 4 + Radix + chart.js 4.5 · Fastify 5 + tRPC 11 + Drizzle + better-sqlite3 · Electron 43 + electron-builder 25. Groq is the only external service and is optional.
 
 ```
-platform/apps/{web,api,desktop}   platform/modules/avilo   platform/packages/tables
+platform/apps/{web,api,desktop,mcp}   platform/modules/avilo   platform/packages/tables
 ```
 
 ## Commands
