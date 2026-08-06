@@ -8,7 +8,7 @@
  * actually written, and the server's answer is what reaches the user.
  */
 import { describe, expect, it } from "vitest";
-import { levelsClaimedInProse, CLAIMS_AN_ACTION } from "../src/services/copilot.js";
+import { levelsClaimedInProse, serverNarration, deniesActing, CLAIMS_AN_ACTION } from "../src/services/copilot.js";
 
 describe("detecting a claimed action", () => {
   it("catches the exact claims that shipped in 1.9.2", () => {
@@ -68,5 +68,78 @@ describe("levelsClaimedInProse", () => {
 
   it("claims nothing for a plain answer, so an ordinary reply is never flagged", () => {
     expect([...levelsClaimedInProse("Revenue for October was the highest of the year.")]).toEqual([]);
+  });
+});
+
+/**
+ * The server's account replaces the model's, rather than being printed beneath it.
+ *
+ * Two rounds of correction cards (BUG-030, BUG-034) established that the app could DETECT a
+ * false claim. They left it on screen and argued with it underneath, which still puts the
+ * false sentence in front of the user. These pin the swap: where the server knows what
+ * happened, `text` is the server's sentence and the model's is carried in `suppressed`.
+ */
+describe("serverNarration", () => {
+  it("describes nothing as nothing", () => {
+    expect(serverNarration([])).toBe("No configuration change was made.");
+  });
+
+  it("names the single change it was given", () => {
+    expect(serverNarration(["Dashboard — hid warnings"])).toBe(
+      "Applied one change: dashboard — hid warnings.",
+    );
+  });
+
+  it("counts and lists several", () => {
+    const text = serverNarration(["Dashboard — hid warnings", "Portfolio tiles — changed"]);
+    expect(text).toContain("Applied 2 changes");
+    expect(text).toContain("dashboard — hid warnings");
+    expect(text).toContain("portfolio tiles — changed");
+  });
+
+  /*
+    The property that matters: this sentence is built from the change list, so there is no
+    input to it that the model authors. It cannot claim a lever that did not move, because
+    it never sees the model's prose at all.
+  */
+  it("can only say what the diff says", () => {
+    const changes = ["Formula avg_noi added: avg3.net_operating_income"];
+    expect(serverNarration(changes)).not.toContain("view");
+    expect(serverNarration(changes)).toContain("formula avg_noi");
+  });
+});
+
+/*
+  BUG-043. The mirror image of BUG-034: prose that DENIES acting while a change was applied.
+  Shown to the user as a refusal printed directly above a "Change applied" card listing three
+  deleted views. `misdescribed` cannot catch this — a refusal naming no lever claims nothing.
+*/
+describe("deniesActing", () => {
+  it("catches the refusal forms a model actually produces", () => {
+    for (const text of [
+      "I can't change the styling or formatting of the executive summary text.",
+      "I cannot alter that.",
+      "This is outside the five levers I can configure.",
+      "That is outside the eight levers.",
+      "I'm not able to do that.",
+      "I am unable to change the header.",
+      "Formatting is not something I can change.",
+      "I don't have the ability to move that button.",
+    ]) {
+      expect(deniesActing(text), text).toBe(true);
+    }
+  });
+
+  it("does not fire on an ordinary report of work done", () => {
+    for (const text of [
+      "Done — the summary is now one paragraph, with gains in green.",
+      "Top jobs is now hidden from the default report layout.",
+      "Built it — \"Overdue invoices\" is in the View picker now.",
+      "I've created the metric and put it on a view.",
+      // "can" alone must not trip it; the bar is a refusal, not a modal verb.
+      "You can now see the overdue accounts on the dashboard.",
+    ]) {
+      expect(deniesActing(text), text).toBe(false);
+    }
   });
 });

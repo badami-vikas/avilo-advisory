@@ -9,7 +9,11 @@
  *
  * `blueprint.ts` re-exports everything here, so existing callers are unaffected.
  */
-import type { AviloBlueprint, CustomView, LayoutOverride, RegisteredSurface } from "@avilo/core";
+import type {
+  ArrangementOverride, AviloBlueprint, CustomView, LayoutOverride, RegisteredSurface,
+  SummaryDoc, SummaryLinkRegistry,
+} from "@avilo/core";
+import { validateSummaryDoc } from "@avilo/core";
 import { CANONICAL_ACCOUNTS, REPORT_TYPES, SEED_FORMULAS } from "@avilo/module";
 import { getDb, schema } from "../db.js";
 import { readSetting } from "./ai.js";
@@ -60,6 +64,68 @@ export const VIEW_ACTIONS = [
   "export-pdf", "upload", "open-report", "open-raw-data", "open-dashboard", "open-standard",
 ] as const;
 
+/**
+ * The three "arrange an existing surface" registries.
+ *
+ * These exist because the assistant's reach was drawn too tightly: a panel the advisor can
+ * see but cannot ask for is a boundary that produces false claims rather than refusals
+ * (BUG-036, and the round after it). The rule is now the one the user actually stated —
+ * the application's own chrome is fixed; the *content* surfaces are arrangeable.
+ *
+ * Mirrored by hand from the web package for the same reason LAYOUT_SECTION_IDS is: apps/api
+ * cannot import React. Drift costs a rejected blueprint, never a wrong one.
+ */
+
+/** Panel ids rendered by `apps/web/src/app/dashboard/Dashboard.tsx`. */
+export const DASHBOARD_SECTION_IDS = [
+  "kpi-strip", "summary", "growth", "quality", "profitability", "cash", "customers",
+  "receivables", "payables", "referrals", "forecast", "goal", "warnings", "actions",
+] as const;
+
+/** Column ids from `COLUMNS` in `apps/web/src/app/pages/ClientsPage.tsx`. */
+export const CLIENTS_COLUMN_IDS = [
+  "name", "stage", "latestPeriod", "revenue", "netOperatingIncome", "grossMarginPct",
+  "noiMarginPct", "daysCashOnHand", "grossProfit", "cogs", "overhead", "cash", "ar", "ap",
+  "totalAssets", "dso", "dpo", "legalName", "industry", "data",
+] as const;
+
+/**
+ * Portfolio aggregates that may appear as a tile above the clients list.
+ *
+ * Every entry is computed by the app from the rows already on screen. There is no tile
+ * whose value the assistant supplies — it picks *which* aggregate to show, never what it
+ * reads. That is why widening this lever cannot fabricate a figure.
+ */
+export const LANDING_TILE_IDS = [
+  "client-count", "clients-with-data", "missing-inputs",
+  "total-revenue", "total-net-operating-income", "total-gross-profit", "total-cogs",
+  "total-overhead", "total-cash", "total-ar", "total-ap", "total-assets",
+  "avg-gross-margin", "avg-noi-margin", "avg-days-cash", "avg-dso", "avg-dpo",
+] as const;
+
+/*
+  The DEFAULTS below matter more than they look. A stored version normalizes an unset
+  arrangement by spelling it out, and if what it spells out is not what the app actually
+  renders when unset, restoring the baseline silently changes the screen — showing eleven
+  columns nobody asked for. These mirror the web package's own defaults for that reason.
+*/
+
+/** `DEFAULT_HIDDEN` in ClientsPage.tsx — columns off until the advisor turns them on. */
+export const DEFAULT_HIDDEN_CLIENTS_COLUMNS = [
+  "grossProfit", "cogs", "overhead", "cash", "ar", "ap", "totalAssets", "dso", "dpo",
+  "legalName", "industry",
+] as const;
+
+/** The four tiles the clients page has always shown, in order. */
+export const DEFAULT_LANDING_TILES = [
+  "client-count", "total-revenue", "missing-inputs", "avg-noi-margin",
+] as const;
+
+/** Where each arrangement lands in `app_settings`. */
+export const DASHBOARD_LAYOUT_KEY = "dashboard_layout";
+export const CLIENTS_TABLE_KEY = "clients_table_layout";
+export const LANDING_TILES_KEY = "landing_tiles";
+
 export function registeredSurface(): RegisteredSurface {
   const db = getDb();
   const formulaIds = db.select({ id: schema.formulas.id }).from(schema.formulas).all();
@@ -71,7 +137,21 @@ export function registeredSurface(): RegisteredSurface {
     sectionIds: new Set(LAYOUT_SECTION_IDS),
     detailKinds: new Set(DETAIL_KINDS),
     actionIds: new Set(VIEW_ACTIONS),
+    dashboardSectionIds: new Set(DASHBOARD_SECTION_IDS),
+    clientsColumnIds: new Set(CLIENTS_COLUMN_IDS),
+    landingTileIds: new Set(LANDING_TILE_IDS),
   };
+}
+
+/** Read one arrangement back out of `app_settings`. A corrupt row reads as unset. */
+function readArrangement(key: string): ArrangementOverride | undefined {
+  const stored = readSetting(key);
+  if (!stored) return undefined;
+  try {
+    return JSON.parse(stored) as ArrangementOverride;
+  } catch {
+    return undefined;
+  }
 }
 
 /** The current live configuration, in the same shape a blueprint carries. */
@@ -81,6 +161,9 @@ export function currentConfiguration(): {
   prompts: AviloBlueprint["prompts"];
   layout?: LayoutOverride;
   views?: CustomView[];
+  dashboard?: ArrangementOverride;
+  clientsTable?: ArrangementOverride;
+  landingTiles?: ArrangementOverride;
 } {
   const db = getDb();
   const formulas = db.select().from(schema.formulas).all().map((f) => ({
@@ -116,12 +199,19 @@ export function currentConfiguration(): {
     }
   }
 
+  const dashboard = readArrangement(DASHBOARD_LAYOUT_KEY);
+  const clientsTable = readArrangement(CLIENTS_TABLE_KEY);
+  const landingTiles = readArrangement(LANDING_TILES_KEY);
+
   return {
     formulas,
     mappings,
     prompts,
     ...(layout ? { layout } : {}),
     ...(views ? { views } : {}),
+    ...(dashboard ? { dashboard } : {}),
+    ...(clientsTable ? { clientsTable } : {}),
+    ...(landingTiles ? { landingTiles } : {}),
   };
 }
 
@@ -135,4 +225,155 @@ export function exportBlueprint(name: string, description?: string): AviloBluepr
     exportedAt: new Date().toISOString(),
     ...config,
   };
+}
+
+/* ------------------------------------------------- summary rich text (ADR-047) */
+
+/**
+ * Where a summary hyperlink may point, composed from what this installation actually has.
+ *
+ * Views come from the live custom-view set rather than a constant, so a link can reach a
+ * screen the assistant built last week. Everything here is a place inside the app; there is
+ * no entry, and no shape, that can express an external address.
+ */
+export function summaryLinkRegistry(): SummaryLinkRegistry {
+  const views = currentConfiguration().views ?? [];
+  return {
+    reportSections: new Set(LAYOUT_SECTION_IDS),
+    dashboardPanels: new Set(DASHBOARD_SECTION_IDS),
+    viewIds: new Set(views.map((v) => v.id)),
+  };
+}
+
+/** The registry as the flat list of destination strings the prompt shows the model. */
+export function summaryDestinations(registry: SummaryLinkRegistry): string[] {
+  return [
+    "raw",
+    ...[...registry.reportSections].map((id) => `report:${id}`),
+    ...[...registry.dashboardPanels].map((id) => `dashboard:${id}`),
+    ...[...registry.viewIds].map((id) => `view:${id}`),
+  ];
+}
+
+/**
+ * A model reply as a `SummaryDoc`, or `null` if it is not one.
+ *
+ * Tolerates the two things models reliably do to JSON: wrap it in a fenced code block, and
+ * put a sentence in front of it. Returns `null` rather than throwing — the caller treats an
+ * unparseable reply as plain prose, which is the pre-existing behaviour and still correct.
+ */
+export function parseSummaryOutput(
+  output: string,
+  registry: SummaryLinkRegistry,
+): SummaryDoc | null {
+  const fenced = /```(?:json)?\s*([\s\S]*?)```/.exec(output);
+  const body = fenced ? fenced[1]! : output;
+
+  /*
+    Models emit ONE OBJECT PER PARAGRAPH about as often as they emit one object with several
+    blocks — observed on the first real run against llama-3.3-70b. Taking the first `{` to
+    the last `}` therefore produced a string containing two concatenated objects, which is
+    not JSON, and the whole rich summary was lost to a formatting habit. Each top-level
+    object is parsed on its own and their blocks are concatenated.
+  */
+  const collect = (text: string) =>
+    topLevelObjects(text)
+      .map((chunk) => {
+        try {
+          return validateSummaryDoc(JSON.parse(chunk), registry).doc;
+        } catch {
+          return null;
+        }
+      })
+      .filter((d): d is SummaryDoc => d !== null);
+
+  /*
+    Repair is a SECOND pass over the whole body, not a per-chunk retry, because the
+    malformation breaks the brace scanner before any chunk exists: `{"text=", a margin of "}`
+    leaves an unbalanced quote, so the scanner reads the following `}` and `{` as being
+    inside a string and never closes the object. Splitting has to happen on repaired text.
+    Well-formed output never reaches the second pass.
+  */
+  const docs = ((): SummaryDoc[] => {
+    const first = collect(body);
+    return first.length > 0 ? first : collect(repairKeys(body));
+  })();
+
+  if (docs.length === 0) return null;
+  return {
+    mode: docs[0]!.mode,
+    blocks: docs.flatMap((d) => d.blocks),
+  };
+}
+
+/**
+ * One narrow repair for a malformation the model actually produces.
+ *
+ * Observed repeatedly on llama-3.3-70b: `{"text=", a margin of "}` where `{"text": "..."}`
+ * was meant — a quoted key followed by `=` instead of `":`. Adding a line to the prompt did
+ * not stop it, and each occurrence cost the entire rich summary.
+ *
+ * Anchored to a key POSITION — immediately after `{` or `,` — and only ever applied to
+ * input that already failed to parse. Without the anchor it would corrupt a legitimate
+ * value: in `{"note":"a=b"}` an unanchored rule rewrites `"a=` and destroys the string.
+ * That anchor is the difference between a targeted fix for a known defect and owning a
+ * general-purpose JSON repairer.
+ */
+function repairKeys(text: string): string {
+  return text.replace(/([{,]\s*)"(\w+)=/g, '$1"$2":');
+}
+
+/** Every balanced top-level `{...}` in a string, ignoring braces inside JSON strings. */
+function topLevelObjects(body: string): string[] {
+  const found: string[] = [];
+  let depth = 0;
+  let start = -1;
+  let inString = false;
+  let escaped = false;
+
+  for (let i = 0; i < body.length; i += 1) {
+    const ch = body[i]!;
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === "{") {
+      if (depth === 0) start = i;
+      depth += 1;
+    } else if (ch === "}") {
+      depth -= 1;
+      if (depth === 0 && start !== -1) {
+        found.push(body.slice(start, i + 1));
+        start = -1;
+      }
+    }
+  }
+  return found;
+}
+
+/**
+ * The prose inside a reply that failed to parse.
+ *
+ * This exists because of a specific, ugly failure: when parsing failed, the raw model
+ * output was handed to `fabricatedFigures` as if it were prose. That output is JSON
+ * containing colour codes, so `#15803d` was read as the figure `15803`, and a completely
+ * faithful summary was discarded for containing numbers "not in your books". The check was
+ * right; it was being shown the wrong text.
+ *
+ * So a reply that looks like JSON never reaches that check as JSON. Its `text` runs are
+ * pulled out and joined, which both salvages a readable summary and gives the figure check
+ * exactly the words the advisor would see. Tolerates the `"text=` malformation models
+ * occasionally produce, since the point here is rescue rather than strictness.
+ */
+export function salvageSummaryText(output: string): string {
+  const looksLikeJson = /^\s*[{[]/.test(output) || /"blocks"\s*:/.test(output);
+  if (!looksLikeJson) return output;
+
+  const runs = [...output.matchAll(/"text"\s*[:=]\s*"((?:[^"\\]|\\.)*)"/g)].map((m) =>
+    m[1]!.replace(/\\(.)/g, "$1"),
+  );
+  return runs.length > 0 ? runs.join("") : output;
 }

@@ -146,3 +146,99 @@ describe("declared levers", () => {
     });
   });
 });
+
+/*
+  BUG-042 — the padding that deleted three views.
+
+  The user asked for the executive summary to be restyled. The reply refused in prose, and
+  the document beneath it carried "views":[] as part of the empty-section scaffolding the
+  worked examples used to demonstrate. `declares` named views, so the guard above passed,
+  and every view the user had built was removed.
+
+  The guard could not have caught this: an author that declares a lever and then sends an
+  empty list for it is, on its face, asking for that lever to be emptied. The fix is to deny
+  the model that sentence at all.
+*/
+describe("an empty views array from the assistant", () => {
+  beforeEach(freshApi);
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  function withOneView() {
+    const outcome = blueprint.applyBlueprintDirectly(
+      "assistant",
+      "build a view",
+      {
+        schemaVersion: 1,
+        name: "v",
+        exportedAt: new Date().toISOString(),
+        views: [{ id: "keep-me", label: "Keep me", layout: "grid", components: [] }],
+      },
+      ["views"],
+    );
+    expect("proposal" in outcome).toBe(true);
+    return outcome;
+  }
+
+  it("does not delete the views the user built", () => {
+    withOneView();
+    const outcome = blueprint.applyBlueprintDirectly(
+      "assistant",
+      "restyle the summary",
+      {
+        schemaVersion: 1,
+        name: "restyle",
+        exportedAt: new Date().toISOString(),
+        prompts: [{ key: "narrative_guidance", body: "One paragraph. Colour the figures." }],
+        views: [],
+      },
+      ["prompts", "views"],
+    );
+    expect("proposal" in outcome).toBe(true);
+    const sections = ("proposal" in outcome ? outcome.proposal.diff : []).map((c) => c.section);
+    expect(sections).toEqual(["prompts"]);
+    expect(blueprint.currentConfiguration().views).toHaveLength(1);
+  });
+
+  it("still deletes a view when the list is non-empty", () => {
+    withOneView();
+    blueprint.applyBlueprintDirectly(
+      "assistant",
+      "add another",
+      {
+        schemaVersion: 1,
+        name: "v2",
+        exportedAt: new Date().toISOString(),
+        views: [
+          { id: "keep-me", label: "Keep me", layout: "grid", components: [] },
+          { id: "drop-me", label: "Drop me", layout: "grid", components: [] },
+        ],
+      },
+      ["views"],
+    );
+    blueprint.applyBlueprintDirectly(
+      "assistant",
+      "delete drop-me",
+      {
+        schemaVersion: 1,
+        name: "v3",
+        exportedAt: new Date().toISOString(),
+        views: [{ id: "keep-me", label: "Keep me", layout: "grid", components: [] }],
+      },
+      ["views"],
+    );
+    expect(blueprint.currentConfiguration().views?.map((v) => v.id)).toEqual(["keep-me"]);
+  });
+
+  /*
+    The regression this fix caused on its first attempt, pinned. Putting the rule in
+    `validateBlueprint` meant a snapshot could no longer say "there were no views", so Undo
+    of a newly-built view silently left the view in place — the safety net that recovered
+    the user's data, broken by the fix for losing it.
+  */
+  it("leaves undo of a view creation working", () => {
+    const outcome = withOneView();
+    const revertId = "proposal" in outcome ? outcome.revertId : "";
+    blueprint.activateProposal(revertId, "user");
+    expect(blueprint.currentConfiguration().views ?? []).toEqual([]);
+  });
+});

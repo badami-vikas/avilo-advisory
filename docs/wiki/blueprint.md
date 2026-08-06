@@ -142,8 +142,10 @@ the same audit trail an edit leaves.
 - Cannot touch application source.
 - Cannot see or emit a Groq API key — `validateBlueprint` refuses a document carrying one.
 - Cannot write a financial fact or import a file.
-- Cannot change the application's own chrome — its header, navigation, or the assistant
-  panel itself. It builds screens *inside* the app; it does not restyle the app.
+- Cannot change the application's own chrome — the header, the navigation, the view
+  dropdown, the assistant panel, and the clients-list search and filter. That list is now
+  the *whole* of what is off-limits: the panels, columns, tiles and report sections are all
+  arrangeable (ADR-046).
 - Cannot invent a component type, a table source or an action. It composes from the
   registry; it cannot extend the vocabulary.
 - Cannot make a change that is not reversible from the panel (ADR-038), with the one
@@ -190,3 +192,64 @@ carries it. The MCP and import paths pass no declaration and are unaffected — 
 A companion check compares the reply's prose to the diff: a lever the prose claims that did
 not move is marked on screen ("trust the change list, not the sentence above it"), closing
 the half of ADR-040 that covered *whether* something changed but not *what* (ADR-045).
+
+
+## Arranging a surface (v1.11.0)
+
+Three levers were added alongside `layout`, which they resemble: `dashboard` (which panels
+the client dashboard shows), `clientsTable` (which columns the clients list shows) and
+`landingTiles` (which portfolio aggregates sit above it). Each takes `{order, hidden}` over
+a closed registry of ids the application already builds.
+
+**The safety argument is the one from ADR-041, applied to layout instead of content.** An
+arrangement can permute and hide. It has no field that can carry a value, so the assistant
+chooses *which* registered thing appears and *where*, and the app computes what it says.
+Widening the reach across four surfaces therefore adds no way to put an unsourced figure on
+a screen.
+
+Three details that are easy to get wrong, and were:
+
+| | |
+|---|---|
+| **Defaults must be real** | A stored version normalizes an unset arrangement by spelling it out. If it spells out `hidden: []` when the clients table actually hides eleven columns by default, restoring the baseline is itself a change. |
+| **Tiles select, panels permute** | `landingTiles.order` is the set to show. `dashboard`/`clientsTable` append ids they omit, so a panel added in a later build does not vanish for an older stored arrangement. |
+| **Unknown ids are dropped at render** | A stored arrangement can outlive the build that wrote it. It passed validation against a *different* registry, so the renderer intersects with the ids this build has rather than trusting the row. |
+
+Why it was worth doing: a surface the advisor can see but cannot ask about is what made the
+assistant claim work it had not done (BUG-033 to BUG-036). Two rounds of prompt-tuning did
+not fix it. Making the request answerable removes the pressure that produced the lie.
+
+## The server's account beats the model's (v1.11.0)
+
+When the assistant's prose claims something the diff does not support, the prose is
+**withheld**, not printed-then-rebutted. `text` becomes a sentence built from the change list
+(`serverNarration`), and the model's own wording moves to `suppressed`, shown collapsed.
+
+Two earlier rounds (BUG-030, BUG-034) answered this with a correction card underneath the
+claim. That is honest and still wrong: the user reads the false sentence, and a rebuttal
+below does not un-read it. `serverNarration` takes only the change list as input, so it has
+no way to name a lever that did not move.
+
+Withheld, not deleted — someone debugging their assistant can still open it.
+
+## Summary rich text (v1.11.0)
+
+*Depth: [ADR-048](../decisions.md).*
+
+`generateSummary` returns a `SummaryDoc`: blocks of spans, each span carrying text plus an
+optional `color` or in-app `link`. Colour is unrestricted; a link is an id
+(`report:profitability`, `dashboard:cash`, `view:<id>`, `raw`) resolved against the live
+registry.
+
+**No markup, no URLs — by shape, not by filter.** A summary ends up in a PDF sent to a
+client, so a live external link would be an outbound request from an offline-first app.
+There is no field to put one in.
+
+The figure check still reads the flattened text, so a number inside a coloured span is
+checked exactly as one in plain prose.
+
+*Worth knowing if you touch this:* five separate defects surfaced only by running it against
+the live model — raw JSON reaching the figure check (a hex colour read as a figure), one JSON
+object per paragraph, a malformed key, a token ceiling still sized for prose, and report
+links with no DOM ids to reach. All are in ADR-048 and BUG-038/039. The lesson is that every
+one of them degraded *silently* to plain text; the page looked fine throughout.

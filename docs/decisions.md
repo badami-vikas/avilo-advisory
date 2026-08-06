@@ -742,3 +742,117 @@ prose claims that did not move is marked on screen: trust the change list, not t
 **Standing lesson, sharpened.** ADR-040 said a model's account of what it did is not evidence.
 The sharper form: when prompting fails twice on the same class of defect, stop writing prompt
 text and find two model outputs that can be checked against each other.
+
+### ADR-046 · The assistant's reach is drawn around chrome, not around content
+
+**Decision.** Three levers were added — `dashboard`, `clientsTable`, `landingTiles` — and the
+boundary the assistant is told about was redrawn. It used to be "these five things are
+yours, everything else on screen is the application". It is now "the header, the navigation,
+the view dropdown, the assistant panel and the clients-list search/filter are the
+application; every other surface is arrangeable".
+
+**Why.** The old line was drawn where the code happened to be flexible, not where a user
+would draw it. An advisor looking at the clients page sees four summary tiles and a table of
+columns and has no way to tell that one is configurable and the other is chrome — so they
+ask, and the assistant refuses something that looks arbitrary, or worse, claims to have done
+it. BUG-036 and its two follow-ups were all this shape. Prompting was tried twice; the third
+attempt is to remove the pressure by making the request answerable.
+
+**Why it does not weaken anything.** All three levers have one shape,
+`{order, hidden}` over a closed registry of ids the application already builds. An
+arrangement can permute and hide; it has no field that can hold a value. So the reach
+grows across surfaces while "never fabricate a figure" holds for exactly the reason it held
+for generated views (ADR-041) — not because the model is asked to behave, but because there
+is nowhere to put a number. Every id is closed; the formula-creation exception (ADR-042) is
+untouched.
+
+**Consequences, and what had to be got right.**
+
+- `normalizeVersionDocument` must spell out each arrangement to the app's **real** default
+  when unset, not to an empty one. The clients table hides eleven columns by default;
+  normalizing to `hidden: []` would have made restoring the baseline itself a change,
+  silently showing eleven columns nobody asked for.
+- `landingTiles` treats `order` as a **selection**; the other levers append unmentioned ids.
+  Appending is right for a panel — one added in a later build should not vanish for someone
+  with an older stored arrangement. It is wrong for tiles: seventeen aggregates exist and
+  four show by default, so "show me these five" must mean five.
+- `levelsClaimedInProse` now discriminates by noun (tile / column / panel) rather than by
+  verb. "Hid" and "reordered" apply to four surfaces now, so keying off the verb would have
+  reported a misdescription every time the assistant correctly hid a panel — a check that
+  cries wolf is a check nobody reads.
+- Unknown ids are dropped at render, not just refused at propose time. A stored arrangement
+  can outlive the build that wrote it (a restore from an older installation, a blueprint from
+  a colleague), and it has already passed validation against a *different* registry.
+
+**Rejected: letting the assistant emit markup for the executive summary.** The request that
+prompted this round also asked for colour-coded prose and hyperlinks. Colour and in-app links
+are fine and are being built — the app resolves both. Arbitrary external URLs and raw HTML
+are not: an external link in a client-facing PDF is an outbound request from an application
+whose premise is that nothing leaves the machine without a button press, and raw HTML makes
+model output into page content. The capability the user asked for is delivered without either.
+
+### ADR-047 · The server's account replaces the model's, rather than arguing with it
+
+**Decision.** Where the server knows what happened and the model's prose says otherwise, the
+prose is **withheld** and replaced by a sentence generated from the diff (`serverNarration`).
+The model's wording is carried in `suppressed` and shown collapsed, behind a disclosure.
+
+**Why.** BUG-030 and BUG-034 both ended in a correction card: print the claim, rebut it
+underneath. That is honest and it is still the wrong shape — the user reads the false
+sentence, and being told afterwards that it was wrong does not un-read it. The rule this
+establishes: *where something knows the truth, it gets to speak first*, not merely to append
+a footnote.
+
+Withheld rather than deleted, because someone debugging their assistant needs to see what it
+actually said. The default is not reading it; the option is always there.
+
+**Consequence.** `serverNarration` takes the change list — the same list the "Change applied"
+card renders. It has no input the model authors, so it cannot claim a lever that did not
+move. The misdescription card no longer says "trust the list below, not the sentence above";
+the sentence above *is* the list.
+
+**What this does not fix.** The model still generates false sentences; they are no longer
+displayed. Full tool-calling for the assistant panel — where the document and the claim are
+one structured object — remains the stronger version and is not built.
+
+### ADR-048 · Rich text for the executive summary: spans, not markup
+
+**Decision.** Generated summaries return a `SummaryDoc` — a list of blocks of spans, each
+span carrying text and optionally a `color` or an in-app `link` id. Colour is unrestricted.
+Links resolve against a registry of destinations inside the application. There is no field
+for markup and no field for a URL.
+
+**Why not HTML.** The request was colour-coded prose with hyperlinks, which HTML would have
+delivered in an afternoon. It would also have made model output into page content, and put a
+live external link into a PDF an advisor sends to a client — an outbound request from an
+application whose whole premise is that nothing leaves the machine without a button press.
+So the ADR-041 move again: a closed grammar, where the unwanted state is not refused by a
+filter but is unrepresentable.
+
+**Colour was never the risk.** It is unvalidated beyond "is a colour": React assigns it
+through the CSSOM, which drops anything that is not one. The worst outcome is green on a bad
+number, which the advisor can see and correct. Restricting it would have bought nothing and
+cost the thing that was actually asked for.
+
+**Five defects found by running it against the live model, none of which a unit test would
+have produced.** Recorded because each one was invisible from the code:
+
+1. **Raw JSON reached `fabricatedFigures`.** On a parse failure the model's output was passed
+   through as prose — so the hex colour `#15803d` read as the figure `15803`, and a perfectly
+   faithful summary was discarded for containing numbers "not in your books". The check was
+   right; it was being shown the wrong text. `salvageSummaryText` now extracts the words.
+2. **One object per paragraph.** The model emitted several top-level JSON objects rather than
+   one with several blocks. Taking the first `{` to the last `}` spanned them all and parsed
+   nothing.
+3. **`{"text=` for `{"text":`.** Repaired, anchored to a key position so it can never corrupt
+   an `=` inside a legitimate value.
+4. **The token ceiling was still sized for prose.** The span form costs roughly three times
+   the tokens, so replies were truncated mid-object and *every* generation silently degraded
+   to plain text. Indistinguishable, from the outside, from the model ignoring the format.
+5. **Report links had nothing to scroll to.** Section ids existed in the layout config but
+   were never rendered into the DOM, and a `report:` link clicked from the dashboard pointed
+   at a different view entirely. Both fixed — ids are rendered, and a cross-view link
+   switches view before scrolling.
+
+Groq's JSON mode (`response_format: json_object`) was then enabled for this call, which took
+the rich form from landing about half the time to landing every time in testing.

@@ -90,6 +90,64 @@ export function buildNarrativePrompt(input: NarrativeInput): string {
 }
 
 /**
+ * The same prompt, asking for a `SummaryDoc` instead of loose prose.
+ *
+ * Separate from `buildNarrativePrompt` rather than replacing it: the plain-prose path is
+ * what runs when the model returns something unparseable, and keeping both means a rich
+ * summary is an upgrade rather than a new way for Generate to fail.
+ *
+ * `destinations` is the closed list of places a link may point. It is composed by the
+ * caller from the live registry, so the model is choosing from what this installation
+ * actually has — the same "a model may choose, never invent" rule the rest of the app runs
+ * on, applied to a hyperlink.
+ */
+export function buildRichNarrativePrompt(
+  input: NarrativeInput & { destinations: string[] },
+): string {
+  const findings = input.beats
+    .map((beat) => [`${beat.kicker}: ${beat.headline}`, ...beat.body.map((b) => `  - ${b}`)].join("\n"))
+    .join("\n\n");
+
+  return [
+    input.guidance ?? NARRATIVE_GUIDANCE,
+    "",
+    `Client: ${input.clientName}`,
+    `Period: ${input.periodLabel}`,
+    "",
+    "Findings (already calculated — these are your only source):",
+    findings,
+    "",
+    "Return ONLY a JSON object, no prose around it, in this shape:",
+    '{"mode":"paragraph","blocks":[[{"text":"Revenue held at "},{"text":"$204K","color":"#15803d"},',
+    '{"text":" — see "},{"text":"the profitability section","link":"report:profitability"},{"text":"."}]]}',
+    "",
+    'A block is one paragraph (mode "paragraph") or one bullet (mode "bullets"). A span is',
+    "either plain text, text with a `color`, or text with a `link`. Use whatever colours you",
+    "think communicate best — any hex value or CSS colour name. Green for what improved, red",
+    "for what worsened, is the convention here, but it is your call.",
+    "",
+    "A `link` must be one of these exact destinations, and nothing else:",
+    input.destinations.join(", "),
+    "",
+    // Observed on the first run under a house style that asked for links: the model used the
+    // destination id as the visible words, printing "report:cash-position" mid-sentence in a
+    // paragraph destined for a client PDF.
+    "`text` is what the READER sees and `link` is where it goes. They are never the same.",
+    'Write the words a client would read — {"text":"cash position","link":"report:cash-position"},',
+    'never {"text":"report:cash-position","link":"report:cash-position"}. A destination id must',
+    "not appear in the prose.",
+    "",
+    "There is no way to link outside the application, and no way to emit HTML. Do not try;",
+    "a document containing either is discarded whole and the advisor sees nothing.",
+    "Every figure must come from the findings above.",
+    "",
+    // Both of these were observed on the first real run and cost the whole rich summary.
+    "Return exactly ONE object containing every block. Do not emit one object per paragraph.",
+    'Use strict JSON: every key quoted and followed by a colon — {"text": "..."}, never {"text= ...}.',
+  ].join("\n");
+}
+
+/**
  * Every number the findings contain.
  *
  * Used to check the model's output back against its source. Matches currency, percentages,

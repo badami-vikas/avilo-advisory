@@ -5,6 +5,8 @@ import { applyView, defaultViewConfig, type ColumnSpec, type ViewConfig } from "
 import { formatPeriod } from "@avilo/module";
 
 import { api } from "../../lib/trpc.js";
+import { useArrangement } from "../../lib/arrangement.jsx";
+import { DEFAULT_TILES, TILES } from "./landing-tiles.js";
 import { money, parseFigure, percent } from "../../lib/format.js";
 import { Block, Button, EmptyState, Spinner, StatTile } from "../components/ui.js";
 import { DataTable, type ColumnRender } from "../components/DataTable.js";
@@ -89,6 +91,25 @@ export function ClientsPage() {
     sorts: [{ id: "name", dir: "asc" }],
     hiddenColumns: DEFAULT_HIDDEN,
   }));
+  /*
+    The two clients-page arrangements. Applying `clientsTable` seeds the view overlay the
+    ⋯ menu also writes, so an assistant change and a manual change use one mechanism rather
+    than competing — the advisor can always override afterwards, and the next assistant
+    change overrides that in turn. Last writer wins, and both writers are visible.
+  */
+  const clientsTable = useArrangement("clients_table_layout");
+  const landingTiles = useArrangement("landing_tiles");
+
+  useEffect(() => {
+    const a = clientsTable.value;
+    if (!a) return;
+    setView((prev) => ({
+      ...prev,
+      ...(a.order ? { columnOrder: a.order.filter((id) => COLUMNS.some((c) => c.id === id)) } : {}),
+      ...(a.hidden ? { hiddenColumns: a.hidden } : {}),
+    }));
+  }, [clientsTable.value]);
+
   const [uploadFor, setUploadFor] = useState<ClientRow | null>(null);
   const [viewMode, setViewMode] = useState<"table" | "card">("table");
   const [modelSettings, setModelSettings] = useState(false);
@@ -476,8 +497,28 @@ export function ClientsPage() {
     return applyView(projected, view) as unknown as ClientRow[];
   }, [rows, search, view]);
 
-  // Tiles summarise what is on screen. Computing them from the unfiltered set while
-  // "Showing" counts the filtered set put two contradictory numbers side by side.
+  /*
+    Which tiles to show. Every tile still reduces `visible` — the filtered set — so the
+    original rule holds: computing a tile from the unfiltered rows while "Showing" counts
+    the filtered ones would put two contradictory numbers side by side.
+  */
+  const tiles = useMemo(() => {
+    /*
+      Tiles are the one arrangement where `order` is a SELECTION, not a permutation.
+      Everywhere else an unmentioned id is appended, so a panel added in a later build does
+      not vanish for someone with an older stored arrangement. Here that rule is wrong: ask
+      for five tiles and appending the other twelve is not what anyone means. There are
+      seventeen aggregates and four shown by default — the set was always a choice.
+    */
+    const a = landingTiles.value;
+    const chosen = a?.order?.length ? a.order : a ? [] : DEFAULT_TILES;
+    const hidden = new Set(a?.hidden ?? []);
+    return chosen
+      .filter((id) => !hidden.has(id))
+      .map((id) => TILES.find((t) => t.id === id))
+      .filter((t): t is (typeof TILES)[number] => Boolean(t));
+  }, [landingTiles.value]);
+
   const totals = useMemo(() => {
     const list = visible;
     const revenue = list.reduce((sum, r) => sum + (r.revenue ?? 0), 0);
@@ -548,24 +589,21 @@ export function ClientsPage() {
         onModelSettings={() => setModelSettings(true)}
       />
 
+      {/*
+        Tiles are chosen by the `landingTiles` arrangement, computed here. The assistant
+        picks which aggregate appears; the figure is always this page's own reduction over
+        the rows on screen.
+      */}
       <div className="flex flex-wrap gap-2.5">
-        <StatTile icon={<Layers size={15} />} label="Showing" value={String(visible.length)} />
-        <StatTile
-          icon={<TrendingUp size={15} />}
-          label="Total revenue"
-          value={money(totals.revenue)}
-        />
-        <StatTile
-          icon={<AlertTriangle size={15} />}
-          label="Missing inputs"
-          value={String(totals.flags)}
-          tone={totals.flags > 0 ? "flag" : "neutral"}
-        />
-        <StatTile
-          icon={<Activity size={15} />}
-          label="Avg NOI margin"
-          value={percent(totals.avgMargin)}
-        />
+        {tiles.map((tile) => (
+          <StatTile
+            key={tile.id}
+            icon={tile.icon}
+            label={tile.label}
+            value={tile.value(visible)}
+            {...(tile.tone ? { tone: tile.tone(visible) } : {})}
+          />
+        ))}
       </div>
 
       {error ? (

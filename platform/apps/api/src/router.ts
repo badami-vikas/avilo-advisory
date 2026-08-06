@@ -7,6 +7,7 @@ import {
   fiscalYearToDate,
   isPeriod,
   buildNarrativePrompt,
+  buildRichNarrativePrompt,
   fabricatedFigures,
   normalizeLabel,
   suggestMappings,
@@ -38,7 +39,14 @@ import {
   restoreVersion,
 } from "./services/blueprint.js";
 import { getVersion, listVersions } from "./services/versions.js";
+import {
+  parseSummaryOutput,
+  salvageSummaryText,
+  summaryDestinations,
+  summaryLinkRegistry,
+} from "./services/configuration.js";
 import { converse } from "./services/copilot.js";
+import { summaryPlainText } from "@avilo/core";
 
 const t = initTRPC.create();
 export const router = t.router;
@@ -331,22 +339,48 @@ const reportRouter = router({
       }
 
       const guidance = readSetting("narrative_guidance") ?? undefined;
-      const prompt = buildNarrativePrompt({ ...input, guidance });
+      const registry = summaryLinkRegistry();
+      const prompt = buildRichNarrativePrompt({
+        ...input,
+        guidance,
+        destinations: summaryDestinations(registry),
+      });
 
       try {
-        const text = (await callGroq(config, prompt, 700)).trim();
+        /*
+          Generously sized, and it has to be. The rich form wraps every run of text in a
+          span object, so the same summary costs roughly three times the tokens plain prose
+          did — at the old ceiling the reply was cut off mid-object, no closing brace ever
+          arrived, and every generation silently fell back to salvaged plain text. The
+          symptom was indistinguishable from the model ignoring the format.
+        */
+        const output = (await callGroq(config, prompt, 2600, { json: true })).trim();
         const source = input.beats
           .map((b) => `${b.headline} ${b.body.join(" ")}`)
           .join(" ");
+
+        /*
+          Parse to a SummaryDoc if we can, and fall back to treating the whole reply as
+          plain prose if we cannot. Falling back rather than failing matters: the fabricated
+          -figure check below is the guarantee, and it runs identically either way, so an
+          unparseable reply costs the advisor colour and links — not correctness, and not
+          the Generate button working at all.
+        */
+        const doc = parseSummaryOutput(output, registry);
+        const text = doc ? summaryPlainText(doc) : salvageSummaryText(output);
+
+        // The check reads the FLATTENED text, so a figure inside a coloured span is caught
+        // exactly as one in plain prose is. Splitting into spans must not open a gap here.
         const fabricated = fabricatedFigures(source, text);
         if (fabricated.length > 0) {
           return {
             ok: false as const,
             text: "",
+            doc: null,
             message: `Discarded — the draft contained figures not in your books (${fabricated.slice(0, 3).join(", ")}).`,
           };
         }
-        return { ok: true as const, text, message: "" };
+        return { ok: true as const, text, doc, message: "" };
       } catch (cause) {
         throw new TRPCError({ code: "BAD_GATEWAY", message: (cause as Error).message });
       }
