@@ -564,3 +564,215 @@ remove most of the compounding — as predicted when it was filed.
 The preview pane runs backgrounded (`document.hidden === true`): `requestAnimationFrame` never fires, so chart.js's throttled event proxy never flushes and scroll events do not fire (measured: 0 across two programmatic scrolls). Radix menus needing real pointer events do not open.
 
 **Workaround.** Drive `chart._eventHandler(...)` directly, dispatch synthetic events, or verify through the API layer instead — and say which was done rather than implying a pointer-level test.
+
+### BUG-037 · A 404 is reported as "This page failed to render"
+
+**Status:** OPEN (found 2026-08-06, not yet fixed)
+
+**Symptom.** Navigating to any URL the router does not match — e.g. `/clients/<id>` instead
+of `/client/<id>` — renders "This page failed to render / Something went wrong rendering
+this page." rather than a not-found message.
+
+**Root cause.** `RouteError` in `apps/web/src/main.tsx` renders its generic fallback for
+anything that is not an `Error` instance. React Router throws a `{status, statusText}`
+error response for an unmatched route, which fails that check, so a routing miss and a
+component crash are presented identically.
+
+**Why it matters more than it looks.** The two have opposite remedies. "Something went
+wrong rendering this page" sends a beta user looking for a data problem; the actual fix is
+a corrected link. Found while verifying ADR-046 — several minutes went into diagnosing a
+component crash that was never happening.
+
+**Fix.** Branch on `isRouteErrorResponse(error)` and render a distinct not-found state with
+a link back to the clients list.
+
+### BUG-038 · A hex colour was read as a fabricated figure
+
+**Status:** RESOLVED (2026-08-06)
+
+**Symptom.** Every rich executive summary was discarded with "the draft contained figures not
+in your books (15803, 15803, 15803)". The figures were real; the books were fine.
+
+**Root cause.** `generateSummary` passed the model's raw output to `fabricatedFigures` when
+the output failed to parse as a `SummaryDoc`. That output is JSON containing colour codes, so
+`#15803d` matched `figuresIn`'s numeric pattern as `15803`. The guard was working exactly as
+designed and was being handed the wrong text.
+
+**Why it matters beyond itself.** The fabrication check is the load-bearing guarantee of the
+whole AI surface. A change that alters *what text it is shown* is a change to that guarantee,
+even when the check itself is untouched.
+
+**Fix.** `salvageSummaryText` extracts the `text` runs from a reply that looks like JSON, so
+the check reads the words the advisor would read and nothing else. Pinned in
+`apps/api/test/summary-parse.test.ts` against the real captured reply.
+
+### BUG-039 · The rich summary silently degraded on every generation
+
+**Status:** RESOLVED (2026-08-06)
+
+**Symptom.** After BUG-038, summaries rendered correctly but almost always as plain text —
+no colour, no links — with no error anywhere.
+
+**Root cause.** Three independent causes, all producing the identical silent fallback:
+the model emitted one JSON object per paragraph; it occasionally wrote `{"text=` for
+`{"text":`; and `max_tokens` was still 900, sized for prose, while the span form needs
+roughly three times that — so replies were cut off mid-object and never closed.
+
+**Why it went unnoticed at first.** The fallback path works. The advisor gets a readable
+summary either way, so the feature "works" while quietly never doing the thing it was built
+for. Verified only by checking the rendered DOM for coloured spans across several runs,
+not by looking at the page.
+
+**Fix.** Parse each top-level object and merge; repair the malformed key (anchored to a key
+position); raise the ceiling to 2600; and enable Groq JSON mode for this call. Three
+consecutive live generations produced colour after the fix, versus roughly one in two before.
+
+### BUG-040 · The assistant refused every request it was newly able to grant
+
+**Status:** RESOLVED (2026-08-06)
+
+**Symptom.** Asked "can you make the executive summary a single continuous paragraph with
+colour-coded text in red and green alongside black and blue for hyperlinks", the assistant
+answered: *"This is outside the five levers I can configure: formulas, mappings, prompts,
+layout, and views."* Every clause of that sentence is wrong. There are eight levers, not
+five; and the request is squarely inside `prompts`, which had just been given exactly this
+power.
+
+**Root cause.** Two defects, both introduced by the ADR-046 widening itself.
+
+1. The `declares` instruction still enumerated five levers while the prompt above it
+   described eight. The three arrangement levers were therefore unreachable in practice:
+   declaring one looked forbidden, and omitting it refuses the whole document (ADR-045).
+2. Lever 3 was described only as "the two AI guidance texts". Nothing connected
+   `narrative_guidance` to the executive summary's *form* — its length, paragraphing,
+   colour or links — so a request phrased in terms of the visible outcome never reached the
+   lever that governs it.
+
+**Why it matters beyond itself.** This is the third instance of the same failure shape as
+BUG-033 to BUG-036: a capability that exists and is unreachable, where the model's refusal
+is *more* misleading than an error, because it states a boundary confidently and wrongly.
+The lesson stands — widening what the assistant may do is not done until the prompt that
+routes requests to it has been widened too, and a capability nobody can invoke is
+indistinguishable from one that was never built.
+
+**Fix.** `declares` now names all eight levers; lever 3 states that `narrative_guidance` is
+the house style of the summary; a SUMMARY STYLE section and a worked example were added.
+`apps/api/test/copilot-examples.test.ts` now runs every worked example in the system prompt
+through `validateBlueprint` against the live registry, and asserts the `declares` list names
+all eight — so a stale example fails the build instead of silently teaching bad output.
+
+**Verified.** Same question, same panel: applied, "Prompt narrative_guidance rewritten",
+with Undo. Generating produced one paragraph of 965 characters carrying 16 coloured spans
+(#15803d / #b91c1c) and 3 in-app links, 0 `<a>` elements.
+
+### BUG-041 · A link's visible words were the destination id
+
+**Status:** RESOLVED (2026-08-06)
+
+**Symptom.** The first summary generated under a house style that asked for links rendered
+the literal string `report:cash-position` as the clickable words, mid-sentence, in prose
+destined for a client PDF.
+
+**Root cause.** `buildRichNarrativePrompt` gave the model the closed destination list and
+said a `link` must be one of them, but never said that `text` is what the reader sees. The
+model used the id for both.
+
+**Fix.** The prompt now states the two are never the same and shows the contrast. Verified
+by regenerating: links read "profitability section", "cash position", "overdue invoices",
+and no destination id appears in the prose.
+
+**Honest limit.** This is a prompt fix, not a structural one, and it is deliberate. The
+structural move — refusing a document whose span text parses as a destination — would be
+*worse*: refusal falls back to `salvageSummaryText`, which prints the same id as plain text
+and loses the colour too. There is no shape-level fix here because the offending value is a
+legal string in a legal field. If it recurs, the fix is a repair pass that drops the span,
+not a rejection.
+
+### BUG-042 · Empty-section padding deleted every view the user had built
+
+**Status:** RESOLVED (2026-08-06)
+
+**Symptom.** A request to restyle the executive summary applied as:
+*Prompt narrative_guidance rewritten · Removed view "Overdue invoices" · Removed view
+"Profitability" · Removed view "Key metrics"*. Three views the user had built were gone.
+
+**Root cause.** `views` replaces the whole set (ADR-039), which makes it the one section
+where `[]` is destructive — everywhere else an empty array is the natural way to write "no
+entries here". The worked examples in the assistant's system prompt padded every block with
+`"formulas":[],"mappings":[],"prompts":[]`, directly contradicting the instruction three
+paragraphs above them to include only the section being changed. Where an instruction and an
+example disagree, the example wins. The model padded its document the same way, `"views":[]`
+went in with the rest, and the set was emptied.
+
+**Why `declares` did not catch it.** It was not out of scope: the model declared `views`. An
+author that declares a lever and sends an empty list for it is, on its face, asking for that
+lever to be emptied — the guard has no way to distinguish intent from padding after the
+fact. ADR-045 protects against changing an *undeclared* lever; it says nothing about a
+declared one that was never meant.
+
+**Fix.** An empty `views` array is dropped in `applyBlueprintDirectly` — the model-authored
+entry point — so the sentence is not available to the assistant at all. The padding was also
+removed from every worked example, and `copilot-examples.test.ts` now fails if one comes
+back.
+
+**The first fix was wrong, and its test said so.** Putting the rule in `validateBlueprint`
+looked cleaner and broke Undo: a snapshot writes `views: []` to mean "there genuinely were
+none", which is exactly how undoing a view creation removes it. The safety net that
+recovered this user's data would have been disabled by the fix for losing it. Scoped to the
+model-authored path instead; the snapshot and restore paths keep the faithful reading. Both
+behaviours are now pinned in `declared-levers.test.ts`.
+
+**Cost, stated exactly.** The assistant can no longer delete a user's LAST remaining view.
+Deleting one of several still works.
+
+**Recovery.** The three views were restored from version 8 via `versions.restore`, which
+appends rather than truncates (ADR-044) — the recovery is itself undoable.
+
+### BUG-043 · The assistant denied doing what it had just done
+
+**Status:** RESOLVED (2026-08-06)
+
+**Symptom.** *"I can't change the styling or formatting of the executive summary text… This
+is outside the five levers I can configure"* — printed directly above a card reading
+"Change applied · Prompt narrative_guidance rewritten". The user's words: *"I asked for
+something, the system did something and the AI says something else."*
+
+**Root cause.** The ADR-047 withholding check compares which LEVERS the prose names against
+which ones moved. A denial names no lever, so it claims nothing and passes clean. The most
+flagrant possible mismatch — prose disowning the change beneath it — was the one shape the
+check could not see, because a denial is not a claim about a lever, it is a claim about the
+turn.
+
+**Fix.** `deniesActing` matches the refusal forms directly, and a denial over a non-empty
+diff withholds the prose exactly as a misdescription does, replacing it with
+`serverNarration`. The model's wording stays behind the disclosure.
+
+**Note.** A false positive here costs a correct sentence replaced by a correct sentence,
+which is why the bar sits at recognisable refusal forms rather than at the word "cannot".
+
+### BUG-044 · The three new levers could not be declared, so they could never be applied
+
+**Status:** RESOLVED (2026-08-06)
+
+**Symptom.** Found while verifying BUG-040, not reported: `dashboard`, `clientsTable` and
+`landingTiles` were unusable through the assistant panel. Asking to hide a dashboard panel
+either did nothing or was refused as out of scope.
+
+**Root cause.** `declares` is parsed through a hard-coded `SECTIONS` list in `copilot.ts`,
+and a lever missing from that list is silently dropped from the parsed declaration. The
+three arrangement levers were added to the grammar, the prompt, the registries and the write
+path — and not to that list. Declaring `dashboard` therefore produced `declared: []`, after
+which the declared-levers guard (ADR-045) refused the whole document.
+
+**Why this one matters most of the four.** The prompt fix in BUG-040 would have looked
+completely correct and changed nothing: the model would have declared the lever, the parser
+would have discarded it, and the guard would have refused the change. The visible failure —
+a refusal — is identical whether the cause is the prompt, the parser or the guard, which is
+why the fix has to be verified by exercising the lever rather than by reading the reply.
+
+**Fix.** `SECTIONS` now lists all eight, pinned by a test that parses a declaration naming
+the three arrangement levers and asserts none is dropped.
+
+**Related.** `CLAIMS_AN_ACTION` also missed "Done — the summary is now written as one
+paragraph", so a claim over an empty diff was printed rather than withheld. Widened to cover
+"done", "built it", and "is/are/has/have now …".

@@ -15,6 +15,9 @@ const surface: RegisteredSurface = {
   sectionIds: new Set(["profitability", "customers"]),
   detailKinds: new Set(["pl_expense", "ar_customer"]),
   actionIds: new Set(["export-pdf", "upload"]),
+  dashboardSectionIds: new Set(["summary", "growth", "cash"]),
+  clientsColumnIds: new Set(["name", "revenue", "cash"]),
+  landingTileIds: new Set(["client-count", "total-revenue", "avg-noi-margin"]),
 };
 
 describe("validateBlueprint", () => {
@@ -192,3 +195,99 @@ describe("diffBlueprint", () => {
     expect(diffBlueprint(proposed, withLayout)).toHaveLength(0);
   });
 });
+
+/*
+  The three arrangement levers (`dashboard`, `clientsTable`, `landingTiles`).
+
+  Pinned here rather than only at the API layer because this is where the closed-registry
+  guarantee actually lives: an id outside the registry must fail the WHOLE document, and an
+  arrangement must have no way to carry a value. Both are properties of the grammar, so this
+  is the file that should break if either is ever loosened.
+*/
+describe("arrangement levers", () => {
+  const base = {
+    schemaVersion: BLUEPRINT_SCHEMA_VERSION,
+    name: "arrangement",
+    exportedAt: "2026-01-01T00:00:00.000Z",
+    formulas: [],
+    mappings: [],
+    prompts: [],
+  };
+
+  it("accepts order and hidden over registered ids", () => {
+    const { blueprint, errors } = validateBlueprint(
+      {
+        ...base,
+        dashboard: { order: ["cash", "summary", "growth"], hidden: ["growth"] },
+        clientsTable: { order: ["name", "cash", "revenue"], hidden: [] },
+        landingTiles: { order: ["total-revenue", "client-count"] },
+      },
+      surface,
+    );
+    expect(errors).toEqual([]);
+    expect(blueprint?.dashboard).toEqual({
+      order: ["cash", "summary", "growth"],
+      hidden: ["growth"],
+    });
+    expect(blueprint?.landingTiles).toEqual({ order: ["total-revenue", "client-count"] });
+  });
+
+  it("refuses an unregistered id and returns no blueprint at all", () => {
+    const { blueprint, errors } = validateBlueprint(
+      { ...base, dashboard: { hidden: ["not-a-real-panel"] } },
+      surface,
+    );
+    expect(blueprint).toBeNull();
+    expect(errors.some((e) => e.message.includes("not-a-real-panel"))).toBe(true);
+  });
+
+  it("names the surface that was wrong, so three levers do not report one error", () => {
+    const { errors } = validateBlueprint(
+      {
+        ...base,
+        clientsTable: { hidden: ["nope"] },
+        landingTiles: { order: ["also-nope"] },
+      },
+      surface,
+    );
+    expect(errors.map((e) => e.path).sort()).toEqual(["clientsTable", "landingTiles"]);
+  });
+
+  it("has nowhere to put a figure — a value field is not carried through", () => {
+    const { blueprint } = validateBlueprint(
+      { ...base, landingTiles: { order: ["client-count"], value: 42, values: { "client-count": 42 } } },
+      surface,
+    );
+    // The grammar has no `value`/`values`, so whatever a model sends is simply not there.
+    expect(blueprint?.landingTiles).toEqual({ order: ["client-count"] });
+    expect(JSON.stringify(blueprint)).not.toContain("42");
+  });
+
+  it("diffs each arrangement separately, and reports nothing when unchanged", () => {
+    const proposed = {
+      ...base,
+      dashboard: { order: ["summary", "growth"], hidden: [] },
+      clientsTable: { order: ["name"], hidden: [] },
+    } as never;
+    const current = {
+      formulas: [],
+      mappings: [],
+      prompts: [],
+      dashboard: { order: ["summary", "growth"], hidden: [] },
+    };
+    const changes = diffBlueprint(proposed, current);
+    expect(changes.map((c) => c.section)).toEqual(["clientsTable"]);
+    expect(changes[0]?.kind).toBe("add");
+  });
+
+  it("omitting an arrangement means leave it alone, not clear it", () => {
+    const changes = diffBlueprint({ ...base } as never, {
+      formulas: [],
+      mappings: [],
+      prompts: [],
+      landingTiles: { order: ["client-count"] },
+    });
+    expect(changes).toEqual([]);
+  });
+});
+

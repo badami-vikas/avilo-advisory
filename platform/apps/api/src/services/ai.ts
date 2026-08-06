@@ -41,10 +41,27 @@ export function groqConfig(): GroqConfig | null {
  * two failures users actually hit — a revoked key and a decommissioned model id — are
  * indistinguishable from "401" and "400" but obvious from the body.
  */
+/**
+ * `json: true` asks the provider to constrain decoding to valid JSON.
+ *
+ * Added for the executive summary's rich form, where free decoding produced a well-formed
+ * document only about half the time — sometimes one object per paragraph, sometimes a
+ * malformed key, sometimes both. Every one of those failures degraded a colour-and-links
+ * summary to plain salvaged text, which is exactly the kind of intermittent quality loss
+ * nobody reports as a bug because it still "works".
+ *
+ * Opt-in rather than default: every other call site wants prose, and asking for JSON when
+ * you want a sentence gets you a sentence wrapped in braces.
+ */
+export interface GroqOptions {
+  json?: boolean;
+}
+
 export async function callGroq(
   config: GroqConfig,
   prompt: string,
   maxTokens = 800,
+  options: GroqOptions = {},
 ): Promise<string> {
   const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
     method: "POST",
@@ -57,6 +74,7 @@ export async function callGroq(
       messages: [{ role: "user", content: prompt }],
       max_tokens: maxTokens,
       temperature: 0,
+      ...(options.json ? { response_format: { type: "json_object" } } : {}),
     }),
   });
 

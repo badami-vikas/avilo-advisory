@@ -12,9 +12,11 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router";
 import { AlertTriangle, ArrowRight, Info, Pencil, Sparkles } from "lucide-react";
 
 import { summaryFingerprint } from "@avilo/module";
+import type { SummaryDoc } from "@avilo/core";
 
 import { api } from "../../lib/trpc.js";
 import { moneyFull, percent } from "../../lib/format.js";
@@ -58,6 +60,8 @@ import {
 } from "./sections.js";
 import { CollectionsPlanner, GoalSeek, GrowthQualitySection } from "./tools.js";
 import { ActionsTable } from "./ActionsTable.js";
+import { Slot, isHidden, orderOf, useArrangement } from "../../lib/arrangement.jsx";
+import { SummaryRichText, type SummaryNavigate } from "./SummaryRichText.js";
 
 const NAV = [
   { id: "summary", label: "Executive summary" },
@@ -101,6 +105,8 @@ export function Dashboard({
   priorDetail: DetailByKind;
   formulas: FormulaRow[];
 }) {
+  /* Which panels this dashboard shows, and in what order. Absent = every panel, as built. */
+  const dashboard = useArrangement("dashboard_layout");
   const [drill, setDrill] = useState<string | null>(null);
   const [customer, setCustomer] = useState<string | null>(null);
   /** Which radar axis the pointer is over — swaps the panel beside it. */
@@ -216,7 +222,10 @@ export function Dashboard({
           On this page
         </p>
         <ul className="space-y-0.5">
-          {NAV.map((item) => (
+          {/* A link to a panel the arrangement hid would scroll to nothing. */}
+          {NAV.filter((item) => !isHidden(dashboard.value, item.id))
+            .sort((a, b) => orderOf(dashboard.value, a.id) - orderOf(dashboard.value, b.id))
+            .map((item) => (
             <li key={item.id}>
               <button
                 onClick={() => go(item.id)}
@@ -238,16 +247,25 @@ export function Dashboard({
         ) : null}
       </nav>
 
-      <div className="min-w-0 flex-1 space-y-4">
+      {/*
+        `flex flex-col` rather than `space-y-4` so the `dashboard` arrangement can reorder
+        panels with CSS `order` instead of this file rebuilding its own JSX tree. The panels
+        stay written in their natural reading order — which is what a person editing this
+        file wants to see — and the arrangement is applied by <Slot> at the edges.
+      */}
+      <div className="flex min-w-0 flex-1 flex-col gap-4">
         {/* --- the strip: everything that matters, on one line */}
-        <KpiStrip
-          report={report}
-          series={series}
-          forecastResult={baseForecast}
-          onOpen={setDrill}
-        />
+        <Slot id="kpi-strip" arrangement={dashboard.value}>
+          <KpiStrip
+            report={report}
+            series={series}
+            forecastResult={baseForecast}
+            onOpen={setDrill}
+          />
+        </Slot>
 
         {/* --- executive summary: the shape on the left, the story on the right */}
+        <Slot id="summary" arrangement={dashboard.value}>
         <section
           id="summary"
           className="scroll-mt-24 rounded-xl border border-line bg-surface shadow-[0_1px_2px_rgba(16,24,40,0.04)]"
@@ -309,19 +327,38 @@ export function Dashboard({
             </div>
           </div>
         </section>
+        </Slot>
 
         {/* --- analysis */}
-        <GrowthSection clientId={clientId} series={series} asAt={asAt} />
-        <GrowthQualitySection detail={detail} priorDetail={priorDetail} asAt={asAt} />
-        <ProfitabilitySection report={report} series={series} detail={detail} />
-        <CashSection report={report} series={series} />
-        <CustomersSection detail={detail} onOpenCustomer={setCustomer} asAt={asAt} />
+        <Slot id="growth" arrangement={dashboard.value}>
+          <GrowthSection clientId={clientId} series={series} asAt={asAt} />
+        </Slot>
+        <Slot id="quality" arrangement={dashboard.value}>
+          <GrowthQualitySection detail={detail} priorDetail={priorDetail} asAt={asAt} />
+        </Slot>
+        <Slot id="profitability" arrangement={dashboard.value}>
+          <ProfitabilitySection report={report} series={series} detail={detail} />
+        </Slot>
+        <Slot id="cash" arrangement={dashboard.value}>
+          <CashSection report={report} series={series} />
+        </Slot>
+        <Slot id="customers" arrangement={dashboard.value}>
+          <CustomersSection detail={detail} onOpenCustomer={setCustomer} asAt={asAt} />
+        </Slot>
         {/*
           The two sides of working capital, side by side. They are read against each other
           — what is owed to you against what you owe — and a page that puts one below the
           other makes the comparison a scroll rather than a glance.
         */}
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        {/*
+          The pair moves as a unit — ordered by `receivables`, since reading one against the
+          other is the point — but each half can be hidden on its own.
+        */}
+        <div
+          className="grid grid-cols-1 gap-4 lg:grid-cols-2"
+          style={{ order: orderOf(dashboard.value, "receivables") }}
+        >
+          <Slot id="receivables" arrangement={dashboard.value} inGrid>
           <AgingSection
             id="receivables"
             title="Money owed to you"
@@ -333,6 +370,8 @@ export function Dashboard({
             reportName="A/R Ageing Summary"
             compact
           />
+          </Slot>
+          <Slot id="payables" arrangement={dashboard.value} inGrid>
           <AgingSection
             id="payables"
             title="Money you owe"
@@ -344,10 +383,14 @@ export function Dashboard({
             reportName="A/P Ageing Summary"
             compact
           />
+          </Slot>
         </div>
-        <ReferralsSection detail={detail} asAt={asAt} />
+        <Slot id="referrals" arrangement={dashboard.value}>
+          <ReferralsSection detail={detail} asAt={asAt} />
+        </Slot>
 
         {/* --- tools: the sections that answer a question rather than report one */}
+        <Slot id="forecast" arrangement={dashboard.value}>
         <ForecastSection
           report={report}
           series={series}
@@ -361,17 +404,24 @@ export function Dashboard({
             />
           )}
         />
-        <GoalSeek report={report} series={series} asAt={asAt} />
+        </Slot>
+        <Slot id="goal" arrangement={dashboard.value}>
+          <GoalSeek report={report} series={series} asAt={asAt} />
+        </Slot>
 
         {/* --- what to do */}
-        <WarningsSection warnings={warnings} onGo={go} asAt={asAt} />
-        <ActionsTable
-          actions={actions}
-          clientId={clientId}
-          period={report.period}
-          onGo={go}
-          asAt={asAt}
-        />
+        <Slot id="warnings" arrangement={dashboard.value}>
+          <WarningsSection warnings={warnings} onGo={go} asAt={asAt} />
+        </Slot>
+        <Slot id="actions" arrangement={dashboard.value}>
+          <ActionsTable
+            actions={actions}
+            clientId={clientId}
+            period={report.period}
+            onGo={go}
+            asAt={asAt}
+          />
+        </Slot>
       </div>
 
       {drill ? (
@@ -445,6 +495,50 @@ function Brief({
   const [edit, setEdit] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [superseded, setSuperseded] = useState(false);
+  const [, setSearchParams] = useSearchParams();
+
+  /*
+    Where a summary hyperlink can go. Every destination is a place in this app, reached by
+    scrolling or by setting the view — which is the whole reason a summary link needs no
+    URL. `report` and `dashboard` share `onGo` because both are element ids on a page the
+    user is already looking at; scrolling to an id that is not there is a no-op, which is
+    the right behaviour for a link that outlived the panel it named.
+  */
+  const summaryNav: SummaryNavigate = useMemo(() => {
+    /*
+      Switch view, then scroll once the new one has rendered.
+
+      The first live run made this necessary: the model linked "gross margin" to
+      `report:profitability` while the reader was on the dashboard, so scrolling to that id
+      found nothing and the link silently did nothing. A link that does nothing is worse
+      than no link — it reads as broken software. The report's sections live on a different
+      view, so reaching one means going there first.
+
+      The delay is a frame-and-a-bit, not a guess at a load: the view is already in memory
+      and this only waits for React to commit. If the id is still absent afterwards, the
+      scroll is a no-op and the reader is at least on the right screen.
+    */
+    const goTo = (view: string, id?: string) => {
+      setSearchParams((p) => {
+        p.set("view", view);
+        return p;
+      });
+      if (id) {
+        window.setTimeout(
+          () => document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" }),
+          120,
+        );
+      }
+    };
+
+    return {
+      report: (id) => goTo("report", id),
+      // Already on this view — scroll directly rather than round-tripping the URL.
+      dashboard: (id) => onGo(id),
+      view: (id) => goTo(`custom:${id}`),
+      raw: () => goTo("raw"),
+    };
+  }, [onGo, setSearchParams]);
 
   useEffect(() => {
     let live = true;
@@ -476,6 +570,7 @@ function Brief({
     prose whose provenance is unclear.
   */
   const [draft, setDraft] = useState<string | null>(null);
+  const [draftDoc, setDraftDoc] = useState<SummaryDoc | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -492,8 +587,10 @@ function Brief({
           body: beat.body,
         })),
       });
-      if (result.ok) setDraft(result.text);
-      else setError(result.message);
+      if (result.ok) {
+        setDraft(result.text);
+        setDraftDoc(result.doc ?? null);
+      } else setError(result.message);
     } catch (cause) {
       setError((cause as Error).message);
     } finally {
@@ -565,17 +662,26 @@ function Brief({
             {busy ? "Writing…" : "Again"}
           </button>
           <button
-            onClick={() => setDraft(null)}
+            onClick={() => { setDraft(null); setDraftDoc(null); }}
             className="text-[11.5px] font-medium text-ink-muted hover:text-accent"
           >
             Dismiss
           </button>
         </div>
-        {draft.split(/\n{2,}/).map((paragraph, index) => (
-          <p key={index} className="text-[12.5px] leading-[1.65] text-ink">
-            {paragraph}
-          </p>
-        ))}
+        {/*
+          A rich draft renders its spans; a plain one falls back to paragraphs. Both paths
+          stay, because the model returning unparseable JSON must cost colour and links, not
+          the Generate button.
+        */}
+        {draftDoc ? (
+          <SummaryRichText doc={draftDoc} go={summaryNav} />
+        ) : (
+          draft.split(/\n{2,}/).map((paragraph, index) => (
+            <p key={index} className="text-[12.5px] leading-[1.65] text-ink">
+              {paragraph}
+            </p>
+          ))
+        )}
       </div>
     );
   }

@@ -20,12 +20,19 @@ import {
   TRAILING,
   extractDependencies,
 } from "@avilo/module";
-import type { LayoutOverride } from "@avilo/core";
+import type { ArrangementOverride, LayoutOverride } from "@avilo/core";
 import { getDb, newId, schema } from "../db.js";
 import { learnMapping } from "./labels.js";
 import { loadFormulaSpecs } from "./formula-specs.js";
 import {
+  CLIENTS_COLUMN_IDS,
+  CLIENTS_TABLE_KEY,
   CUSTOM_VIEWS_KEY,
+  DASHBOARD_LAYOUT_KEY,
+  DASHBOARD_SECTION_IDS,
+  DEFAULT_HIDDEN_CLIENTS_COLUMNS,
+  DEFAULT_LANDING_TILES,
+  LANDING_TILES_KEY,
   LAYOUT_SECTION_IDS,
   REPORT_LAYOUT_DEFAULT_KEY,
   currentConfiguration,
@@ -47,8 +54,16 @@ import {
   holding both the surface and the transitions made that a dependency cycle.
 */
 export {
+  CLIENTS_COLUMN_IDS,
+  CLIENTS_TABLE_KEY,
+  DEFAULT_HIDDEN_CLIENTS_COLUMNS,
+  DEFAULT_LANDING_TILES,
   CUSTOM_VIEWS_KEY,
+  DASHBOARD_LAYOUT_KEY,
+  DASHBOARD_SECTION_IDS,
   DETAIL_KINDS,
+  LANDING_TILES_KEY,
+  LANDING_TILE_IDS,
   LAYOUT_SECTION_IDS,
   PROMPT_KEYS,
   REPORT_LAYOUT_DEFAULT_KEY,
@@ -86,6 +101,39 @@ export function describeBlueprintChange(change: BlueprintChange): string {
     if (orderChanged && parts.length === 0) parts.push("reordered the sections");
 
     return `Report layout — ${parts.length > 0 ? parts.join("; ") : "changed"}`;
+  }
+
+  /*
+    The three arrangement levers describe themselves the same way the report layout does,
+    for the same reason: "modify dashboard: dashboard" is unreadable, and an unreadable
+    change is one nobody catches.
+  */
+  const ARRANGEMENT_NOUNS = {
+    dashboard: ["Dashboard", "panel"],
+    clientsTable: ["Clients list", "column"],
+    landingTiles: ["Portfolio tiles", "tile"],
+  } as const;
+
+  if (change.section in ARRANGEMENT_NOUNS) {
+    const [surface, noun] = ARRANGEMENT_NOUNS[change.section as keyof typeof ARRANGEMENT_NOUNS];
+    const before = (change.before ?? {}) as ArrangementOverride;
+    const after = (change.after ?? {}) as ArrangementOverride;
+    const wasHidden = new Set(before.hidden ?? []);
+    const nowHidden = new Set(after.hidden ?? []);
+    const hid = [...nowHidden].filter((s) => !wasHidden.has(s));
+    const shown = [...wasHidden].filter((s) => !nowHidden.has(s));
+
+    const parts: string[] = [];
+    if (hid.length > 0) parts.push(`hid ${hid.join(", ")}`);
+    if (shown.length > 0) parts.push(`showed ${shown.join(", ")}`);
+    if (
+      JSON.stringify(before.order ?? []) !== JSON.stringify(after.order ?? []) &&
+      parts.length === 0
+    ) {
+      parts.push(`reordered the ${noun}s`);
+    }
+
+    return `${surface} — ${parts.length > 0 ? parts.join("; ") : "changed"}`;
   }
 
   if (change.section === "formulas") {
@@ -307,6 +355,21 @@ export function activateProposal(
       .run();
   }
 
+  // The three arrangement levers follow the same "absent means leave alone" rule.
+  for (const [field, key] of [
+    ["dashboard", DASHBOARD_LAYOUT_KEY],
+    ["clientsTable", CLIENTS_TABLE_KEY],
+    ["landingTiles", LANDING_TILES_KEY],
+  ] as const) {
+    const arrangement = blueprint[field];
+    if (!arrangement) continue;
+    const value = JSON.stringify(arrangement);
+    db.insert(schema.appSettings)
+      .values({ key, value })
+      .onConflictDoUpdate({ target: schema.appSettings.key, set: { value } })
+      .run();
+  }
+
   db.update(schema.blueprintProposals)
     .set({ status: "active", decidedAt: new Date().toISOString(), decisionNote: note ?? null })
     .where(eq(schema.blueprintProposals.id, id))
@@ -362,6 +425,12 @@ export function restoreVersion(
     ...liveNow,
     layout: liveNow.layout ?? { sectionOrder: [...LAYOUT_SECTION_IDS], hiddenSections: [] },
     views: liveNow.views ?? [],
+    dashboard: liveNow.dashboard ?? { order: [...DASHBOARD_SECTION_IDS], hidden: [] },
+    clientsTable: liveNow.clientsTable ?? {
+      order: [...CLIENTS_COLUMN_IDS],
+      hidden: [...DEFAULT_HIDDEN_CLIENTS_COLUMNS],
+    },
+    landingTiles: liveNow.landingTiles ?? { order: [...DEFAULT_LANDING_TILES], hidden: [] },
   };
   if (diffBlueprint(document, live).length === 0) return { noChange: true };
 
@@ -408,6 +477,36 @@ export function applyBlueprintDirectly(
   | { noChange: true }
   | { outOfScope: { declared: BlueprintSection[]; undeclared: BlueprintSection[]; changes: string[] } }
   | { errors: { path: string; message: string }[] } {
+  /*
+    An empty `views` array from a MODEL means "I had nothing to say about views", not
+    "delete every view the user built" — BUG-042.
+
+    `views` replaces the whole set (ADR-039), which makes it the one section where `[]` is
+    destructive while everywhere else an empty array is the natural way to write "no entries
+    here". A model composing a document pads it with empty sections, and that padding wiped
+    three of the user's views on a request about the summary's wording. `declares` could not
+    catch it: the author had declared `views`. It was padding, not intent, and nothing
+    downstream can tell those apart after the fact.
+
+    Scoped to this function deliberately, NOT to the grammar. A snapshot writes `views: []`
+    to mean "there genuinely were none", which is how Undo removes a view it just created —
+    putting this rule in `validateBlueprint` broke exactly that, and the test for it caught
+    the mistake. This is the model-authored entry point; the snapshot and restore paths
+    reach `activateProposal` directly and keep the faithful reading.
+
+    The cost, stated exactly: the assistant cannot delete a user's LAST remaining view.
+    Deleting one of several still works, because that list is non-empty.
+  */
+  if (
+    typeof candidate === "object" &&
+    candidate !== null &&
+    Array.isArray((candidate as { views?: unknown }).views) &&
+    (candidate as { views: unknown[] }).views.length === 0
+  ) {
+    const { views: _dropped, ...rest } = candidate as Record<string, unknown>;
+    candidate = rest;
+  }
+
   const { blueprint, errors } = validateBlueprint(candidate, registeredSurface());
   if (!blueprint) return { errors };
 

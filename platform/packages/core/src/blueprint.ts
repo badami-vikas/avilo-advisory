@@ -59,6 +59,21 @@ export interface LayoutOverride {
 }
 
 /**
+ * Order and visibility over a closed set of ids — the shape shared by every "arrange this
+ * surface" lever (`dashboard`, `clientsTable`, `landingTiles`).
+ *
+ * One type rather than three because the safety argument is identical in each case and
+ * worth making once: an arrangement can only *permute and hide* things the application
+ * already builds. There is no field for a new panel, a new column, or a tile's value — so
+ * widening the assistant's reach across these surfaces adds no way to put an unsourced
+ * figure on screen. It is the binding-not-value rule applied to layout instead of content.
+ */
+export interface ArrangementOverride {
+  order?: string[];
+  hidden?: string[];
+}
+
+/**
  * A component the assistant may place in a view.
  *
  * The generative-UI contract, and the reason this is a closed union rather than anything
@@ -113,6 +128,12 @@ export interface AviloBlueprint {
   layout?: LayoutOverride;
   /** User-defined views. Absent means "leave the existing views alone" (see ADR-039). */
   views?: CustomView[];
+  /** Which dashboard panels appear, and in what order. */
+  dashboard?: ArrangementOverride;
+  /** Which columns the clients list shows, and in what order. */
+  clientsTable?: ArrangementOverride;
+  /** Which portfolio aggregates appear as tiles above the clients list. */
+  landingTiles?: ArrangementOverride;
 }
 
 export function emptyBlueprint(name: string): AviloBlueprint {
@@ -148,6 +169,12 @@ export interface RegisteredSurface {
   detailKinds: ReadonlySet<string>;
   /** Every action an `actions` component may place a button for. */
   actionIds: ReadonlySet<string>;
+  /** Every panel the client dashboard can render. */
+  dashboardSectionIds: ReadonlySet<string>;
+  /** Every column the clients list can render. */
+  clientsColumnIds: ReadonlySet<string>;
+  /** Every portfolio aggregate that can be shown as a tile above the clients list. */
+  landingTileIds: ReadonlySet<string>;
 }
 
 /**
@@ -303,6 +330,37 @@ export function validateBlueprint(
   }
 
   /*
+    The three arrangement levers. Each permutes and hides a closed set of ids the
+    application already builds, so the only way to fail is to name something that does not
+    exist — and naming it fails the document whole, exactly as an invented account id does.
+  */
+  const arrangements: Partial<Record<"dashboard" | "clientsTable" | "landingTiles", ArrangementOverride>> = {};
+  const arrangementFields = [
+    ["dashboard", surface.dashboardSectionIds, "dashboard panel"],
+    ["clientsTable", surface.clientsColumnIds, "clients list column"],
+    ["landingTiles", surface.landingTileIds, "portfolio tile"],
+  ] as const;
+
+  for (const [field, known, noun] of arrangementFields) {
+    if (doc[field] === undefined) continue;
+    if (typeof doc[field] !== "object" || doc[field] === null) {
+      fail(field, "Not an object.");
+      continue;
+    }
+    const a = doc[field] as Record<string, unknown>;
+    const order = Array.isArray(a.order)
+      ? a.order.filter((s): s is string => typeof s === "string")
+      : undefined;
+    const hidden = Array.isArray(a.hidden)
+      ? a.hidden.filter((s): s is string => typeof s === "string")
+      : undefined;
+    for (const id of [...(order ?? []), ...(hidden ?? [])]) {
+      if (!known.has(id)) fail(field, `Unknown ${noun} "${id}".`);
+    }
+    arrangements[field] = { ...(order ? { order } : {}), ...(hidden ? { hidden } : {}) };
+  }
+
+  /*
     Views. Every id a component binds to is checked here against the live registry, which
     is what makes a generated interface safe to render without inspecting it: by the time a
     `CustomView` exists, every metric resolves, every series resolves, every table names a
@@ -413,6 +471,7 @@ export function validateBlueprint(
       prompts: validPrompts,
       ...(layout ? { layout } : {}),
       ...(views ? { views } : {}),
+      ...arrangements,
     },
     errors: [],
   };
@@ -423,7 +482,9 @@ export function validateBlueprint(
 export type ChangeKind = "add" | "modify" | "remove" | "unchanged";
 
 export interface BlueprintChange {
-  section: "formulas" | "mappings" | "prompts" | "layout" | "views";
+  section:
+    | "formulas" | "mappings" | "prompts" | "layout" | "views"
+    | "dashboard" | "clientsTable" | "landingTiles";
   key: string;
   kind: ChangeKind;
   before?: unknown;
@@ -446,6 +507,9 @@ export function diffBlueprint(
     prompts: PromptOverride[];
     layout?: LayoutOverride;
     views?: CustomView[];
+    dashboard?: ArrangementOverride;
+    clientsTable?: ArrangementOverride;
+    landingTiles?: ArrangementOverride;
   },
 ): BlueprintChange[] {
   const changes: BlueprintChange[] = [];
@@ -516,6 +580,20 @@ export function diffBlueprint(
       if (!proposedIds.has(v.id))
         changes.push({ section: "views", key: v.id, kind: "remove", before: v });
     }
+  }
+
+  for (const field of ["dashboard", "clientsTable", "landingTiles"] as const) {
+    const next = proposed[field];
+    if (!next) continue;
+    const before = current[field];
+    if (JSON.stringify(next) === JSON.stringify(before ?? {})) continue;
+    changes.push({
+      section: field,
+      key: field,
+      kind: before ? "modify" : "add",
+      ...(before ? { before } : {}),
+      after: next,
+    });
   }
 
   return changes;

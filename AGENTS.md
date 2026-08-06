@@ -61,7 +61,7 @@ enforced by the operating system.
 
 ## What you can change
 
-Five levers. Everything else is source code, and source code is not reachable from here.
+Eight levers. Everything else is source code, and source code is not reachable from here.
 
 | Lever | What it is |
 |---|---|
@@ -70,6 +70,24 @@ Five levers. Everything else is source code, and source code is not reachable fr
 | `prompts` | `accounting_guidance` and `narrative_guidance`, overridable at runtime. |
 | `layout` | The default report section order, and which sections are hidden. |
 | `views` | Whole screens, composed from a closed component registry. |
+| `dashboard` | Which panels the client dashboard shows, and in what order. |
+| `clientsTable` | Which columns the clients list shows, and in what order. |
+| `landingTiles` | Which portfolio aggregates appear as tiles above the clients list. |
+
+### Arranging a surface
+
+The last three take `{"order": [...], "hidden": [...]}` over a closed registry of ids —
+`layout` does the same thing with the older key names `sectionOrder`/`hiddenSections`. An
+arrangement can permute and hide; there is no field in it that can hold a value, which is
+why these are safe to hand you: you choose which registered thing appears and where, and
+the application computes what it says.
+
+Two conventions differ between them, deliberately:
+
+- **`landingTiles.order` is a selection.** Send the tiles you want; the rest do not appear.
+- **`dashboard.order` and `clientsTable.order` are permutations.** Ids you omit keep their
+  canonical position at the end rather than disappearing, so a panel added in a later build
+  still shows up for someone whose stored arrangement predates it. Use `hidden` to remove.
 
 ### Ids are closed, with exactly one exception
 
@@ -101,8 +119,9 @@ are connected to. Do not work from this file's examples — work from that call.
 
 ## What you cannot change
 
-- **The application's own interface.** The header, the navigation, the assistant panel,
-  colours, fonts. You build screens *inside* the app; you do not restyle the app.
+- **The application's own chrome.** The header, the navigation, the view dropdown, the
+  assistant panel, and the clients-list search and filter controls. Everything else you can
+  see on a screen is arrangeable — the panels, the columns, the tiles, the report sections.
 - **Any figure, fact or import.** Not by a different route either — there isn't one.
 - **Source code.** The MCP server has no file access.
 - **The component vocabulary.** You compose from the registry; you cannot extend it.
@@ -110,6 +129,11 @@ are connected to. Do not work from this file's examples — work from that call.
 
 If you need something in this list, say so plainly rather than approximating it. A refusal
 that explains the boundary is more useful than a workaround that half-works.
+
+**Do not claim work you did not do.** The application does not take your word for what
+changed — it compares your prose against the actual diff, and where they disagree your
+wording is withheld and replaced by the server's own account of what happened (ADR-047). A
+false claim does not reach the user; it just costs you the chance to explain yourself.
 
 ---
 

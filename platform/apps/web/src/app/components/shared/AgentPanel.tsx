@@ -32,6 +32,7 @@ interface ChatTurn {
   falseClaim?: true;
   outOfScope?: { declared: string[]; undeclared: string[]; changes: string[] };
   misdescribed?: string[];
+  suppressed?: { reason: "false-claim" | "misdescribed" | "denied"; original: string };
   proposalErrors?: { path: string; message: string }[];
 }
 
@@ -231,6 +232,7 @@ export function AgentPanelBody({ collapsed, clientId }: { collapsed: boolean; cl
           falseClaim: reply.falseClaim,
           outOfScope: reply.outOfScope,
           misdescribed: reply.misdescribed,
+          suppressed: reply.suppressed,
           proposalErrors: reply.proposalErrors,
         },
       ]);
@@ -275,12 +277,29 @@ export function AgentPanelBody({ collapsed, clientId }: { collapsed: boolean; cl
             >
               {turn.text}
             </div>
+            {/*
+              The withheld wording. Shown collapsed rather than not at all: the point is
+              that the user does not READ the false sentence by default, not that it becomes
+              unavailable to someone debugging their assistant.
+            */}
+            {turn.suppressed ? (
+              <details className="mt-1.5 text-[11px] text-ink-faint">
+                <summary className="cursor-pointer select-none">
+                  {turn.suppressed.reason === "false-claim"
+                    ? "The assistant's own wording claimed a change that was not made — withheld."
+                    : "The assistant's own wording described a different change — withheld."}
+                </summary>
+                <p className="mt-1 rounded-lg border border-line bg-canvas p-2 leading-relaxed">
+                  {turn.suppressed.original}
+                </p>
+              </details>
+            ) : null}
             {turn.falseClaim ? (
               <div className="mt-2 rounded-lg border border-flag/40 bg-flag/5 p-2.5 text-[11.5px] leading-relaxed text-flag">
-                <span className="font-medium">Nothing was actually changed.</span> The reply
-                above says otherwise, but no configuration was written. The assistant can
-                only change formulas, QuickBooks mappings, AI prompts and the default report
-                layout — never the app's buttons, screens or figures.
+                <span className="font-medium">Nothing was changed.</span> The assistant can
+                change formulas, QuickBooks mappings, AI prompts, the report layout, the
+                dashboard panels, the clients-list columns and tiles, and it can build views
+                — never the app&rsquo;s header, navigation or figures.
               </div>
             ) : null}
             {turn.outOfScope ? (
@@ -303,11 +322,16 @@ export function AgentPanelBody({ collapsed, clientId }: { collapsed: boolean; cl
                 </p>
               </div>
             ) : null}
+            {/*
+              No longer says "trust the list, not the sentence above" — the sentence above
+              IS the list now, generated from the diff. This records why the swap happened.
+            */}
             {turn.misdescribed?.length ? (
               <p className="mt-1.5 rounded-lg border border-flag/30 bg-flag/5 p-2 text-[11px] leading-relaxed text-flag">
-                The reply above describes a change to{" "}
+                The assistant described a change to{" "}
                 <span className="font-medium">{turn.misdescribed.join(", ")}</span>, which is
-                not what happened. Trust the change list below, not the sentence above it.
+                not what it did. The summary above is the server&rsquo;s, taken from the
+                change list.
               </p>
             ) : null}
             {turn.noChange ? (

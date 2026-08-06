@@ -18,7 +18,10 @@
  * 2. **A version stores the whole configuration, normalized.** Not a delta. An absent key
  *    in a blueprint means "leave this alone" (ADR-039), so a state captured with `views`
  *    omitted could never be restored over a state that had views — restoring it would
- *    silently keep them. `normalize` spells out `layout` and `views` so a restore is exact.
+ *    silently keep them. `normalize` spells out every optional key — `layout`, `views`, and
+ *    the three arrangements — so a restore is exact. Each is spelled out to the app's *real*
+ *    default when unset, not to an empty one, or restoring the baseline would itself be a
+ *    change.
  *
  * 3. **Restore is forward-only.** Returning to seq 3 appends a new version at the head; it
  *    does not truncate history to 3. Nothing is ever destroyed by using this, and an undo
@@ -29,7 +32,14 @@
 import { desc, eq } from "drizzle-orm";
 import { diffBlueprint, type AviloBlueprint, type BlueprintChange } from "@avilo/core";
 import { getDb, newId, schema } from "../db.js";
-import { LAYOUT_SECTION_IDS, exportBlueprint } from "./configuration.js";
+import {
+  CLIENTS_COLUMN_IDS,
+  DASHBOARD_SECTION_IDS,
+  DEFAULT_HIDDEN_CLIENTS_COLUMNS,
+  DEFAULT_LANDING_TILES,
+  LAYOUT_SECTION_IDS,
+  exportBlueprint,
+} from "./configuration.js";
 
 export interface VersionRecord {
   id: string;
@@ -69,6 +79,12 @@ export function normalizeVersionDocument(blueprint: AviloBlueprint): AviloBluepr
     ...blueprint,
     layout: blueprint.layout ?? { sectionOrder: [...LAYOUT_SECTION_IDS], hiddenSections: [] },
     views: blueprint.views ?? [],
+    dashboard: blueprint.dashboard ?? { order: [...DASHBOARD_SECTION_IDS], hidden: [] },
+    clientsTable: blueprint.clientsTable ?? {
+      order: [...CLIENTS_COLUMN_IDS],
+      hidden: [...DEFAULT_HIDDEN_CLIENTS_COLUMNS],
+    },
+    landingTiles: blueprint.landingTiles ?? { order: [...DEFAULT_LANDING_TILES], hidden: [] },
   };
 }
 

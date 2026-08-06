@@ -804,6 +804,13 @@ export function ReportView({
       {visible.map((id) => (
         <div
           key={id}
+          /*
+            The section's own id in the DOM, so a summary hyperlink (`report:profitability`)
+            has something to scroll to. Without it the ids existed only in the layout config
+            and every report link silently did nothing. `scroll-mt` keeps the heading clear
+            of the sticky toolbar when one lands here.
+          */
+          id={id}
           draggable={Boolean(onLayoutChange)}
           onDragStart={(event) => {
             setDragging(id);
@@ -826,7 +833,7 @@ export function ReportView({
             setDragging(null);
             setDropTarget(null);
           }}
-          className={`relative ${dragging === id ? "opacity-40" : ""} ${
+          className={`relative scroll-mt-24 ${dragging === id ? "opacity-40" : ""} ${
             dropTarget === id ? "before:absolute before:-top-1.5 before:left-0 before:right-0 before:h-0.5 before:rounded-full before:bg-accent" : ""
           }`}
         >
