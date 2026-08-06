@@ -1,6 +1,6 @@
 {
   "name": "@avilo/web",
-  "version": "1.10.0",
+  "version": "1.10.1",
   "private": true,
   "type": "module",
   "description": "Avilo Advisory front end. Ports the v9 prototype's report design onto the governed tRPC surface. Every dependency is bundled \u2014 no CDN, no runtime network access.",

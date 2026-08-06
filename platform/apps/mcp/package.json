@@ -1,6 +1,6 @@
 {
   "name": "@avilo/mcp",
-  "version": "1.10.0",
+  "version": "1.10.1",
   "private": true,
   "type": "module",
   "description": "Model Context Protocol server over Avilo's configuration surface. Reaches configuration only; no client data, no fact, no figure.",

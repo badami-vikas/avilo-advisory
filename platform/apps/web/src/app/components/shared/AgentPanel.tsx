@@ -30,6 +30,8 @@ interface ChatTurn {
   revertId?: string;
   noChange?: true;
   falseClaim?: true;
+  outOfScope?: { declared: string[]; undeclared: string[]; changes: string[] };
+  misdescribed?: string[];
   proposalErrors?: { path: string; message: string }[];
 }
 
@@ -227,6 +229,8 @@ export function AgentPanelBody({ collapsed, clientId }: { collapsed: boolean; cl
           revertId: reply.revertId,
           noChange: reply.noChange,
           falseClaim: reply.falseClaim,
+          outOfScope: reply.outOfScope,
+          misdescribed: reply.misdescribed,
           proposalErrors: reply.proposalErrors,
         },
       ]);
@@ -278,6 +282,33 @@ export function AgentPanelBody({ collapsed, clientId }: { collapsed: boolean; cl
                 only change formulas, QuickBooks mappings, AI prompts and the default report
                 layout — never the app's buttons, screens or figures.
               </div>
+            ) : null}
+            {turn.outOfScope ? (
+              <div className="mt-2 rounded-lg border border-flag/40 bg-flag/5 p-2.5 text-[11.5px] leading-relaxed text-flag">
+                <span className="font-medium">Refused — nothing was changed.</span> The
+                assistant said it was changing{" "}
+                {turn.outOfScope.declared.length > 0
+                  ? turn.outOfScope.declared.join(", ")
+                  : "nothing"}
+                , but the change it produced would also have altered{" "}
+                {turn.outOfScope.undeclared.join(", ")}:
+                <ul className="mt-1 space-y-0.5">
+                  {turn.outOfScope.changes.map((c, j) => (
+                    <li key={j}>· {c}</li>
+                  ))}
+                </ul>
+                <p className="mt-1">
+                  Nothing was written. Ask again and it will have to be explicit about what
+                  it touches.
+                </p>
+              </div>
+            ) : null}
+            {turn.misdescribed?.length ? (
+              <p className="mt-1.5 rounded-lg border border-flag/30 bg-flag/5 p-2 text-[11px] leading-relaxed text-flag">
+                The reply above describes a change to{" "}
+                <span className="font-medium">{turn.misdescribed.join(", ")}</span>, which is
+                not what happened. Trust the change list below, not the sentence above it.
+              </p>
             ) : null}
             {turn.noChange ? (
               <p className="mt-1.5 text-[11px] text-ink-faint">

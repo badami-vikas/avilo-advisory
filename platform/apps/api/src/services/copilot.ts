@@ -24,12 +24,14 @@
 // no tool call wired to any of those, only to configuration.
 
 import { eq } from "drizzle-orm";
-import type { BlueprintChange, LayoutOverride } from "@avilo/core";
+
 import { ACCOUNTS_BY_ID, CANONICAL_ACCOUNTS } from "@avilo/module";
 import { getDb, schema } from "../db.js";
 import { callGroq, groqConfig } from "./ai.js";
 import {
   applyBlueprintDirectly,
+  describeBlueprintChange,
+  type BlueprintSection,
   currentConfiguration,
   registeredSurface,
   DETAIL_KINDS,
@@ -55,6 +57,17 @@ export interface CopilotReply {
   falseClaim?: true;
   /** Present instead when the candidate failed validation; nothing was written. */
   proposalErrors?: { path: string; message: string }[];
+  /**
+   * The document would have changed levers the assistant never declared. Nothing was
+   * written; this is what was refused (BUG-033).
+   */
+  outOfScope?: { declared: BlueprintSection[]; undeclared: BlueprintSection[]; changes: string[] };
+  /**
+   * A change WAS applied, but the reply's prose points at levers that did not move — so the
+   * sentence above the change list is describing something other than what happened
+   * (BUG-034). The change list is the record; this marks the prose as unreliable.
+   */
+  misdescribed?: BlueprintSection[];
 }
 
 const SYSTEM_PROMPT = `You are the Avilo Advisory in-app assistant.
@@ -91,9 +104,24 @@ BUTTONS come from the action list you were given and nothing else. You place a b
 do not invent what it does.
 
 When the user asks for something NOT on the five levers, SAY SO PLAINLY AND EMIT NO BLOCK.
-This matters as much as acting does. You cannot change the application's own chrome (its
-header, its navigation, the assistant panel itself), invent a component type that is not in
-the list above, alter source code, write or correct a financial figure, or import a file.
+This matters as much as acting does. You cannot change the application's own chrome, invent
+a component type that is not in the list above, alter source code, write or correct a
+financial figure, or import a file.
+
+APPLICATION CHROME — you cannot place anything here, or next to anything here:
+  - the top header and its title
+  - the left navigation and its links
+  - the assistant panel itself (this panel), including its buttons
+  - the clients-list page: its search box, its Filter control, its table columns, and the
+    summary tiles across the top of it (SHOWING, TOTAL REVENUE, MISSING INPUTS, AVG NOI
+    MARGIN). These tiles are part of the app. You CANNOT add a tile beside them.
+  - the built-in Report, Raw data and Dashboard views
+
+The user can SEE these and will name them; that a thing is visible does not make it one of
+your levers. When asked to put something "next to" one of them, say plainly that it is part
+of the app, then offer what you CAN do: build a view containing that metric. Do not create a
+formula and describe it as if you had placed it somewhere — a formula is a definition, and
+creating one puts NOTHING on any screen until a view binds to it.
 There is no mechanism for any of it — it is not a permission you can be granted or a review
 you can route around.
 
@@ -119,13 +147,20 @@ rather than inventing one.
 To make a configuration change, end your reply with a fenced block:
 
 \`\`\`avilo-blueprint
-{"schemaVersion":1,"name":"...","exportedAt":"...","formulas":[...],"mappings":[...],"prompts":[...],"layout":{...},"views":[...]}
+{"declares":["formulas"],"schemaVersion":1,"name":"...","exportedAt":"...","formulas":[...]}
 \`\`\`
+
+EVERY block MUST carry a "declares" array naming the levers you are changing — any of
+"formulas", "mappings", "prompts", "layout", "views". This is checked. If the document turns
+out to change a lever you did not declare, the WHOLE change is refused and nothing is
+written; if you omit "declares" entirely, everything is refused. Declare exactly what you
+intend, then include only those sections.
 
 Include ONLY the section you are actually changing. Omit "layout" unless the user asked to
 reorder or hide report sections; omit "formulas" unless a formula is changing, and so on. A
 section you include but do not intend to change is how an unrelated edit gets made by
-accident.
+accident — this has happened twice, which is why "declares" is now enforced rather than
+merely requested.
 
 "views" is special: it REPLACES the whole set of views. To add one, send every existing view
 (they are listed for you below) plus the new one. To delete one, send every view except that
@@ -142,7 +177,7 @@ WORKED EXAMPLES. Follow these exactly.
 User: "Hide the top jobs section from the report by default."
 You: Top jobs is now hidden from the default report layout.
 \`\`\`avilo-blueprint
-{"schemaVersion":1,"name":"Hide top jobs","exportedAt":"2026-01-01T00:00:00.000Z","formulas":[],"mappings":[],"prompts":[],"layout":{"hiddenSections":["top-jobs"]}}
+{"declares":["layout"],"schemaVersion":1,"name":"Hide top jobs","exportedAt":"2026-01-01T00:00:00.000Z","formulas":[],"mappings":[],"prompts":[],"layout":{"hiddenSections":["top-jobs"]}}
 \`\`\`
 (Note: the id is "top-jobs", from the registered section ids. Hiding a section is a LAYOUT
 change — it is lever 4, it is in scope, and it MUST come with a block. Answering "I've
@@ -151,7 +186,7 @@ updated the layout" without a block is a lie.)
 User: "Build me a dashboard for monitoring overdue invoices."
 You: Built it — "Overdue invoices" is in the View picker now.
 \`\`\`avilo-blueprint
-{"schemaVersion":1,"name":"Overdue invoices view","exportedAt":"2026-01-01T00:00:00.000Z","formulas":[],"mappings":[],"prompts":[],"views":[{"id":"overdue-invoices","label":"Overdue invoices","layout":"grid","components":[{"id":"ar-total","type":"metric","label":"Total receivable","valueId":"ar.total"},{"id":"dso","type":"metric","label":"Days sales outstanding","valueId":"dso"},{"id":"ar-trend","type":"chart","label":"Receivables over time","series":[{"id":"ar.total","kind":"bar"}]},{"id":"ar-by-customer","type":"table","label":"By customer","source":"ar_customer"},{"id":"go","type":"actions","label":"Next step","buttons":["export-pdf"]}]}]}
+{"declares":["views"],"schemaVersion":1,"name":"Overdue invoices view","exportedAt":"2026-01-01T00:00:00.000Z","formulas":[],"mappings":[],"prompts":[],"views":[{"id":"overdue-invoices","label":"Overdue invoices","layout":"grid","components":[{"id":"ar-total","type":"metric","label":"Total receivable","valueId":"ar.total"},{"id":"dso","type":"metric","label":"Days sales outstanding","valueId":"dso"},{"id":"ar-trend","type":"chart","label":"Receivables over time","series":[{"id":"ar.total","kind":"bar"}]},{"id":"ar-by-customer","type":"table","label":"By customer","source":"ar_customer"},{"id":"go","type":"actions","label":"Next step","buttons":["export-pdf"]}]}]}
 \`\`\`
 (Every figure is a BINDING — "ar.total", "dso" — never a number. The block carries every
 existing view plus this one, because "views" replaces the whole set.)
@@ -162,6 +197,14 @@ change. I can only change formulas, QuickBooks mappings, AI prompts, and the def
 layout.
 (No block. The assistant's own panel is application chrome, not one of the five levers. A
 button inside a VIEW you built would be fine; this is not that.)
+
+User: "Next to Avg NOI Margin, can you add Avg Net Op. Income"
+You: Those tiles across the top of the clients list are part of the app, so I can't add one
+beside them. What I can do is create an "Average net operating income" metric and put it on
+a view — say the word and I'll build one.
+(No block. Note what is NOT done here: a formula is not created and then described as though
+it had been placed somewhere. Creating a formula puts nothing on screen. If the user then
+says "yes, build the view", THAT turn declares ["formulas","views"] and does both.)
 
 User: "What's missing for this client?"
 You: [answer from the Active client data section]
@@ -244,59 +287,6 @@ function clientDataSummary(clientId: string): string {
   ].join("\n");
 }
 
-/**
- * A change, in words a person can check against what they asked for.
- *
- * BUG-031 is the reason this exists rather than `${kind} ${section}: ${key}`. When the
- * assistant hid a report section in response to a request about a button, the panel
- * described it as "modify layout: layout" — technically accurate, and completely useless
- * for noticing that something unrelated had just happened to the report. A change the user
- * cannot read is a change the user cannot catch.
- */
-function describeChange(change: BlueprintChange): string {
-  if (change.section === "layout") {
-    const before = (change.before ?? {}) as LayoutOverride;
-    const after = (change.after ?? {}) as LayoutOverride;
-    const wasHidden = new Set(before.hiddenSections ?? []);
-    const nowHidden = new Set(after.hiddenSections ?? []);
-    const hid = [...nowHidden].filter((s) => !wasHidden.has(s));
-    const shown = [...wasHidden].filter((s) => !nowHidden.has(s));
-
-    const parts: string[] = [];
-    if (hid.length > 0) parts.push(`hid ${hid.join(", ")}`);
-    if (shown.length > 0) parts.push(`un-hid ${shown.join(", ")}`);
-
-    const orderChanged =
-      JSON.stringify(before.sectionOrder ?? []) !== JSON.stringify(after.sectionOrder ?? []);
-    // Reordering is implied by hiding, so only call it out when it is the actual change.
-    if (orderChanged && parts.length === 0) parts.push("reordered the sections");
-
-    return `Report layout — ${parts.length > 0 ? parts.join("; ") : "changed"}`;
-  }
-
-  if (change.section === "formulas") {
-    const after = change.after as { expression?: string } | undefined;
-    const before = change.before as { expression?: string } | undefined;
-    if (change.kind === "add") return `Formula ${change.key} added: ${after?.expression ?? ""}`;
-    return `Formula ${change.key}: ${before?.expression ?? "?"} → ${after?.expression ?? "?"}`;
-  }
-
-  if (change.section === "views") {
-    const after = change.after as { label?: string; components?: unknown[] } | undefined;
-    const before = change.before as { label?: string } | undefined;
-    if (change.kind === "remove") return `Removed view "${before?.label ?? change.key}"`;
-    const count = after?.components?.length ?? 0;
-    const verb = change.kind === "add" ? "Added" : "Updated";
-    return `${verb} view "${after?.label ?? change.key}" (${count} component${count === 1 ? "" : "s"})`;
-  }
-
-  if (change.section === "mappings") {
-    const after = change.after as { accountId?: string } | undefined;
-    return `Mapping ${change.key} → ${after?.accountId ?? "?"}`;
-  }
-
-  return `Prompt ${change.key} rewritten`;
-}
 
 /**
  * Does this reply claim to have changed something?
@@ -313,16 +303,61 @@ function describeChange(change: BlueprintChange): string {
 export const CLAIMS_AN_ACTION =
   /\bI(?:'ve|\s+have)?\s+(?:just\s+)?(?:updated|changed|added|removed|hidden|hid|moved|set|configured|applied|modified|created|adjusted|reordered|renamed|enabled|disabled)\b/i;
 
-function extractBlueprintBlock(text: string): { reply: string; candidate: unknown | null } {
+const SECTIONS: readonly BlueprintSection[] = [
+  "formulas", "mappings", "prompts", "layout", "views",
+];
+
+/**
+ * Pull the reply, the document, and the document's own `declares` list apart.
+ *
+ * `declares` rides on the emitted JSON but is NOT part of a blueprint —
+ * `validateBlueprint` rebuilds the document from known fields only, so it is dropped before
+ * anything is stored and an exported blueprint never carries it. It exists purely as the
+ * model's statement of intent, made before it can see the diff, so the server has something
+ * to hold it to (BUG-033).
+ */
+function extractBlueprintBlock(text: string): {
+  reply: string;
+  candidate: unknown | null;
+  declared: BlueprintSection[] | null;
+} {
   const match = /```avilo-blueprint\s*([\s\S]*?)```/.exec(text);
-  if (!match) return { reply: text.trim(), candidate: null };
+  if (!match) return { reply: text.trim(), candidate: null, declared: null };
 
   const reply = (text.slice(0, match.index) + text.slice(match.index + match[0].length)).trim();
   try {
-    return { reply, candidate: JSON.parse(match[1]!.trim()) as unknown };
+    const parsed = JSON.parse(match[1]!.trim()) as Record<string, unknown>;
+    const raw = Array.isArray(parsed.declares) ? parsed.declares : null;
+    const declared = raw
+      ? (raw.filter((d): d is BlueprintSection => SECTIONS.includes(d as BlueprintSection)))
+      : null;
+    return { reply, candidate: parsed, declared };
   } catch {
-    return { reply, candidate: null };
+    return { reply, candidate: null, declared: null };
   }
+}
+
+/**
+ * Which levers does this reply's PROSE claim to have touched?
+ *
+ * The backstop for BUG-034. `CLAIMS_AN_ACTION` only ever ran when nothing was written, so
+ * "I've added a metric next to Avg NOI Margin" could sit above a card reading `Added view
+ * "Profitability"` with nothing to contradict it — and the green card lent the false
+ * sentence credibility. This reads the prose the same crude way, and the caller compares it
+ * to the diff that was actually applied.
+ *
+ * Deliberately keyword-based and deliberately loose. It cannot understand the sentence; it
+ * only has to notice that the words point at a different lever from the one that moved.
+ */
+export function levelsClaimedInProse(text: string): Set<BlueprintSection> {
+  const claimed = new Set<BlueprintSection>();
+  const t = text.toLowerCase();
+  if (/\bmetric\b|\bformula\b|\bcalculat/.test(t)) claimed.add("formulas");
+  if (/\bview\b|\bscreen\b|\bdashboard\b|\bpage\b|\btab\b/.test(t)) claimed.add("views");
+  if (/\bmapping\b|\bquickbooks row\b|\blabel\b/.test(t)) claimed.add("mappings");
+  if (/\bprompt\b|\bguidance\b/.test(t)) claimed.add("prompts");
+  if (/\blayout\b|\bsection\b|\bhid(e|den)?\b|\breorder|\border of\b/.test(t)) claimed.add("layout");
+  return claimed;
 }
 
 /**
@@ -348,7 +383,7 @@ export async function converse(history: ChatTurn[], clientId?: string): Promise<
   ].join("\n");
 
   const raw = await callGroq(config, prompt, 1200);
-  const { reply, candidate } = extractBlueprintBlock(raw);
+  const { reply, candidate, declared } = extractBlueprintBlock(raw);
 
   /*
     No blueprint at all. Usually that is right — a question needs no change. But when the
@@ -361,7 +396,15 @@ export async function converse(history: ChatTurn[], clientId?: string): Promise<
   }
 
   const summary = history[history.length - 1]?.text.slice(0, 120) ?? "Assistant change";
-  const outcome = applyBlueprintDirectly("assistant", summary, candidate);
+
+  /*
+    An omitted `declares` is treated as declaring nothing, so any diff at all is out of
+    scope and the document is refused. That is on purpose: making the declaration optional
+    would make the guard optional, and the failure it exists to catch (BUG-033) is exactly
+    the model being careless about which levers its document touches. The refusal names the
+    missing field, so the model can correct it on the next turn.
+  */
+  const outcome = applyBlueprintDirectly("assistant", summary, candidate, declared ?? []);
 
   if ("errors" in outcome) {
     return {
@@ -380,10 +423,35 @@ export async function converse(history: ChatTurn[], clientId?: string): Promise<
     return CLAIMS_AN_ACTION.test(text) ? { text, falseClaim: true } : { text, noChange: true };
   }
 
+  /*
+    The document changed something the assistant never said it would. Nothing was written —
+    not the change, not the snapshot — and the user is told exactly what was refused.
+    Refusing whole rather than filtering: a partly-applied change is the state this pipeline
+    exists to prevent (BUG-033).
+  */
+  if ("outOfScope" in outcome) {
+    return {
+      text: reply || raw.trim(),
+      outOfScope: outcome.outOfScope,
+    };
+  }
+
+  const applied = outcome.proposal.diff;
+  const actualSections = new Set(applied.map((c) => c.section));
+  const claimedSections = levelsClaimedInProse(reply || raw.trim());
+
+  /*
+    BUG-034: the prose and the diff describe different things. Only flag when the prose
+    positively points at a lever that did NOT move — prose that simply says less than the
+    diff is imprecise, not false, and the change list beneath it is the record either way.
+  */
+  const misdescribed = [...claimedSections].filter((c) => !actualSections.has(c));
+
   return {
     text: reply || raw.trim(),
     appliedSummary: outcome.proposal.summary,
-    appliedChanges: outcome.proposal.diff.map(describeChange),
+    appliedChanges: applied.map(describeBlueprintChange),
     revertId: outcome.revertId,
+    ...(misdescribed.length > 0 ? { misdescribed } : {}),
   };
 }

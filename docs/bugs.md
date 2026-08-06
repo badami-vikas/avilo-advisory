@@ -442,6 +442,123 @@ nothing written. Both behaviours verified in one session against the real databa
 **Standing lesson.** An assistant's own account of what it did is not evidence that it did
 it. Where a model's claim is user-visible, the server must be able to contradict it.
 
+### BUG-033 · A formula request also un-hid a report section (BUG-031 recurring)
+**Found.** 2026-08-06, from a user screenshot.
+**Status.** RESOLVED 2026-08-06.
+
+"Next to Avg NOI Margin, can you add Avg Net Op. Income" applied two changes: the intended
+`avg_net_operating_income` formula, and `Report layout — un-hid top-jobs`. The user had
+previously hidden that section; nothing in the request mentioned the layout.
+
+**Root cause.** Same shape as BUG-031: the model composes a whole blueprint and includes
+`layout` when it has no business touching it, then reproduces `hiddenSections` incorrectly.
+BUG-031's fix (`describeChange`) made the stray edit *legible* — and it did work, the user
+could see "un-hid top-jobs" — but legibility is not prevention. The prompt says an omitted
+key means "leave alone"; a small model does not reliably omit.
+
+**Fix.** Declared levers (ADR-045). Every block must carry `"declares": [...]`, naming the
+levers it changes. `applyBlueprintDirectly` computes the diff and refuses the WHOLE document
+if any change falls outside the declaration — no formula, no layout edit, no snapshot, no
+version. Refusing whole rather than filtering, because a partly-applied change is the state
+the propose/activate split exists to prevent. An omitted declaration declares nothing and so
+refuses everything: making it optional would make the guard optional.
+
+**Proven.** `test/declared-levers.test.ts` reproduces the shipped shape exactly — a document
+adding `avg_net_operating_income` that also un-hides `top-jobs` — and asserts the refusal
+names `layout`, reports "un-hid top-jobs", and leaves the formula absent, the section still
+hidden, and both the version and proposal counts unchanged. The same document applies
+normally when `layout` IS declared.
+
+---
+
+### BUG-034 · The reply described a different change from the one applied
+**Found.** 2026-08-06, from a user screenshot.
+**Status.** RESOLVED 2026-08-06.
+
+Turn one: *"I've added a new metric next to Avg NOI Margin"* over a card reading `Formula
+avg_net_operating_income added`. No tile was placed anywhere. Turn two: *"I've added a new
+metric next to Avg NOI Margin, binding to the avg_net_operating_income formula"* over a card
+reading `Added view "Profitability" (2 components)`. The prose and the diff describe
+different things, and the "Change applied" card lends the false description credibility.
+
+**Root cause.** `CLAIMS_AN_ACTION` runs only when `candidate === null` (copilot.ts:358) or
+when the diff is empty (copilot.ts:378). When a change *is* applied, the reply text is never
+compared against what was written. ADR-040 closed "claimed something, did nothing"; it left
+open "claimed X, did Y", which is arguably worse — there is a green card next to it.
+
+**Fix.** `levelsClaimedInProse` reads which levers the reply's prose points at, by keyword,
+and `converse` compares that to the sections the diff actually touched. A lever the prose
+claims that did not move sets `misdescribed`, and the panel prints: "The reply above
+describes a change to X, which is not what happened. Trust the change list below, not the
+sentence above it." Only a positive claim about a lever that did not move is flagged — prose
+that says less than the diff is imprecise, not false.
+
+**Proven.** `test/copilot-claims.test.ts` pins the exact sentences from the screenshot,
+including the turn that said "metric" while the diff was a view. Live: the follow-up turn
+that genuinely built a view reported no mismatch, so an honest reply is not flagged.
+
+---
+
+### BUG-035 · The assistant contradicted the configuration it was shown
+**Found.** 2026-08-06, from a user screenshot.
+**Status.** RESOLVED 2026-08-06 — by consequence of BUG-036, not by its own fix.
+
+Asked "Where did you add, in which page", the assistant answered *"I didn't add it to any
+page... I will build a new view called Profitability"* — one turn after it had created a view
+called Profitability. `buildContext()` (copilot.ts:185) does send the existing views, so the
+model was told the view existed and denied it.
+
+**What worked.** The `noChange` guard stopped the redundant write and the panel correctly
+read "No configuration change was made" — the BUG-030 machinery behaved exactly as intended.
+The defect is that the user was told something false about their own configuration.
+
+**Note.** Related to BUG-034 but distinct: that one is prose disagreeing with the diff of the
+same turn, this one is prose disagreeing with state from earlier turns.
+
+**Resolution.** No separate fix. The confusion was downstream of BUG-036 — the assistant had
+claimed a placement it never made, so its own history was already false and every later turn
+reasoned from it. With turn one answered honestly the same four-turn conversation now ends
+correctly: asked "Where did you add, in which page", it answers *"I added the new view called
+Key metrics to the client page's View picker, beside Standard/Report/Raw data/Dashboard."*
+Verified live against the real model. Watch this one — fixed by consequence means a
+regression elsewhere could bring it back without touching anything named here.
+
+---
+
+### BUG-036 · A request naming app chrome was answered as if it were configurable
+**Found.** 2026-08-06, from a user screenshot.
+**Status.** RESOLVED 2026-08-06.
+
+"Avg NOI Margin" is a tile on the ClientsPage summary bar — application chrome, not a
+configurable surface. The assistant cannot place anything next to it. The correct answer was
+"those tiles are part of the app; I can build you a view containing that metric." Instead it
+created a formula and claimed a placement, and every later turn compounded from there.
+
+**Root cause.** The prompt tells the assistant what it *can* change, but nothing teaches it
+that a thing the user can see and name may not be one of those surfaces. It defaulted to
+acting rather than to naming the boundary — the opposite of the behaviour BUG-029's fix was
+meant to install, and evidence that fix generalised less far than it appeared.
+
+**Fix.** The prompt now enumerates application chrome concretely rather than by category —
+the header, the navigation, the assistant panel, the built-in views, and specifically the
+clients-page summary tiles by name (SHOWING, TOTAL REVENUE, MISSING INPUTS, AVG NOI MARGIN),
+with the sentence "the user can SEE these and will name them; that a thing is visible does
+not make it one of your levers." Plus a worked example of this exact request, whose note
+spells out the trap: creating a formula puts NOTHING on screen, so a formula must never be
+created and then described as a placement.
+
+**Proven live** against the real model. The verbatim failing request now returns: *"Those
+tiles across the top of the clients list are part of the app, so I can't add one beside them.
+What I can do is create an 'Average net operating income' metric and put it on a view — say
+the word and I'll build one."* No block, no formula, no layout change. And the guard did not
+make it useless: "Yes, build the view" then applied `Added view "Key metrics" (1 component)`
+binding to `avg_net_operating_income`.
+
+**Note.** This was the root of the whole exchange in BUG-033 to BUG-035, and fixing it did
+remove most of the compounding — as predicted when it was filed.
+
+---
+
 **KNOWN LIMITATION** — not an app bug
 
 The preview pane runs backgrounded (`document.hidden === true`): `requestAnimationFrame` never fires, so chart.js's throttled event proxy never flushes and scroll events do not fire (measured: 0 across two programmatic scrolls). Radix menus needing real pointer events do not open.
