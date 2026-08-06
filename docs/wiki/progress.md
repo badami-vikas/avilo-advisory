@@ -1,4 +1,6 @@
-# Progress
+# Progress — v1.10.0
+
+**v1.10.0** — shipping to a first beta user. macOS ships arm64 only for now (BUG-028). Alongside the in-app assistant, an **external agent** (Claude Code, or any MCP client) can now reach the same configuration pipeline over a stdio MCP server: it reads the registry and the live configuration, records a **proposal** a person applies, and can **restore** any earlier state. It cannot activate a new state and cannot read a client, a fact or a figure — the data boundary is the module graph, checked by a test that walks it, not a rule in a prompt (ADR-043). Every change to the configuration, from any of the three routes, appends to `configuration_versions`; restore is forward-only, so an undo is itself undoable (ADR-044). `AGENTS.md`, `docs/` and the MCP source ship inside the installer.
 
 **v1.9.4** — shipping to a first beta user. macOS ships arm64 only for now (BUG-028). The assistant **builds**: it composes whole views from an approved component registry (metrics, charts, tables, text, action buttons) that appear in the client page's View picker, creates new formulas, and still edits mappings, prompts and the report layout — applying each immediately with an Undo. A generated component binds to an id and can never carry a figure (ADR-041), so a screen it built is exactly as trustworthy as the books behind it. It refuses anything outside that surface out loud, and the server corrects it when its prose does not match what it wrote (ADR-040).
 
