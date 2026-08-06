@@ -1,6 +1,6 @@
 {
   "name": "@avilo/api",
-  "version": "1.10.0",
+  "version": "1.10.1",
   "private": true,
   "type": "module",
   "description": "Local Fastify + tRPC surface over SQLite. Binds to 127.0.0.1 only; makes no outbound requests.",

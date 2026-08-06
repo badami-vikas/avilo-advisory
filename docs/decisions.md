@@ -693,3 +693,52 @@ change every time and was caught by the tests before it shipped.
 earlier build, history starts empty while the configuration is already whatever the user
 built up. Without it, the first change would be seq 1 with nothing earlier to restore — the
 user would lose the ability to undo precisely the change they were making.
+
+---
+
+### ADR-045 · An author declares which levers it is changing, and is held to it
+**Date.** 2026-08-06
+
+**Decision.** Every blueprint the assistant emits must carry `"declares": [...]`, naming the
+levers it changes. `applyBlueprintDirectly` computes the diff and refuses the **whole**
+document if any change falls outside that declaration. An omitted declaration declares
+nothing and therefore refuses everything. `declares` is stripped by `validateBlueprint`
+before storage, so an exported blueprint never carries it — it is a statement of intent in
+the chat protocol, not part of the portable document.
+
+**Why.** BUG-031 and BUG-033 are the same failure twice, three versions apart: a request
+about one lever arrived as a document that also rewrote the report layout, silently undoing
+a section the user had deliberately hidden. The prompt has said "omit what you are not
+changing" since v1.9.3. A small model does not reliably comply, and after the second
+occurrence this stopped being a prompting problem.
+
+The declaration works because it is made **before the diff is known**. The model states
+intent in one place and expresses it in another; the server compares them. Neither the
+prompt nor the model has to become more reliable — the disagreement between two things the
+model already produces is what gets caught.
+
+**Refuse whole, not filter.** Dropping the undeclared entries and applying the rest would be
+friendlier and wrong: a partly-applied change is exactly the state the propose/activate split
+exists to prevent, and it would leave the user with a change nobody described. The author can
+resubmit having either narrowed the document or widened the declaration honestly.
+
+**Rejected: making the declaration optional.** An optional guard is not a guard — the failure
+it catches is precisely the model being careless, and a careless model omits the field. The
+cost of strictness is a refused turn the model can correct; the cost of laxity is a silent
+edit to the user's report.
+
+**Consequence.** The MCP and import paths pass no declaration and are unaffected — an
+external agent composes its document deliberately and its proposal is reviewed by a person
+before it lands, so the guard addresses a risk those paths do not carry. Verified live: the
+request that produced BUG-033 now refuses with an offer of what *can* be done, and the
+follow-up "yes, build the view" still applies normally.
+
+**Companion, same commit.** `levelsClaimedInProse` closes the other half (BUG-034). ADR-040
+gave the server the last word on *whether* something changed; it left open *what* changed, so
+"I've added a metric" could sit above a card reading `Added view "Profitability"` with a green
+tick lending it credibility. The prose is now compared to the diff by keyword, and a lever the
+prose claims that did not move is marked on screen: trust the change list, not the sentence.
+
+**Standing lesson, sharpened.** ADR-040 said a model's account of what it did is not evidence.
+The sharper form: when prompting fails twice on the same class of defect, stop writing prompt
+text and find two model outputs that can be checked against each other.

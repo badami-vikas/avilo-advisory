@@ -20,6 +20,7 @@ import {
   TRAILING,
   extractDependencies,
 } from "@avilo/module";
+import type { LayoutOverride } from "@avilo/core";
 import { getDb, newId, schema } from "../db.js";
 import { learnMapping } from "./labels.js";
 import { loadFormulaSpecs } from "./formula-specs.js";
@@ -56,6 +57,60 @@ export {
   exportBlueprint,
   registeredSurface,
 } from "./configuration.js";
+
+/**
+ * A change, in words a person can check against what they asked for.
+ *
+ * BUG-031 is the reason this exists rather than `${kind} ${section}: ${key}`. When the
+ * assistant hid a report section in response to a request about a button, the panel
+ * described it as "modify layout: layout" — technically accurate, and completely useless
+ * for noticing that something unrelated had just happened to the report. A change the user
+ * cannot read is a change the user cannot catch.
+ */
+export function describeBlueprintChange(change: BlueprintChange): string {
+  if (change.section === "layout") {
+    const before = (change.before ?? {}) as LayoutOverride;
+    const after = (change.after ?? {}) as LayoutOverride;
+    const wasHidden = new Set(before.hiddenSections ?? []);
+    const nowHidden = new Set(after.hiddenSections ?? []);
+    const hid = [...nowHidden].filter((s) => !wasHidden.has(s));
+    const shown = [...wasHidden].filter((s) => !nowHidden.has(s));
+
+    const parts: string[] = [];
+    if (hid.length > 0) parts.push(`hid ${hid.join(", ")}`);
+    if (shown.length > 0) parts.push(`un-hid ${shown.join(", ")}`);
+
+    const orderChanged =
+      JSON.stringify(before.sectionOrder ?? []) !== JSON.stringify(after.sectionOrder ?? []);
+    // Reordering is implied by hiding, so only call it out when it is the actual change.
+    if (orderChanged && parts.length === 0) parts.push("reordered the sections");
+
+    return `Report layout — ${parts.length > 0 ? parts.join("; ") : "changed"}`;
+  }
+
+  if (change.section === "formulas") {
+    const after = change.after as { expression?: string } | undefined;
+    const before = change.before as { expression?: string } | undefined;
+    if (change.kind === "add") return `Formula ${change.key} added: ${after?.expression ?? ""}`;
+    return `Formula ${change.key}: ${before?.expression ?? "?"} → ${after?.expression ?? "?"}`;
+  }
+
+  if (change.section === "views") {
+    const after = change.after as { label?: string; components?: unknown[] } | undefined;
+    const before = change.before as { label?: string } | undefined;
+    if (change.kind === "remove") return `Removed view "${before?.label ?? change.key}"`;
+    const count = after?.components?.length ?? 0;
+    const verb = change.kind === "add" ? "Added" : "Updated";
+    return `${verb} view "${after?.label ?? change.key}" (${count} component${count === 1 ? "" : "s"})`;
+  }
+
+  if (change.section === "mappings") {
+    const after = change.after as { accountId?: string } | undefined;
+    return `Mapping ${change.key} → ${after?.accountId ?? "?"}`;
+  }
+
+  return `Prompt ${change.key} rewritten`;
+}
 
 export interface ProposalRecord {
   id: string;
@@ -337,13 +392,21 @@ export function restoreVersion(
  * that existed, so a mapping the assistant added survives the revert and has to be corrected
  * in the mapping UI like any other. Formulas, prompts and layout revert exactly.
  */
+export type BlueprintSection = BlueprintChange["section"];
+
 export function applyBlueprintDirectly(
   author: string,
   summary: string,
   candidate: unknown,
+  /**
+   * The levers the author SAID it was changing. When supplied, a diff touching anything
+   * outside this set is refused whole — see the `outOfScope` guard below.
+   */
+  declared?: readonly BlueprintSection[],
 ):
   | { proposal: ProposalRecord; revertId: string }
   | { noChange: true }
+  | { outOfScope: { declared: BlueprintSection[]; undeclared: BlueprintSection[]; changes: string[] } }
   | { errors: { path: string; message: string }[] } {
   const { blueprint, errors } = validateBlueprint(candidate, registeredSurface());
   if (!blueprint) return { errors };
@@ -404,7 +467,38 @@ export function applyBlueprintDirectly(
     "Change applied" teaches the user that the panel's claims mean nothing. Nothing is
     recorded either — not the snapshot, not the proposal.
   */
-  if (diffBlueprint(blueprint, currentConfiguration()).length === 0) return { noChange: true };
+  const diff = diffBlueprint(blueprint, currentConfiguration());
+  if (diff.length === 0) return { noChange: true };
+
+  /*
+    Hold the author to what it said it was doing.
+
+    BUG-031 and BUG-033 are the same failure twice: a request about a formula arrived as a
+    document that ALSO rewrote the report layout, silently un-hiding a section the user had
+    deliberately hidden. The model composes a whole blueprint, includes keys it has no reason
+    to touch, and gets them wrong. The prompt has said "omit what you are not changing" since
+    v1.9.3 and a small model does not reliably comply — so this stops being a prompting
+    problem and becomes a check.
+
+    The declaration is the author's own statement of intent, made before the diff is known.
+    Refusing the whole document rather than filtering the stray entries is deliberate: a
+    partly-applied change is exactly the state the propose/activate split exists to prevent,
+    and the author can resubmit having either narrowed the document or widened the
+    declaration honestly.
+  */
+  if (declared) {
+    const allowed = new Set<BlueprintSection>(declared);
+    const undeclared = [...new Set(diff.map((c) => c.section))].filter((s) => !allowed.has(s));
+    if (undeclared.length > 0) {
+      return {
+        outOfScope: {
+          declared: [...allowed],
+          undeclared,
+          changes: diff.filter((c) => undeclared.includes(c.section)).map(describeBlueprintChange),
+        },
+      };
+    }
+  }
 
   /*
     An absent `layout` in a blueprint means "leave layout alone", not "clear it" — so a

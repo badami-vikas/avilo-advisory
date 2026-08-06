@@ -167,3 +167,26 @@ The panel's turns and proposal decisions survive a refresh, stored under
 pair every other runtime override in this app already goes through (ADR-013), not a new
 table. A stored turn is inert text; it is never re-validated or re-applied on load, only
 displayed.
+
+## Declared levers (v1.10.1)
+
+Every blueprint the assistant emits carries `"declares": [...]` — the levers it says it is
+changing. `applyBlueprintDirectly` refuses the whole document if the diff touches anything
+outside that list, and an omitted declaration refuses everything.
+
+It exists because BUG-031 and BUG-033 were the same failure three versions apart: a request
+about a formula arriving as a document that also un-hid a report section. The prompt had said
+"omit what you are not changing" since v1.9.3; a small model does not reliably comply.
+
+The declaration works because it is made *before the diff is known*. Intent is stated in one
+place and expressed in another, and the server compares them — nothing has to become more
+reliable for the disagreement to be caught.
+
+Refusal is total rather than filtered: a partly-applied change is the state propose/activate
+exists to prevent. `declares` is stripped before storage, so an exported blueprint never
+carries it. The MCP and import paths pass no declaration and are unaffected — see
+[mcp.md](mcp.md).
+
+A companion check compares the reply's prose to the diff: a lever the prose claims that did
+not move is marked on screen ("trust the change list, not the sentence above it"), closing
+the half of ADR-040 that covered *whether* something changed but not *what* (ADR-045).
