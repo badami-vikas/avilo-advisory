@@ -18,20 +18,54 @@ import { fileURLToPath } from "node:url";
 
 import { serveHost, type RunningHost } from "@bridge/module-host";
 import { buildHost, MODULES } from "@avilo/api/src/host.js";
+import { configurePaths } from "@avilo/api/src/paths.js";
 import { startUpdater } from "./updater.js";
+import { runMcpStdio } from "../../mcp/src/stdio-entry.js";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
 
 /**
- * A single instance, always.
+ * `--mcp-stdio`: run the MCP server on stdio and exit when stdin closes.
  *
- * Two windows would be cosmetic; two *processes* would be two SQLite writers and two
- * migration runs against one file. Electron's lock is the only thing standing between a
- * double-click on the dock icon and that.
+ * The Electron binary is the right host for the MCP server: it already has better-sqlite3
+ * (the native addon that cannot be bundled), all @avilo/api modules, and knows exactly
+ * where the database and migrations live regardless of install path. A client with the
+ * installed app can therefore point their MCP config at the exe with this flag and get
+ * the full configuration surface without needing the source repo, tsx, or Node.
+ *
+ * This runs before the single-instance lock so the MCP process and the GUI can coexist —
+ * they open the same SQLite file in WAL mode, which is designed for exactly this.
  */
-if (!app.requestSingleInstanceLock()) {
-  app.quit();
-  process.exit(0);
+if (process.argv.includes("--mcp-stdio")) {
+  app.whenReady().then(async () => {
+    const documents = app.getPath("documents");
+    const filesRoot = join(documents, "Bridge", "Avilo Advisory");
+    const migrationsDir = app.isPackaged
+      ? join(process.resourcesPath, "modules", "avilo", "migrations")
+      : join(here, "modules", "avilo", "migrations");
+    configurePaths({
+      filesRoot,
+      dbPath: join(filesRoot, ".data", "avilo.sqlite"),
+      migrationsDir,
+    });
+    await runMcpStdio();
+    app.quit();
+  }).catch((cause: unknown) => {
+    process.stderr.write(`avilo-mcp: ${(cause as Error).message}\n`);
+    process.exit(1);
+  });
+} else {
+  /**
+   * A single instance, always.
+   *
+   * Two windows would be cosmetic; two *processes* would be two SQLite writers and two
+   * migration runs against one file. Electron's lock is the only thing standing between a
+   * double-click on the dock icon and that.
+   */
+  if (!app.requestSingleInstanceLock()) {
+    app.quit();
+    process.exit(0);
+  }
 }
 
 /** The first module in the registry names the window. */
@@ -288,7 +322,7 @@ async function smokeTest(): Promise<never> {
   }
 }
 
-app.whenReady().then(async () => {
+if (!process.argv.includes("--mcp-stdio")) app.whenReady().then(async () => {
   if (process.argv.includes("--smoke")) {
     await smokeTest();
   }

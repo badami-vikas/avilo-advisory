@@ -26,8 +26,39 @@ construction rather than by good behaviour.
 
 ## Connecting
 
-The MCP server speaks stdio. Add it to your MCP client's configuration:
+The MCP server is built into the installed application and speaks stdio. Run the Avilo
+Advisory binary itself with `--mcp-stdio` — no separate install, no Node, no source repo.
 
+**macOS** (installed to Applications):
+```json
+{
+  "mcpServers": {
+    "avilo": {
+      "command": "/Applications/Avilo Advisory.app/Contents/MacOS/Avilo Advisory",
+      "args": ["--mcp-stdio"]
+    }
+  }
+}
+```
+
+**Windows** (per-user install — substitute your username):
+```json
+{
+  "mcpServers": {
+    "avilo": {
+      "command": "C:\\Users\\<username>\\AppData\\Local\\Programs\\Avilo Advisory\\Avilo Advisory.exe",
+      "args": ["--mcp-stdio"]
+    }
+  }
+}
+```
+
+The binary reads `~/Documents/Bridge/Avilo Advisory/.data/avilo.sqlite` — the same
+database the GUI uses. The app does not need to be running; both can coexist (SQLite WAL
+handles concurrent readers). If the app is running, configuration changes appear without
+a reload.
+
+**From the source repo** (during development):
 ```json
 {
   "mcpServers": {
@@ -39,10 +70,7 @@ The MCP server speaks stdio. Add it to your MCP client's configuration:
 }
 ```
 
-It reads the same database the app uses (`~/Documents/Bridge/Avilo Advisory/.data/avilo.sqlite`).
-The app does not need to be running. If it is, changes appear without a reload.
-
-Point it at a different installation with `AVILO_DB_PATH` / `AVILO_FILES_ROOT`.
+Point at a different database with `AVILO_DB_PATH` / `AVILO_FILES_ROOT`.
 
 ---
 
