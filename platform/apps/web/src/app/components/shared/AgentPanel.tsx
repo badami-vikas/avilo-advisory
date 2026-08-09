@@ -210,7 +210,7 @@ export function AgentPanelBody({ collapsed, clientId }: { collapsed: boolean; cl
     setSending(true);
     try {
       const reply = await api.copilot.converse.mutate({
-        history: next.map((t) => ({ role: t.role, text: t.text })),
+        history: next.slice(-40).map((t) => ({ role: t.role, text: t.text })),
         clientId,
       });
       /*
@@ -372,7 +372,13 @@ export function AgentPanelBody({ collapsed, clientId }: { collapsed: boolean; cl
       ) : null}
 
       <div className="border-t border-line p-2.5">
-        <div className="mb-1.5 flex justify-end">
+        <div className="mb-1.5 flex justify-between">
+          <button
+            onClick={() => { setTurns([]); setDecided({}); }}
+            className="rounded px-1.5 py-0.5 text-[11px] text-ink-faint hover:bg-line-soft hover:text-ink"
+          >
+            Clear
+          </button>
           <button
             onClick={() => setHistoryOpen(true)}
             className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-ink-faint hover:bg-line-soft hover:text-ink"

@@ -511,6 +511,12 @@ export async function converse(history: ChatTurn[], clientId?: string): Promise<
   const config = groqConfig();
   if (!config) return null;
 
+  // Keep the last 6 turns (3 exchanges). The system prompt + full config context is
+  // already ~2–4K tokens of fixed overhead per call; sending the full accumulated
+  // history on top multiplies that cost with every message. 6 turns is enough context
+  // for coherent follow-ups while keeping Groq calls predictably sized.
+  const window = history.slice(-6);
+
   const prompt = [
     SYSTEM_PROMPT,
     "",
@@ -519,7 +525,7 @@ export async function converse(history: ChatTurn[], clientId?: string): Promise<
     ...(clientId ? ["", "--- Active client data ---", clientDataSummary(clientId)] : []),
     "",
     "--- Conversation ---",
-    ...history.map((turn) => `${turn.role === "user" ? "User" : "Assistant"}: ${turn.text}`),
+    ...window.map((turn) => `${turn.role === "user" ? "User" : "Assistant"}: ${turn.text}`),
     "Assistant:",
   ].join("\n");
 
