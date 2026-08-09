@@ -59,16 +59,24 @@ handles concurrent readers). If the app is running, configuration changes appear
 a reload.
 
 **From the source repo** (during development):
-```json
-{
-  "mcpServers": {
-    "avilo": {
-      "command": "npx",
-      "args": ["tsx", "<repo>/platform/apps/mcp/src/server.ts"]
-    }
-  }
-}
+
+Claude Code launches MCP servers without inheriting your shell's `PATH`, so `npx` and
+`tsx` won't be found if they live in a custom location (e.g. `~/.local/bin`). Build the
+bundle once, then use the absolute path to `node`:
+
+```bash
+# One-time build (re-run after changing MCP source)
+pnpm --filter @avilo/mcp build
+
+# Find your node binary
+which node     # e.g. /Users/you/.local/bin/node or /usr/local/bin/node
+
+# Add to Claude Code (replace <node> and <repo> with your absolute paths)
+claude mcp add avilo <node> <repo>/platform/apps/mcp/dist/server.js
 ```
+
+`dist/server.js` is a self-contained bundle — no `tsx`, no `npx`, no PATH lookup — and
+`better-sqlite3` is resolved from the repo's own `node_modules` at runtime.
 
 Point at a different database with `AVILO_DB_PATH` / `AVILO_FILES_ROOT`.
 
