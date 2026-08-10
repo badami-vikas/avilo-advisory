@@ -138,5 +138,13 @@ describe("MCP server data isolation", () => {
     expect(names).not.toContain("platform/apps/api/src/services/copilot.ts");
     expect(names).not.toContain("platform/apps/api/src/services/import.ts");
     expect(names).not.toContain("platform/apps/api/src/router.ts");
+    /*
+      The in-app assistant's client-scoped levers — sticky notes, action assignments, client
+      metadata, one client's report layout. These write rows belonging to a client, which is
+      exactly what an external agent may not reach, and the temptation to import them from
+      `blueprint.ts` for convenience is precisely the drift this whole file exists to catch.
+      The table check below would already fail on it; naming the module says why.
+    */
+    expect(names).not.toContain("platform/apps/api/src/services/client-levers.ts");
   });
 });

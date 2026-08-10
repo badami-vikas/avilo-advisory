@@ -856,3 +856,96 @@ have produced.** Recorded because each one was invisible from the code:
 
 Groq's JSON mode (`response_format: json_object`) was then enabled for this call, which took
 the rich form from landing about half the time to landing every time in testing.
+
+### ADR-049 · Client-scoped levers live outside the MCP module graph, not behind a flag
+
+The assistant gained four levers that write a client's own rows — sticky notes, action
+assignments, client metadata, and one client's report layout. All four are low-risk by the
+test this project already uses: none has a field that can hold a figure, and every one is a
+row the advisor can already edit by hand in the UI they are looking at.
+
+None of them can live in `blueprint.ts`. That module is reachable from the MCP server's
+entry point, and `test/mcp-isolation.test.ts` walks that import graph and fails the build if
+any reachable file so much as names a client-data table — `clients` and `sticky_notes` are
+both on that list. Adding the writes there would not merely be untidy; it would hand an
+external agent the ability to read and write a client's record, which is the one thing
+ADR-043 promises it cannot do.
+
+So they live in `services/client-levers.ts`, imported by `copilot.ts` and nothing else, and
+the isolation test now names that module explicitly as one the MCP graph must not reach.
+**The boundary is drawn where the guarantee is:** configuration is global, portable and
+reachable over MCP; a client's own working data is none of those three.
+
+**No client id appears in any of these sections.** They act on whatever client is open,
+taken from the panel's context. That is not a convention — it is what makes "the assistant
+cannot reach another client's rows" true by construction rather than by a validation rule
+somebody has to keep correct. A note id belonging to a different client is simply not found.
+
+**Rejected: a `clientId` field with a check.** It reads as more flexible and is strictly
+worse — it moves a structural guarantee into a runtime comparison, and the failure mode of a
+wrong comparison is writing to the wrong client's record.
+
+**Undo deliberately does not cover them.** The panel's Undo activates a *configuration*
+snapshot, and none of these are configuration. Rather than build a second reversal
+mechanism for changes that are one click from reversible, the card says which changes Undo
+reaches and which the user should remove where they appear. A button that silently does
+less than it appears to is the class of claim this panel exists to prevent (ADR-040).
+
+**`periodNotes` was considered and refused.** Key Insights is the obvious next lever and the
+wrong one: that prose prints to the client PDF, and unlike the executive summary — a rewrite
+of computed findings, checked by `fabricatedFigures` — it has no findings to be checked
+against. A model writing there could put an unsourced claim in front of a paying client.
+
+### ADR-050 · A benchmark is the one number a blueprint may carry
+
+`formulas` gained `active`, `unit`, `sortOrder` and `benchmark`. The first three are plainly
+inside "never fabricate a figure" — a boolean, a render hint, an ordering. `benchmark` is
+not obviously inside it, because it carries numbers, so the argument is worth stating.
+
+A benchmark is a **policy the advisor sets** — "warn below 30 days of cash" — never a reading
+from anyone's books. No figure on screen is ever sourced from it; the band only decides what
+colour an independently computed figure is drawn in. The rule the project actually enforces
+is that a *displayed figure* must trace to an imported fact, a stored override, or a formula.
+A threshold displayed as a threshold breaks none of that.
+
+**`active` rather than deletion is the answer to "stop showing this metric".** Deleting a
+formula to hide it throws away the version history ADR-003 exists to keep. The prompt says so
+explicitly, because the lazy reading of "stop showing DSO" is a delete.
+
+### ADR-051 · `viewsPatch` names the views you mean
+
+`views` replaces the whole set (ADR-039), which is right for export/import — a blueprint IS
+the set of views it describes — and wrong for an author editing one of several. Forgetting to
+resend a view deletes it, which is what BUG-042 was; the guard added then only covers the
+empty-array case, not the forget-one case.
+
+`viewsPatch: {upsert, remove}` names the views it means. It is resolved into a full `views`
+set at the boundary, in `resolveViewsPatch`, so the diff, the apply and the snapshot Undo
+activates all continue to see exactly the document shape they already understood — the patch
+costs a dozen lines at one entry point instead of a parallel code path in three places, and
+it cannot drift from the full-replace semantics because by then it *is* a full replacement.
+
+An upsert replaces a view **in place** rather than appending, so changing a view's label does
+not silently reorder the view picker.
+
+Sending both `views` and `viewsPatch` is refused rather than merged: they express one intent
+two ways, and any merge order is a rule nobody asked for that someone would later have to
+reverse-engineer from behaviour.
+
+### ADR-052 · "Already configured" is not a refusal, and must not be dressed as one
+
+A document identical to the live configuration produced `noChange`, and — if the reply had
+claimed to act — `falseClaim`, which the panel renders as a red card listing what the
+assistant *can* change. That copy is correct for a request outside the levers. Shown on a
+request that was in scope and **already satisfied**, it tells the user the capability does
+not exist when it does. A user who sees it three times concludes the assistant is powerless,
+which is exactly what happened.
+
+`alreadyConfigured` is now a separate outcome with neutral styling and, more importantly, a
+`nextStep`: a configuration can satisfy a request and still leave the old output on screen,
+because rewriting `narrative_guidance` changes how the *next* summary is written. Naming the
+button is the difference between an answer and a dead end.
+
+The general rule: **the panel's failure copy must distinguish "I cannot" from "I already
+did".** They are opposite facts about the assistant's power, and one message cannot carry
+both.

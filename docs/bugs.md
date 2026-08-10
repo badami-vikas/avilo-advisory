@@ -776,3 +776,79 @@ the three arrangement levers and asserts none is dropped.
 **Related.** `CLAIMS_AN_ACTION` also missed "Done — the summary is now written as one
 paragraph", so a claim over an empty diff was printed rather than withheld. Widened to cover
 "done", "built it", and "is/are/has/have now …".
+
+### BUG-045 · An in-scope request the app had already satisfied was reported as a refusal
+
+**Status:** RESOLVED (2026-08-10)
+
+**Symptom.** Reported by the user with a screenshot, having asked the same thing three times.
+"Can you make the executive summary a single continuous paragraph with colour coded text…"
+returned *"I did not change anything — the document I produced matches the configuration
+already in place"*, under a red card reading **"Nothing was changed.** The assistant can
+change formulas, QuickBooks mappings, AI prompts, the report layout…". The user's conclusion,
+stated plainly: "I still dont see the AI agent having any powers."
+
+**Root cause.** Two separate things, both in the `noChange` branch of `converse`.
+
+The assistant had in fact done the work on the *first* attempt — `narrative_guidance` was
+rewritten. Every later attempt produced a document identical to what was now live, which is
+correctly `noChange`. But `noChange` + a reply that claimed to act set `falseClaim: true`,
+and `falseClaim` renders the **out-of-scope** copy: a list of what the assistant can change.
+That copy is right for "I cannot do that" and precisely wrong for "I already did that". They
+are opposite facts about the assistant's power and one message was carrying both.
+
+Second, the replacement sentence was a dead end. The user asked for an outcome, not a diff.
+The summary on screen was written under the *previous* guidance and would stay that way until
+Generate was pressed — the one thing actually left to do, and the one thing not said.
+
+**Fix.** `alreadyConfigured` is now a distinct outcome from `falseClaim`, rendered neutrally,
+and carries a `nextStep` derived from the declared levers ("Press Generate on the executive
+summary…"). See ADR-052.
+
+**What this cost.** Three repeated attempts, then a session spent concluding the capability
+was missing. The capability was never missing. A miscalibrated failure message is not a
+cosmetic bug when the message is the only evidence the user has.
+
+### BUG-046 · A formula edit that changed only its label was silently dropped
+
+**Status:** RESOLVED (2026-08-10)
+
+**Symptom.** Found while adding the presentation fields, not reported — and it would have
+made every one of them a silent no-op.
+
+**Root cause.** Two places, the same assumption. `diffBlueprint` compared only `expression`,
+so a document changing a formula's label produced an **empty diff** — reported to the user as
+`noChange`, i.e. the assistant correctly saying it changed nothing about a change it was
+never given the chance to make. And `activateProposal` began its update with
+`if (existing.expression === formula.expression) continue;`, so even a diff that *did* reach
+it would not have been written.
+
+**Why it matters beyond the label.** `label` was the only presentation field at the time, so
+the bug was nearly invisible. The moment `active`, `unit`, `sortOrder` and `benchmark` were
+added, "stop showing DSO" would have reported success and done nothing — the failure mode
+BUG-044 already established as the worst available, arrived at by a different route.
+
+**Fix.** The diff compares every field the author can set, counting only fields actually
+present (an omitted field still means "leave alone"). The apply path separates a definition
+change — which opens a new `formula_versions` row, because the figure moved — from a
+presentation change, which writes the columns and does not.
+
+**The general shape.** A field the grammar accepts and the diff ignores is worse than a field
+that does not exist: it is a promise the system makes and does not keep, and nothing reports
+it.
+
+### BUG-047 · `pdf.test.ts` geometry test times out under full-suite load
+
+**Status:** OPEN (2026-08-10)
+
+**Symptom.** `readPdf — geometry reconstruction > recovers a label column and two
+right-aligned value columns` fails with `Test timed out in 5000ms` during `pnpm test`, and
+passes in ~1.1s when run alone (`pnpm --filter @avilo/module test pdf`). Intermittent.
+
+**Not a correctness bug.** The reconstruction is right; the test is racing vitest's default
+5s timeout under parallel load, on a suite whose collect phase alone takes ~25s. Filed rather
+than fixed because a flaky test in the shared suite trains people to re-run and move on,
+which is how a real failure gets waved through.
+
+**Likely fix.** An explicit `testTimeout` on this test, or a `poolOptions` cap so the PDF
+suite is not competing with nine other files for cores.

@@ -23,15 +23,29 @@ function exampleBlocks(): string[] {
     .filter((body) => !body.includes("[...]"));
 }
 
-const ALL_LEVERS: BlueprintSection[] = [
+/**
+ * Every lever a worked example may declare: the configuration sections, `viewsPatch` (the
+ * safer route to the `views` lever), and the four client-scoped levers.
+ *
+ * `string[]` rather than `BlueprintSection[]` because the client levers are deliberately not
+ * blueprint sections — they are applied by `client-levers.ts`, which lives outside the MCP
+ * module graph so an external agent cannot reach a client's own rows.
+ */
+const ALL_LEVERS: string[] = [
   "formulas",
   "mappings",
   "prompts",
   "layout",
   "views",
+  "viewsPatch",
   "dashboard",
   "clientsTable",
   "landingTiles",
+  "accountLabels",
+  "notes",
+  "actionAssignments",
+  "clientMeta",
+  "clientLayout",
 ];
 
 describe("the assistant's worked examples", () => {

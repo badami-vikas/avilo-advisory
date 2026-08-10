@@ -36,6 +36,40 @@ export interface FormulaOverride {
   /** Present when the author wants to change how the figure is labelled or explained. */
   label?: string;
   description?: string;
+  /** currency | percent | days | ratio | count — how the figure is rendered, never what it is. */
+  unit?: string;
+  /** Position in the metric list. Ordering, not value. */
+  sortOrder?: number;
+  /**
+   * `false` hides the metric everywhere without deleting its definition or its version
+   * history. "Stop showing DSO" is a display decision, and answering it by deleting the
+   * formula would throw away the audit trail ADR-003 exists to keep.
+   */
+  active?: boolean;
+  /**
+   * Healthy band, driving the colour and the Check Formulas panel.
+   *
+   * This is the one lever that carries numbers, and it is worth being precise about why
+   * that does not breach "never fabricate a figure". A benchmark is a POLICY the advisor
+   * sets — "warn below 30 days of cash" — not a reading from anyone's books. No displayed
+   * figure is ever sourced from here; the band only decides what colour an independently
+   * computed figure is drawn in. `null` clears an existing band.
+   */
+  benchmark?: { min?: number; max?: number; note?: string } | null;
+}
+
+/**
+ * A display name for a canonical account.
+ *
+ * Renaming "Total Income" to "Revenue" changes the word on screen and nothing else — every
+ * figure is still resolved by the account's id, which is closed and cannot be invented. The
+ * binding-not-value rule (ADR-041) is what makes this safe to hand over: the label is the
+ * part that carries no data.
+ */
+export interface AccountLabelOverride {
+  id: string;
+  label?: string;
+  description?: string;
 }
 
 export interface LabelMappingEntry {
@@ -128,6 +162,21 @@ export interface AviloBlueprint {
   layout?: LayoutOverride;
   /** User-defined views. Absent means "leave the existing views alone" (see ADR-039). */
   views?: CustomView[];
+  /**
+   * Add, replace or delete individual views without resending the set.
+   *
+   * `views` replaces wholesale, which is right for export/import — a blueprint IS the set of
+   * views it describes — and wrong for an author editing one of several. A model that forgets
+   * to resend a view deletes it, which is what BUG-042 was, and the guard that caught it only
+   * covers the empty-array case. Naming the view you mean removes the class of mistake rather
+   * than one instance of it.
+   *
+   * `views` and `viewsPatch` in the same document is refused: they express the same intent
+   * two ways, and applying both leaves the result dependent on ordering.
+   */
+  viewsPatch?: { upsert?: CustomView[]; remove?: string[] };
+  /** Display names for canonical accounts. Absent means "leave labels alone". */
+  accountLabels?: AccountLabelOverride[];
   /** Which dashboard panels appear, and in what order. */
   dashboard?: ArrangementOverride;
   /** Which columns the clients list shows, and in what order. */
@@ -254,11 +303,61 @@ export function validateBlueprint(
       );
       return;
     }
+    /*
+      Presentation fields, each optional and each independently checked.
+
+      `unit` is closed to what the renderers actually implement — an unknown unit is a
+      metric that draws as nothing, which is worse than a rejected document. `benchmark`
+      is the only place a number enters a blueprint, and it is a threshold rather than a
+      reading; `null` clears a band that already exists.
+    */
+    const UNITS = ["currency", "percent", "days", "ratio", "count"];
+    if (f.unit !== undefined && (typeof f.unit !== "string" || !UNITS.includes(f.unit))) {
+      fail(`formulas[${i}].unit`, `Unknown unit "${String(f.unit)}". One of: ${UNITS.join(", ")}.`);
+      return;
+    }
+    if (f.sortOrder !== undefined && typeof f.sortOrder !== "number") {
+      fail(`formulas[${i}].sortOrder`, "Must be a number.");
+      return;
+    }
+    if (f.active !== undefined && typeof f.active !== "boolean") {
+      fail(`formulas[${i}].active`, "Must be true or false.");
+      return;
+    }
+    let benchmark: { min?: number; max?: number; note?: string } | null | undefined;
+    if (f.benchmark !== undefined) {
+      if (f.benchmark === null) {
+        benchmark = null;
+      } else if (typeof f.benchmark !== "object") {
+        fail(`formulas[${i}].benchmark`, "Must be an object with min/max/note, or null to clear.");
+        return;
+      } else {
+        const b = f.benchmark as Record<string, unknown>;
+        if (b.min !== undefined && typeof b.min !== "number") {
+          fail(`formulas[${i}].benchmark.min`, "Must be a number.");
+          return;
+        }
+        if (b.max !== undefined && typeof b.max !== "number") {
+          fail(`formulas[${i}].benchmark.max`, "Must be a number.");
+          return;
+        }
+        benchmark = {
+          ...(typeof b.min === "number" ? { min: b.min } : {}),
+          ...(typeof b.max === "number" ? { max: b.max } : {}),
+          ...(typeof b.note === "string" ? { note: b.note } : {}),
+        };
+      }
+    }
+
     validFormulas.push({
       id: f.id,
       expression: f.expression,
       ...(typeof f.label === "string" ? { label: f.label } : {}),
       ...(typeof f.description === "string" ? { description: f.description } : {}),
+      ...(typeof f.unit === "string" ? { unit: f.unit } : {}),
+      ...(typeof f.sortOrder === "number" ? { sortOrder: f.sortOrder } : {}),
+      ...(typeof f.active === "boolean" ? { active: f.active } : {}),
+      ...(benchmark !== undefined ? { benchmark } : {}),
     });
   });
 
@@ -368,32 +467,41 @@ export function validateBlueprint(
     checks of its own, and a model that invents `revenue_chart` gets the whole document
     refused rather than a view with one broken tile in it.
   */
-  let views: CustomView[] | undefined;
-  if (doc.views !== undefined) {
-    if (!Array.isArray(doc.views)) {
-      fail("views", "Not an array.");
-    } else {
-      const valueIds = (id: string) => surface.accountIds.has(id) || surface.formulaIds.has(id);
-      const seen = new Set<string>();
-      const collected: CustomView[] = [];
+  /*
+    One view validator, two entry points.
 
-      doc.views.forEach((raw, i) => {
-        if (typeof raw !== "object" || raw === null) return fail(`views[${i}]`, "Not an object.");
-        const v = raw as Record<string, unknown>;
-        if (typeof v.id !== "string" || v.id === "") return fail(`views[${i}].id`, "Missing id.");
-        if (typeof v.label !== "string" || v.label === "")
-          return fail(`views[${i}].label`, "Missing label.");
-        if (seen.has(v.id)) return fail(`views[${i}].id`, `Duplicate view id "${v.id}".`);
-        seen.add(v.id);
+    `views` replaces the whole set; `viewsPatch.upsert` names individual views. The
+    component checking has to be identical in both — a `metric` that may not carry a figure
+    is the guarantee (ADR-041), and a second copy of that check is how the two eventually
+    disagree about what a component may hold. Extracted rather than duplicated for exactly
+    that reason.
+  */
+  const validateViewList = (raw: unknown, at: string): CustomView[] | null => {
+    if (!Array.isArray(raw)) {
+      fail(at, "Not an array.");
+      return null;
+    }
+    const valueIds = (id: string) => surface.accountIds.has(id) || surface.formulaIds.has(id);
+    const seen = new Set<string>();
+    const collected: CustomView[] = [];
 
-        const layoutKind = v.layout === "stack" ? "stack" : "grid";
-        if (!Array.isArray(v.components))
-          return fail(`views[${i}].components`, "Not an array.");
+    raw.forEach((rawV, i) => {
+      if (typeof rawV !== "object" || rawV === null) return fail(`${at}[${i}]`, "Not an object.");
+      const v = rawV as Record<string, unknown>;
+      if (typeof v.id !== "string" || v.id === "") return fail(`${at}[${i}].id`, "Missing id.");
+      if (typeof v.label !== "string" || v.label === "")
+        return fail(`${at}[${i}].label`, "Missing label.");
+      if (seen.has(v.id)) return fail(`${at}[${i}].id`, `Duplicate view id "${v.id}".`);
+      seen.add(v.id);
 
-        const components: ViewComponent[] = [];
-        v.components.forEach((rawC, j) => {
-          const at = `views[${i}].components[${j}]`;
-          if (typeof rawC !== "object" || rawC === null) return fail(at, "Not an object.");
+      const layoutKind = v.layout === "stack" ? "stack" : "grid";
+      if (!Array.isArray(v.components))
+        return fail(`${at}[${i}].components`, "Not an array.");
+
+      const components: ViewComponent[] = [];
+      v.components.forEach((rawC, j) => {
+          const at2 = `${at}[${i}].components[${j}]`;
+          if (typeof rawC !== "object" || rawC === null) return fail(at2, "Not an object.");
           const c = rawC as Record<string, unknown>;
           const id = typeof c.id === "string" && c.id !== "" ? c.id : `${v.id}-${j}`;
           const label = typeof c.label === "string" ? c.label : "";
@@ -401,18 +509,18 @@ export function validateBlueprint(
           switch (c.type) {
             case "metric": {
               if (typeof c.valueId !== "string" || !valueIds(c.valueId))
-                return fail(`${at}.valueId`, `Unknown account or formula id "${String(c.valueId)}".`);
+                return fail(`${at2}.valueId`, `Unknown account or formula id "${String(c.valueId)}".`);
               components.push({ id, type: "metric", label: label || c.valueId, valueId: c.valueId });
               return;
             }
             case "chart": {
               if (!Array.isArray(c.series) || c.series.length === 0)
-                return fail(`${at}.series`, "A chart needs at least one series.");
+                return fail(`${at2}.series`, "A chart needs at least one series.");
               const series: { id: string; label?: string; kind?: "bar" | "line" }[] = [];
               for (const rawS of c.series) {
                 const s = (typeof rawS === "string" ? { id: rawS } : rawS) as Record<string, unknown>;
                 if (typeof s?.id !== "string" || !valueIds(s.id))
-                  return fail(`${at}.series`, `Unknown account or formula id "${String(s?.id)}".`);
+                  return fail(`${at2}.series`, `Unknown account or formula id "${String(s?.id)}".`);
                 series.push({
                   id: s.id,
                   ...(typeof s.label === "string" ? { label: s.label } : {}),
@@ -424,37 +532,99 @@ export function validateBlueprint(
             }
             case "table": {
               if (typeof c.source !== "string" || !surface.detailKinds.has(c.source))
-                return fail(`${at}.source`, `Unknown table source "${String(c.source)}".`);
+                return fail(`${at2}.source`, `Unknown table source "${String(c.source)}".`);
               components.push({ id, type: "table", label: label || c.source, source: c.source });
               return;
             }
             case "text": {
               if (typeof c.body !== "string" || c.body === "")
-                return fail(`${at}.body`, "A text block needs a body.");
+                return fail(`${at2}.body`, "A text block needs a body.");
               components.push({ id, type: "text", ...(label ? { label } : {}), body: c.body });
               return;
             }
             case "actions": {
               if (!Array.isArray(c.buttons) || c.buttons.length === 0)
-                return fail(`${at}.buttons`, "An actions block needs at least one button.");
+                return fail(`${at2}.buttons`, "An actions block needs at least one button.");
               const buttons: string[] = [];
               for (const b of c.buttons) {
                 if (typeof b !== "string" || !surface.actionIds.has(b))
-                  return fail(`${at}.buttons`, `Unknown action "${String(b)}".`);
+                  return fail(`${at2}.buttons`, `Unknown action "${String(b)}".`);
                 buttons.push(b);
               }
               components.push({ id, type: "actions", ...(label ? { label } : {}), buttons });
               return;
             }
             default:
-              return fail(`${at}.type`, `Unknown component type "${String(c.type)}".`);
+              return fail(`${at2}.type`, `Unknown component type "${String(c.type)}".`);
           }
         });
 
-        collected.push({ id: v.id, label: v.label, layout: layoutKind, components });
-      });
+      collected.push({ id: v.id, label: v.label, layout: layoutKind, components });
+    });
 
-      views = collected;
+    return collected;
+  };
+
+  let views: CustomView[] | undefined;
+  if (doc.views !== undefined) {
+    const collected = validateViewList(doc.views, "views");
+    if (collected) views = collected;
+  }
+
+  /*
+    `views` and `viewsPatch` together are refused rather than merged. They express the same
+    intent two ways, and any merge order is a rule nobody asked for that someone would later
+    have to reverse-engineer from behaviour.
+  */
+  let viewsPatch: { upsert?: CustomView[]; remove?: string[] } | undefined;
+  if (doc.viewsPatch !== undefined) {
+    if (doc.views !== undefined) {
+      fail("viewsPatch", "Send `views` or `viewsPatch`, never both — they express the same intent two ways.");
+    } else if (typeof doc.viewsPatch !== "object" || doc.viewsPatch === null) {
+      fail("viewsPatch", "Not an object.");
+    } else {
+      const patch = doc.viewsPatch as Record<string, unknown>;
+      const upsert = patch.upsert === undefined ? undefined : validateViewList(patch.upsert, "viewsPatch.upsert");
+      let remove: string[] | undefined;
+      if (patch.remove !== undefined) {
+        if (!Array.isArray(patch.remove)) fail("viewsPatch.remove", "Not an array.");
+        else if (patch.remove.some((r) => typeof r !== "string"))
+          fail("viewsPatch.remove", "Every entry must be a view id string.");
+        else remove = patch.remove as string[];
+      }
+      if (upsert === undefined && remove === undefined) {
+        fail("viewsPatch", "Needs `upsert`, `remove`, or both.");
+      } else {
+        viewsPatch = { ...(upsert ? { upsert } : {}), ...(remove ? { remove } : {}) };
+      }
+    }
+  }
+
+  /*
+    Account display labels. The id must already exist — this renames what is on screen, it
+    never brings an account into being, and the figure behind the label is still resolved by
+    that closed id.
+  */
+  let accountLabels: AccountLabelOverride[] | undefined;
+  if (doc.accountLabels !== undefined) {
+    if (!Array.isArray(doc.accountLabels)) {
+      fail("accountLabels", "Not an array.");
+    } else {
+      const collected: AccountLabelOverride[] = [];
+      doc.accountLabels.forEach((raw, i) => {
+        if (typeof raw !== "object" || raw === null) return fail(`accountLabels[${i}]`, "Not an object.");
+        const a = raw as Record<string, unknown>;
+        if (typeof a.id !== "string" || !surface.accountIds.has(a.id))
+          return fail(`accountLabels[${i}].id`, `Unknown account id "${String(a.id)}".`);
+        if (typeof a.label !== "string" && typeof a.description !== "string")
+          return fail(`accountLabels[${i}]`, "Needs a `label` or a `description` to change.");
+        collected.push({
+          id: a.id,
+          ...(typeof a.label === "string" ? { label: a.label } : {}),
+          ...(typeof a.description === "string" ? { description: a.description } : {}),
+        });
+      });
+      accountLabels = collected;
     }
   }
 
@@ -471,6 +641,8 @@ export function validateBlueprint(
       prompts: validPrompts,
       ...(layout ? { layout } : {}),
       ...(views ? { views } : {}),
+      ...(viewsPatch ? { viewsPatch } : {}),
+      ...(accountLabels ? { accountLabels } : {}),
       ...arrangements,
     },
     errors: [],
@@ -484,7 +656,7 @@ export type ChangeKind = "add" | "modify" | "remove" | "unchanged";
 export interface BlueprintChange {
   section:
     | "formulas" | "mappings" | "prompts" | "layout" | "views"
-    | "dashboard" | "clientsTable" | "landingTiles";
+    | "dashboard" | "clientsTable" | "landingTiles" | "accountLabels";
   key: string;
   kind: ChangeKind;
   before?: unknown;
@@ -510,6 +682,7 @@ export function diffBlueprint(
     dashboard?: ArrangementOverride;
     clientsTable?: ArrangementOverride;
     landingTiles?: ArrangementOverride;
+    accountLabels?: AccountLabelOverride[];
   },
 ): BlueprintChange[] {
   const changes: BlueprintChange[] = [];
@@ -519,13 +692,53 @@ export function diffBlueprint(
     keyOf: (item: T) => string,
   ) => new Map(list.map((item) => [keyOf(item), item]));
 
+  /*
+    Compare every field the author can set, not just the expression.
+
+    Until the presentation fields existed this only ever compared `expression`, and once
+    they did that omission became a silent no-op: "rename this metric" produced an empty
+    diff, which `applyBlueprintDirectly` reports as `noChange` — the assistant correctly
+    saying it changed nothing, about a change it was never given the chance to make. A
+    field the grammar accepts and the diff ignores is worse than a field that does not
+    exist. An omitted field means "leave alone", so only fields actually present count.
+  */
   const formulaKey = (f: FormulaOverride) => f.id;
   const currentFormulas = byId(current.formulas, formulaKey);
+  const formulaDiffers = (existing: FormulaOverride, f: FormulaOverride) => {
+    if (existing.expression !== f.expression) return true;
+    if (f.label !== undefined && existing.label !== f.label) return true;
+    if (f.description !== undefined && existing.description !== f.description) return true;
+    if (f.unit !== undefined && existing.unit !== f.unit) return true;
+    if (f.sortOrder !== undefined && existing.sortOrder !== f.sortOrder) return true;
+    if (f.active !== undefined && (existing.active ?? true) !== f.active) return true;
+    if (f.benchmark !== undefined) {
+      const a = f.benchmark === null ? null : f.benchmark;
+      const b = existing.benchmark ?? null;
+      if (JSON.stringify(a) !== JSON.stringify(b)) return true;
+    }
+    return false;
+  };
   for (const f of proposed.formulas) {
     const existing = currentFormulas.get(f.id);
     if (!existing) changes.push({ section: "formulas", key: f.id, kind: "add", after: f });
-    else if (existing.expression !== f.expression)
+    else if (formulaDiffers(existing, f))
       changes.push({ section: "formulas", key: f.id, kind: "modify", before: existing, after: f });
+  }
+
+  /*
+    Account labels diff per account, for the same reason views do: "Renamed Total Income to
+    Revenue" is checkable against what the user asked for, and "accountLabels changed" is not.
+  */
+  if (proposed.accountLabels) {
+    const currentLabels = byId(current.accountLabels ?? [], (a) => a.id);
+    for (const a of proposed.accountLabels) {
+      const existing = currentLabels.get(a.id);
+      const changedLabel = a.label !== undefined && existing?.label !== a.label;
+      const changedDesc = a.description !== undefined && existing?.description !== a.description;
+      if (!existing) changes.push({ section: "accountLabels", key: a.id, kind: "add", after: a });
+      else if (changedLabel || changedDesc)
+        changes.push({ section: "accountLabels", key: a.id, kind: "modify", before: existing, after: a });
+    }
   }
 
   const mappingKey = (m: LabelMappingEntry) => `${m.reportType}|${m.rawLabel}`;

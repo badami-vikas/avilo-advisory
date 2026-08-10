@@ -137,10 +137,52 @@ export function describeBlueprintChange(change: BlueprintChange): string {
   }
 
   if (change.section === "formulas") {
-    const after = change.after as { expression?: string } | undefined;
-    const before = change.before as { expression?: string } | undefined;
+    type F = {
+      expression?: string; label?: string; unit?: string; active?: boolean;
+      sortOrder?: number; benchmark?: { min?: number; max?: number } | null;
+    };
+    const after = change.after as F | undefined;
+    const before = change.before as F | undefined;
     if (change.kind === "add") return `Formula ${change.key} added: ${after?.expression ?? ""}`;
-    return `Formula ${change.key}: ${before?.expression ?? "?"} → ${after?.expression ?? "?"}`;
+
+    /*
+      Say which of the metric's properties moved, not just that it changed.
+
+      A presentation-only edit used to render as "Formula dso: <expr> → <expr>" — the same
+      expression on both sides of an arrow, describing a change to something the sentence
+      never mentions. A change the user cannot read is a change the user cannot catch
+      (BUG-031), and that applies to the new fields exactly as it did to the layout.
+    */
+    if (before?.expression !== after?.expression) {
+      return `Formula ${change.key}: ${before?.expression ?? "?"} → ${after?.expression ?? "?"}`;
+    }
+    const parts: string[] = [];
+    if (after?.label !== undefined && after.label !== before?.label)
+      parts.push(`renamed to "${after.label}"`);
+    if (after?.active !== undefined && after.active !== (before?.active ?? true))
+      parts.push(after.active ? "shown again" : "hidden");
+    if (after?.unit !== undefined && after.unit !== before?.unit)
+      parts.push(`shown as ${after.unit}`);
+    if (after?.sortOrder !== undefined && after.sortOrder !== before?.sortOrder)
+      parts.push("moved in the list");
+    if (after?.benchmark !== undefined) {
+      const b = after.benchmark;
+      parts.push(
+        b === null
+          ? "benchmark cleared"
+          : `benchmark set to ${[b.min !== undefined ? `min ${b.min}` : null, b.max !== undefined ? `max ${b.max}` : null].filter(Boolean).join(", ")}`,
+      );
+    }
+    return `Formula ${change.key} — ${parts.length > 0 ? parts.join("; ") : "changed"}`;
+  }
+
+  if (change.section === "accountLabels") {
+    const after = change.after as { label?: string; description?: string } | undefined;
+    const before = change.before as { label?: string } | undefined;
+    if (after?.label !== undefined) {
+      return `Account ${change.key} renamed${before?.label ? ` from "${before.label}"` : ""} to "${after.label}"`;
+    }
+    return `Account ${change.key} — description updated`;
   }
 
   if (change.section === "views") {
@@ -190,13 +232,48 @@ function rowToRecord(row: typeof schema.blueprintProposals.$inferSelect): Propos
  * Validate a candidate document, diff it against the live configuration, and record it as
  * a proposal. Nothing is applied here — this is the "propose" half of propose/activate.
  */
+/**
+ * Turn `viewsPatch` into the full `views` set it means, against what is live right now.
+ *
+ * Everything downstream — the diff, the apply, the snapshot Undo activates — already
+ * understands `views`, and nothing understands a patch. Resolving at the boundary costs a
+ * dozen lines here instead of a parallel code path in three places, and it cannot drift
+ * from the full-replace semantics because by the time anyone else sees the document it IS
+ * a full replacement.
+ *
+ * Called by both entry points. `proposeBlueprint` covers the MCP and import paths;
+ * `applyBlueprintDirectly` needs it too because it diffs before it proposes.
+ */
+function resolveViewsPatch(blueprint: AviloBlueprint): AviloBlueprint {
+  if (!blueprint.viewsPatch) return blueprint;
+
+  const live = currentConfiguration().views ?? [];
+  const removed = new Set(blueprint.viewsPatch.remove ?? []);
+  const upserts = blueprint.viewsPatch.upsert ?? [];
+  const upsertById = new Map(upserts.map((v) => [v.id, v]));
+
+  const resolved = [
+    /*
+      An upsert replaces a view IN PLACE rather than moving it to the end, so "change this
+      view's label" does not silently reorder the view picker. A view the user has learned
+      the position of is a view whose position is part of what they built.
+    */
+    ...live.filter((v) => !removed.has(v.id)).map((v) => upsertById.get(v.id) ?? v),
+    ...upserts.filter((v) => !live.some((e) => e.id === v.id)),
+  ];
+
+  const { viewsPatch: _resolved, ...rest } = blueprint;
+  return { ...rest, views: resolved };
+}
+
 export function proposeBlueprint(
   author: string,
   summary: string,
   candidate: unknown,
 ): { proposal: ProposalRecord } | { errors: { path: string; message: string }[] } {
-  const { blueprint, errors } = validateBlueprint(candidate, registeredSurface());
-  if (!blueprint) return { errors };
+  const { blueprint: validated, errors } = validateBlueprint(candidate, registeredSurface());
+  if (!validated) return { errors };
+  const blueprint = resolveViewsPatch(validated);
 
   const diff = diffBlueprint(blueprint, currentConfiguration());
   const db = getDb();
@@ -273,11 +350,12 @@ export function activateProposal(
           id: formula.id,
           label: formula.label ?? formula.id,
           expression: formula.expression,
-          unit: "currency",
+          unit: formula.unit ?? "currency",
           ...(formula.description ? { description: formula.description } : {}),
-          sortOrder: maxOrder + 10,
+          ...(formula.benchmark ? { benchmark: JSON.stringify(formula.benchmark) } : {}),
+          sortOrder: formula.sortOrder ?? maxOrder + 10,
           version: 1,
-          active: true,
+          active: formula.active ?? true,
         })
         .run();
       db.insert(schema.formulaVersions)
@@ -293,15 +371,37 @@ export function activateProposal(
       continue;
     }
 
-    if (existing.expression === formula.expression) continue;
+    /*
+      A presentation-only edit is still an edit.
+
+      This used to `continue` whenever the expression matched, which silently dropped every
+      change to a label, unit, order, benchmark or the active flag — the diff reported the
+      change, the panel announced it, and nothing was written. An expression change opens a
+      new version row because the definition of the figure moved; renaming the metric does
+      not, because the figure is the same figure. So the two are separated rather than
+      sharing one early exit.
+    */
+    const presentation = {
+      ...(formula.label !== undefined ? { label: formula.label } : {}),
+      ...(formula.description !== undefined ? { description: formula.description } : {}),
+      ...(formula.unit !== undefined ? { unit: formula.unit } : {}),
+      ...(formula.sortOrder !== undefined ? { sortOrder: formula.sortOrder } : {}),
+      ...(formula.active !== undefined ? { active: formula.active } : {}),
+      ...(formula.benchmark !== undefined
+        ? { benchmark: formula.benchmark === null ? null : JSON.stringify(formula.benchmark) }
+        : {}),
+    };
+
+    if (existing.expression === formula.expression) {
+      if (Object.keys(presentation).length > 0) {
+        db.update(schema.formulas).set(presentation).where(eq(schema.formulas.id, formula.id)).run();
+      }
+      continue;
+    }
+
     const nextVersion = existing.version + 1;
     db.update(schema.formulas)
-      .set({
-        expression: formula.expression,
-        version: nextVersion,
-        ...(formula.label ? { label: formula.label } : {}),
-        ...(formula.description ? { description: formula.description } : {}),
-      })
+      .set({ expression: formula.expression, version: nextVersion, ...presentation })
       .where(eq(schema.formulas.id, formula.id))
       .run();
     db.insert(schema.formulaVersions)
@@ -313,6 +413,20 @@ export function activateProposal(
         author: `blueprint:${row.author}`,
         note: `From proposal ${id}: ${row.summary}`,
       })
+      .run();
+  }
+
+  /*
+    Account display labels. Renames what is on screen; the id every figure is resolved by is
+    untouched, which is what keeps this inside "never fabricate a figure".
+  */
+  for (const account of blueprint.accountLabels ?? []) {
+    db.update(schema.accounts)
+      .set({
+        ...(account.label !== undefined ? { label: account.label } : {}),
+        ...(account.description !== undefined ? { description: account.description } : {}),
+      })
+      .where(eq(schema.accounts.id, account.id))
       .run();
   }
 
@@ -507,8 +621,9 @@ export function applyBlueprintDirectly(
     candidate = rest;
   }
 
-  const { blueprint, errors } = validateBlueprint(candidate, registeredSurface());
-  if (!blueprint) return { errors };
+  const { blueprint: validated, errors } = validateBlueprint(candidate, registeredSurface());
+  if (!validated) return { errors };
+  const blueprint = resolveViewsPatch(validated);
 
   /*
     Compile every NEWLY CREATED formula before anything is written.
