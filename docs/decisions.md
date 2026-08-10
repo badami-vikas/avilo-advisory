@@ -949,3 +949,26 @@ button is the difference between an answer and a dead end.
 The general rule: **the panel's failure copy must distinguish "I cannot" from "I already
 did".** They are opposite facts about the assistant's power, and one message cannot carry
 both.
+
+### ADR-053 · Key Insights gets `generateSummary`'s exact contract, not a chat lever
+
+A user asked the chat assistant to "generate key insights in standard view" and it correctly
+refused — `periodNotes` was deliberately kept off the assistant's levers (ADR-049) because it
+prints straight to a client PDF with no computed findings to check an assistant's free-form
+reply against. That reasoning still holds; nothing here reopens it. What was missing was not
+assistant reach, it was a generation path at all — the executive summary had a Generate
+button and Key Insights did not.
+
+`generateKeyInsights` is a new tRPC mutation, not a fifteenth declarable lever. It reuses
+`generateSummary`'s whole safety contract: findings computed server-side before the model is
+involved, the model rewrites rather than analyses, and the reply is checked with
+`fabricatedFigures` before it is returned at all. It differs only in destination — the draft
+lands in `KeyInsightsBlock`'s local textarea state, exactly where a hand-typed note would,
+and nothing reaches `period_notes` until the advisor's existing blur-or-Cmd-Enter save fires.
+An unread draft cannot reach a client PDF, same as the executive summary's draft.
+
+The chat assistant still cannot do this by typing a request, and that stays correct: the
+guard here is a dedicated, checked code path with its own house style
+(`KEY_INSIGHTS_GUIDANCE`, terser than `NARRATIVE_GUIDANCE`), not a free-form chat reply. A
+button the advisor presses is a narrower, more checkable surface than a lever an external
+agent or a mis-parsed chat turn could also reach.

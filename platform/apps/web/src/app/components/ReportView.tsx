@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
-import { AlertTriangle, EyeOff, GripVertical, Plus } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { AlertTriangle, EyeOff, GripVertical, Plus, Sparkles } from "lucide-react";
 
-import { Block } from "./ui.js";
+import { Block, Button } from "./ui.js";
 import { Tip } from "./Tooltip.js";
 import { InlineEditor } from "./DataTable.js";
 import { ChartBlock, type ChartPoint } from "./ChartBlock.js";
@@ -14,6 +14,14 @@ import {
 } from "./DetailSections.js";
 import { formatPeriodLong } from "@avilo/module";
 import { byUnit, money } from "../../lib/format.js";
+import { api } from "../../lib/trpc.js";
+import {
+  actions as buildActions,
+  forecast,
+  healthScore,
+  narrative,
+  warnings as buildWarnings,
+} from "../dashboard/insights.js";
 import {
   isHidden,
   reorderSection,
@@ -33,32 +41,62 @@ import type {
  * Key Insights — the advisor's own commentary.
  *
  * In the v9 prototype this was `d.note || 'Add your key insights here.'`: a plain text
- * field a person typed. It is kept that way deliberately. The numbers are already on the
- * page; what a client is paying for is someone's reading of them, and a generated
- * paragraph would be confident prose with nothing behind it.
+ * field a person typed. The advisor's reading of the numbers is still the whole point of
+ * the panel — a Generate button does not change what gets SAVED here, only what the
+ * textarea starts with. A drafted note lands exactly where a hand-typed one would: in the
+ * same editable field, requiring the same blur-or-Cmd-Enter save the advisor already uses.
+ * Nothing is written to `period_notes` until that save fires, so an unread draft cannot
+ * reach a client PDF — same guarantee `generateSummary`'s draft has, applied here.
  *
  * Click to edit, blur or Cmd-Enter to save, Escape to abandon.
  */
 function KeyInsightsBlock({
   note,
   onSave,
+  onGenerate,
 }: {
   note: string;
   onSave: (body: string) => Promise<void>;
+  /** Absent when there is nothing to generate FROM yet, or no model is configured. */
+  onGenerate?: () => Promise<{ ok: boolean; text: string; message: string }>;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(note);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   // The note belongs to the selected period, so changing period must replace the draft
   // rather than carry last month's commentary into this month's field.
   useEffect(() => {
     setDraft(note);
     setEditing(false);
+    setError(null);
   }, [note]);
 
   const commit = async () => {
     setEditing(false);
     if (draft !== note) await onSave(draft);
+  };
+
+  const generate = async () => {
+    if (!onGenerate) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await onGenerate();
+      if (result.ok) {
+        // Opens straight into edit mode with the draft loaded — the SAME textarea and the
+        // SAME save gesture a hand-typed note takes. Nothing is saved by generating it.
+        setDraft(result.text);
+        setEditing(true);
+      } else {
+        setError(result.message);
+      }
+    } catch (cause) {
+      setError((cause as Error).message);
+    } finally {
+      setBusy(false);
+    }
   };
 
   const isEmpty = note.trim() === "";
@@ -68,9 +106,24 @@ function KeyInsightsBlock({
       data-print-empty={isEmpty ? "true" : undefined}
       className="rounded-xl border border-line bg-accent-soft/40 px-5 py-4"
     >
-      <p className="text-[11px] font-semibold uppercase tracking-[0.06em] text-ink-faint">
-        Key Insights
-      </p>
+      <div className="flex items-center justify-between">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.06em] text-ink-faint">
+          Key Insights
+        </p>
+        {onGenerate ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => void generate()}
+            disabled={busy}
+            className="no-print"
+          >
+            <Sparkles size={12} className="mr-1" />
+            {busy ? "Generating…" : "Generate"}
+          </Button>
+        ) : null}
+      </div>
+      {error ? <p className="mt-1 text-[11px] text-flag">{error}</p> : null}
       {editing ? (
         <textarea
           autoFocus
@@ -215,6 +268,38 @@ export function ReportView({
 
   const commit = (next: ReportLayout) => onLayoutChange?.(next);
   const visible = layout.order.filter((id) => !isHidden(layout, id));
+
+  /*
+    The same findings the executive summary is generated from, computed here from the same
+    props (`report`, `series`, `detail`, `formulas`) rather than passed down — Dashboard.tsx
+    derives them identically from identical inputs, so recomputing is a duplicate of a pure
+    function, not a second source of truth. Key Insights' Generate button reuses these
+    findings so its draft is grounded in exactly what the rest of the client's report says.
+  */
+  const keyInsightsBeats = useMemo(() => {
+    const health = healthScore(report, series, detail);
+    const baseForecast = forecast(report, series, {
+      revenueChangePct: 0,
+      costChangePct: 0,
+      collectionDays: Math.round(
+        report.metrics.find((m) => m.id === "dso" && m.status === "ok")?.value ?? 30,
+      ),
+    });
+    const warningList = buildWarnings(report, series, detail, formulas, baseForecast);
+    const actionList = buildActions(report, series, detail, warningList);
+    return narrative(report, series, detail, health, baseForecast, warningList, actionList);
+  }, [report, series, detail, formulas]);
+
+  const generateKeyInsights = () =>
+    api.report.generateKeyInsights.mutate({
+      clientName,
+      periodLabel: report.periodLabel,
+      beats: keyInsightsBeats.map((beat) => ({
+        kicker: beat.kicker,
+        headline: beat.headline,
+        body: beat.body,
+      })),
+    });
 
   /**
    * Printing always produces the document, from whichever view is on screen.
@@ -501,7 +586,9 @@ export function ReportView({
    * a section can be moved or dropped from the PDF without touching this file.
    */
   const sections: Record<ReportSectionId, ReactNode> = {
-    "key-insights": <KeyInsightsBlock note={note} onSave={onSetNote} />,
+    "key-insights": (
+      <KeyInsightsBlock note={note} onSave={onSetNote} onGenerate={generateKeyInsights} />
+    ),
 
     "revenue-trend": (
       <ChartBlock

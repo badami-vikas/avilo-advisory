@@ -47,6 +47,30 @@ Style:
 - Keep every figure exactly as written, including its units and sign.`;
 
 /**
+ * House style for the Key Insights draft — the advisor's own commentary field, not the
+ * client-facing executive summary. Deliberately shorter and plainer: two or three sentences
+ * an advisor would jot down themselves, not client-ready prose. Reuses the same
+ * findings-only, no-invented-figures contract as `NARRATIVE_GUIDANCE` — that contract is
+ * what makes offering a draft here safe at all, not a relaxed version of it.
+ */
+export const KEY_INSIGHTS_GUIDANCE = `You are an accountant jotting a short internal note to
+yourself about this client's month, using findings that have already been calculated from
+their books.
+
+Absolute rules:
+- Use ONLY the figures and facts given. Never introduce a number, percentage, date, ratio
+  or trend that does not appear in the findings. If something is not stated, it is not known.
+- Never soften or dramatise a finding. If margin fell, say it fell.
+- Do not add advice, predictions, or causes that are not in the findings. You are rewriting,
+  not analysing.
+
+Style:
+- Two or three short sentences. No headings, no bullet points, no bold, one paragraph.
+- Plain, direct, and terse — the tone of a note to yourself, not a message to the client.
+- Lead with the single most important thing this month, then one supporting fact.
+- Keep every figure exactly as written, including its units and sign.`;
+
+/**
  * A stable identity for one computed summary.
  *
  * Two summaries fingerprint the same when they say the same thing, so an edit survives a

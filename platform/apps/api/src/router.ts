@@ -9,6 +9,7 @@ import {
   buildNarrativePrompt,
   buildRichNarrativePrompt,
   fabricatedFigures,
+  KEY_INSIGHTS_GUIDANCE,
   normalizeLabel,
   suggestMappings,
   validateExpression,
@@ -381,6 +382,62 @@ const reportRouter = router({
           };
         }
         return { ok: true as const, text, doc, message: "" };
+      } catch (cause) {
+        throw new TRPCError({ code: "BAD_GATEWAY", message: (cause as Error).message });
+      }
+    }),
+
+  /**
+   * Draft a starting point for Key Insights — the advisor's own commentary field.
+   *
+   * Same shape and same guarantee as `generateSummary`: findings computed before the model
+   * is involved are its only source, and the reply is checked back against them, so it
+   * cannot introduce a figure the books do not have. The difference is what happens to the
+   * result. `generateSummary`'s draft is shown ALONGSIDE the deterministic summary and never
+   * persisted on its own. This one is returned as plain text for the caller to drop into the
+   * Key Insights textarea AS A DRAFT — the advisor still has to blur or press Cmd-Enter to
+   * save it, the same action saving a hand-typed note takes. Nothing here writes to
+   * `period_notes` directly; this procedure only drafts text; the existing `report.setNote`
+   * mutation is still the only way anything is stored.
+   */
+  generateKeyInsights: procedure
+    .input(
+      z.object({
+        clientName: z.string(),
+        periodLabel: z.string(),
+        beats: z.array(
+          z.object({
+            kicker: z.string(),
+            headline: z.string(),
+            body: z.array(z.string()),
+          }),
+        ),
+      }),
+    )
+    .mutation(async ({ input }) => {
+      const config = groqConfig();
+      if (!config) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "No model configured. Add a Groq API key under Clients → ⋯ → Model settings. One key serves every AI feature.",
+        });
+      }
+
+      const prompt = buildNarrativePrompt({ ...input, guidance: KEY_INSIGHTS_GUIDANCE });
+
+      try {
+        const text = (await callGroq(config, prompt, 400)).trim();
+        const source = input.beats.map((b) => `${b.headline} ${b.body.join(" ")}`).join(" ");
+
+        const fabricated = fabricatedFigures(source, text);
+        if (fabricated.length > 0) {
+          return {
+            ok: false as const,
+            text: "",
+            message: `Discarded — the draft contained figures not in your books (${fabricated.slice(0, 3).join(", ")}).`,
+          };
+        }
+        return { ok: true as const, text, message: "" };
       } catch (cause) {
         throw new TRPCError({ code: "BAD_GATEWAY", message: (cause as Error).message });
       }
