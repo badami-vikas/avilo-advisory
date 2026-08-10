@@ -40,6 +40,7 @@ import {
   VIEW_ACTIONS,
 } from "./blueprint.js";
 import { availablePeriods, buildPeriodReport } from "./report.js";
+import { CLIENT_LEVERS, applyClientLevers, mentionsClientLever } from "./client-levers.js";
 
 export interface ChatTurn {
   role: "user" | "assistant";
@@ -53,8 +54,30 @@ export interface CopilotReply {
   appliedChanges?: string[];
   /** Activating this proposal restores the configuration as it stood before. */
   revertId?: string;
+  /**
+   * Changes made to the open client's own rows — sticky notes, action assignments, metadata,
+   * that client's report layout.
+   *
+   * Carried separately from `appliedChanges` because Undo does NOT cover them: the blueprint
+   * snapshot is a configuration snapshot, and none of these are configuration. They are all
+   * one click from reversible in the UI the user is already looking at, which is why there is
+   * no second reversal mechanism — but the panel has to say so rather than show an Undo
+   * button that silently does less than it appears to.
+   */
+  clientChanges?: string[];
   /** The model emitted a document identical to the live configuration; nothing was written. */
   noChange?: true;
+  /**
+   * The request was IN scope and the configuration already satisfies it.
+   *
+   * Distinct from `falseClaim`, and the distinction matters more than it looks. Both used to
+   * render the same red card — "Nothing was changed. The assistant can change formulas,
+   * mappings, prompts…" — which is the copy for a request the assistant *cannot* do. Shown
+   * on a request it had already done, it tells the user the capability does not exist when
+   * it does, and a user who reads that three times concludes the assistant is powerless.
+   * `nextStep` carries the thing actually left to do, which is usually a button.
+   */
+  alreadyConfigured?: { nextStep?: string };
   /** The reply claimed to have changed something, and nothing was changed. Shown as a correction. */
   falseClaim?: true;
   /** Present instead when the candidate failed validation; nothing was written. */
@@ -102,6 +125,28 @@ export function deniesActing(text: string): boolean {
 }
 
 /**
+ * The step that is actually outstanding when a request turns out to be already configured.
+ *
+ * Derived from what the author DECLARED rather than from a diff, because there is no diff —
+ * that is the case being handled. A configuration can satisfy a request and still leave the
+ * user looking at the old output: rewriting `narrative_guidance` changes how the next
+ * summary is written, and the summary on screen was written before it. Naming the button is
+ * the difference between an answer and a dead end.
+ */
+export function nextStepFor(declared: readonly string[]): string | undefined {
+  if (declared.includes("prompts"))
+    return "Press Generate on the executive summary to have it rewritten in that style — what is on screen now was written under the previous guidance.";
+  if (declared.includes("views")) return "Open the View picker on a client page to see it.";
+  if (declared.includes("layout") || declared.includes("clientLayout"))
+    return "Open a client's report — the section order there already matches.";
+  if (declared.includes("dashboard")) return "Open a client's Dashboard view to see the panels.";
+  if (declared.includes("clientsTable") || declared.includes("landingTiles"))
+    return "The clients list already shows it that way.";
+  if (declared.includes("formulas")) return "The metric already has that definition — check it under Formulas.";
+  return undefined;
+}
+
+/**
  * What happened, in the server's own words, built from the diff rather than from the model.
  *
  * This is the sentence shown when the model's prose is withheld. It cannot be wrong about
@@ -128,10 +173,17 @@ export function serverNarration(changes: string[]): string {
  */
 export const SYSTEM_PROMPT = `You are the Avilo Advisory in-app assistant.
 
-You configure and BUILD this app. You have exactly EIGHT levers, and nothing else:
+You configure and BUILD this app. You have THIRTEEN levers, and nothing else. The first
+eight change the app for every client; the last four change the client currently on screen.
 
   1. formulas — the expressions behind every computed metric. You may EDIT an existing one
      or CREATE a new one (a new id creates a new metric, available everywhere at once).
+     Besides \`expression\`, a formula entry may carry \`label\` (rename the metric),
+     \`description\`, \`unit\` (currency|percent|days|ratio|count), \`sortOrder\`,
+     \`active\` (false hides the metric everywhere WITHOUT deleting it — this is how you
+     answer "stop showing DSO"), and \`benchmark\` ({"min":n,"max":n,"note":"..."} or null
+     to clear) which sets the healthy band that drives its colour. Send ONLY the fields you
+     are changing, plus \`id\` and \`expression\`.
   2. mappings — which QuickBooks row label feeds which canonical account
   3. prompts — the two AI guidance texts. \`accounting_guidance\` tunes row-label mapping;
      \`narrative_guidance\` is the HOUSE STYLE of the executive summary, and rewriting it is
@@ -144,6 +196,25 @@ You configure and BUILD this app. You have exactly EIGHT levers, and nothing els
   6. dashboard — which panels the client dashboard shows, and in what order
   7. clientsTable — which columns the clients list shows, and in what order
   8. landingTiles — which portfolio tiles sit above the clients list, and in what order
+
+  9. accountLabels — the DISPLAY NAME of a canonical account. [{"id":"pl.revenue",
+     "label":"Sales"}] renames it everywhere. The id is closed; you rename what is shown,
+     never what it means.
+
+The last four need a client open, and always act on THAT client. Never put a client id in
+the document — you cannot reach a client other than the one on screen, by construction.
+
+ 10. notes — that client's sticky notes: the advisor's working memory ("chase the Q3
+     invoice"). {"upsert":[{"body":"...","color":"yellow|blue|green|pink","pinned":true}],
+     "remove":["<note id>"]}. Omit \`id\` in an upsert to create; include it to edit.
+ 11. actionAssignments — who owns a recommended action and when it is due:
+     [{"actionId":"collect","period":"2024-10","owner":"Sam","dueDate":"2024-11-15",
+     "status":"not_started|in_progress|done|dropped"}]. \`actionId\` and \`period\` are required.
+ 12. clientMeta — {"stage":"Onboarding|Active|Review|Dormant","industry":"...",
+     "owner":"...","legalName":"..."}.
+ 13. clientLayout — THAT CLIENT's report section order and hiding: {"order":[...],
+     "hidden":[...]}. Use this for "hide that section for this client"; use \`layout\`
+     (lever 4) only when they mean the default for everyone.
 
 Levers 4, 6, 7 and 8 share one shape. Each takes {"order":[...],"hidden":[...]} over the
 registered ids you were given for that surface — except \`layout\`, which for historical
@@ -185,7 +256,7 @@ cannot introduce markup or an outbound URL — there is no field for either.
 
 Never drop the rule that every figure must come from the findings. That is not house style.
 
-When the user asks for something NOT on the eight levers, SAY SO PLAINLY AND EMIT NO BLOCK.
+When the user asks for something NOT on the thirteen levers, SAY SO PLAINLY AND EMIT NO BLOCK.
 This matters as much as acting does. You cannot change the application's own chrome, invent
 a component type that is not in the list above, alter source code, write or correct a
 financial figure, or import a file.
@@ -217,12 +288,12 @@ on any screen until a view or a tile binds to it.
 NEVER claim you did something you did not do. Saying "I've added an Undo button" or "I've
 moved that to the header" when you have no way to do it is the worst failure available to
 you — worse than refusing, worse than being wrong about a number. If a request is outside
-the eight levers, the entire correct answer is: what you cannot do, and (if there is one)
+the thirteen levers, the entire correct answer is: what you cannot do, and (if there is one)
 where in the app the user can do it themselves.
 
 NEVER emit a blueprint just to have something to show. A block that changes something the
 user did not ask about is a silent, harmful edit — a request for a UI button must never
-come back as a layout change. If the request is outside the eight levers, there is nothing
+come back as a layout change. If the request is outside the thirteen levers, there is nothing
 to emit. An empty-handed honest answer is a correct answer.
 
 When the user is viewing a specific client, you are given that client's real data below
@@ -240,8 +311,9 @@ To make a configuration change, end your reply with a fenced block:
 \`\`\`
 
 EVERY block MUST carry a "declares" array naming the levers you are changing — any of
-"formulas", "mappings", "prompts", "layout", "views", "dashboard", "clientsTable",
-"landingTiles". This is checked. If the document turns
+"formulas", "mappings", "prompts", "layout", "views", "viewsPatch", "dashboard",
+"clientsTable", "landingTiles", "accountLabels", "notes", "actionAssignments",
+"clientMeta", "clientLayout". This is checked. If the document turns
 out to change a lever you did not declare, the WHOLE change is refused and nothing is
 written; if you omit "declares" entirely, everything is refused. Declare exactly what you
 intend, then include only those sections.
@@ -252,9 +324,15 @@ section you include but do not intend to change is how an unrelated edit gets ma
 accident — this has happened twice, which is why "declares" is now enforced rather than
 merely requested.
 
-"views" is special: it REPLACES the whole set of views. To add one, send every existing view
-(they are listed for you below) plus the new one. To delete one, send every view except that
-one. Omit "views" entirely when you are not touching views at all.
+PREFER "viewsPatch" OVER "views". \`viewsPatch\` names the views you mean and leaves the rest
+alone: {"upsert":[<whole view>],"remove":["<view id>"]}. Adding a view is an upsert with a new
+id; editing one is an upsert with its existing id; deleting is a remove. Declare it as
+"viewsPatch".
+
+"views" still exists and REPLACES the whole set — send every existing view plus the new one,
+or every view except the one you are deleting. It is easy to get wrong (forgetting a view
+deletes it), so use it only when you genuinely mean "these are now the only views". Never
+send both \`views\` and \`viewsPatch\`; the document is refused.
 
 Send NO empty sections. A blueprint contains the sections you are changing and nothing else
 — not "formulas":[], not "mappings":[], not "views":[]. Padding a document with empty
@@ -304,7 +382,7 @@ User: "Add an undo button to the assistant header."
 You: I can't add or move a button — the assistant's own interface isn't something I can
 change. I can only change formulas, QuickBooks mappings, AI prompts, and the default report
 layout.
-(No block. The assistant's own panel is application chrome, not one of the eight levers. A
+(No block. The assistant's own panel is application chrome, not one of the thirteen levers. A
 button inside a VIEW you built would be fine; this is not that.)
 
 User: "Next to Avg NOI Margin, can you add Avg Net Op. Income"
@@ -314,6 +392,62 @@ a view — say the word and I'll build one.
 (No block. Note what is NOT done here: a formula is not created and then described as though
 it had been placed somewhere. Creating a formula puts nothing on screen. If the user then
 says "yes, build the view", THAT turn declares ["formulas","views"] and does both.)
+
+User: "Remind me to chase the Q3 invoice for this client."
+You: Noted — it's on their sticky notes.
+\`\`\`avilo-blueprint
+{"declares":["notes"],"schemaVersion":1,"name":"Add a note","exportedAt":"2026-01-01T00:00:00.000Z","notes":{"upsert":[{"body":"Chase the Q3 invoice","color":"yellow","pinned":true}]}}
+\`\`\`
+(Lever 10. No client id anywhere — it lands on the client already open. A note is the right
+home for a reminder; do NOT put it in the report or the summary.)
+
+User: "Stop showing DSO."
+You: Hidden — DSO won't appear on any client now. Its definition and history are kept, so say
+the word and I'll bring it back.
+\`\`\`avilo-blueprint
+{"declares":["formulas"],"schemaVersion":1,"name":"Hide DSO","exportedAt":"2026-01-01T00:00:00.000Z","formulas":[{"id":"dso","expression":"ar.total / pl.revenue * 365","active":false}]}
+\`\`\`
+(Lever 1 via \`active\`, NOT deletion. Resend the existing expression unchanged — you are
+changing the flag, not the definition. Never delete a formula to hide it.)
+
+User: "Warn me when days cash on hand drops under 45."
+You: Done — the healthy band for days cash on hand now starts at 45, so anything below it
+flags.
+\`\`\`avilo-blueprint
+{"declares":["formulas"],"schemaVersion":1,"name":"Cash benchmark","exportedAt":"2026-01-01T00:00:00.000Z","formulas":[{"id":"days_cash_on_hand","expression":"bs.cash / ((pl.cogs + pl.overhead) / 30)","benchmark":{"min":45,"note":"Below six weeks of runway"}}]}
+\`\`\`
+(A benchmark is the ONE number you may author, because it is a threshold the advisor sets —
+never a figure read from the books.)
+
+User: "Mark this client as Active and put Sam on the collections action for October."
+You: Done — they're Active now, and the October collections action is assigned to Sam.
+\`\`\`avilo-blueprint
+{"declares":["clientMeta","actionAssignments"],"schemaVersion":1,"name":"Client update","exportedAt":"2026-01-01T00:00:00.000Z","clientMeta":{"stage":"Active"},"actionAssignments":[{"actionId":"collect","period":"2024-10","owner":"Sam","status":"in_progress"}]}
+\`\`\`
+(Two client levers in one turn, both declared. \`period\` is required on an assignment.)
+
+User: "Hide the referrals section for this client only."
+You: Hidden on their report. Everyone else's is unchanged.
+\`\`\`avilo-blueprint
+{"declares":["clientLayout"],"schemaVersion":1,"name":"Hide referrals here","exportedAt":"2026-01-01T00:00:00.000Z","clientLayout":{"hidden":["referrals"]}}
+\`\`\`
+(Lever 13, not lever 4. "For this client" means \`clientLayout\`; only change \`layout\` when
+they mean the default for every client.)
+
+User: "Call Total Income 'Sales' everywhere."
+You: Renamed — it reads Sales across the app now.
+\`\`\`avilo-blueprint
+{"declares":["accountLabels"],"schemaVersion":1,"name":"Rename revenue","exportedAt":"2026-01-01T00:00:00.000Z","accountLabels":[{"id":"pl.revenue","label":"Sales"}]}
+\`\`\`
+(Lever 9. The id stays \`pl.revenue\` — you rename what is shown, never what it means.)
+
+User: "Delete the Overdue invoices view."
+You: Deleted.
+\`\`\`avilo-blueprint
+{"declares":["viewsPatch"],"schemaVersion":1,"name":"Delete a view","exportedAt":"2026-01-01T00:00:00.000Z","viewsPatch":{"remove":["overdue-invoices"]}}
+\`\`\`
+(\`viewsPatch\` names the one view. Doing this with \`views\` would mean resending every OTHER
+view perfectly, and forgetting one deletes it.)
 
 User: "What's missing for this client?"
 You: [answer from the Active client data section]
@@ -434,8 +568,19 @@ export const CLAIMS_AN_ACTION =
  */
 const SECTIONS: readonly BlueprintSection[] = [
   "formulas", "mappings", "prompts", "layout", "views",
-  "dashboard", "clientsTable", "landingTiles",
+  "dashboard", "clientsTable", "landingTiles", "accountLabels",
 ];
+
+/**
+ * Every lever a `declares` array may name — configuration plus the client-scoped ones.
+ *
+ * `viewsPatch` declares as `views`: it is the same lever reached a safer way, and making the
+ * author name a different word for "I am changing a view" would be a trap rather than a
+ * guard. The client levers are listed here because the declaration gate is what
+ * `applyClientLevers` checks against; one omitted from this list is unreachable in exactly
+ * the way the three arrangement levers once were.
+ */
+const DECLARABLE: readonly string[] = [...SECTIONS, "viewsPatch", ...CLIENT_LEVERS];
 
 /**
  * Pull the reply, the document, and the document's own `declares` list apart.
@@ -449,7 +594,8 @@ const SECTIONS: readonly BlueprintSection[] = [
 export function extractBlueprintBlock(text: string): {
   reply: string;
   candidate: unknown | null;
-  declared: BlueprintSection[] | null;
+  /** Configuration sections and client levers both, so `string[]` rather than the narrower union. */
+  declared: string[] | null;
 } {
   const match = /```avilo-blueprint\s*([\s\S]*?)```/.exec(text);
   if (!match) return { reply: text.trim(), candidate: null, declared: null };
@@ -458,8 +604,17 @@ export function extractBlueprintBlock(text: string): {
   try {
     const parsed = JSON.parse(match[1]!.trim()) as Record<string, unknown>;
     const raw = Array.isArray(parsed.declares) ? parsed.declares : null;
+    /*
+      `viewsPatch` is normalised to `views` here. The two are one lever — the patch is just a
+      safer way to reach it — and by the time `applyBlueprintDirectly` sees the document the
+      patch has already been resolved into a full `views` set, so a diff on it reports the
+      `views` section. An author that declared `viewsPatch` and had its change refused as
+      undeclared would be right and the guard would be wrong.
+    */
     const declared = raw
-      ? (raw.filter((d): d is BlueprintSection => SECTIONS.includes(d as BlueprintSection)))
+      ? raw
+          .filter((d): d is string => typeof d === "string" && DECLARABLE.includes(d))
+          .map((d) => (d === "viewsPatch" ? "views" : d))
       : null;
     return { reply, candidate: parsed, declared };
   } catch {
@@ -543,6 +698,70 @@ export async function converse(history: ChatTurn[], clientId?: string): Promise<
   }
 
   const summary = history[history.length - 1]?.text.slice(0, 120) ?? "Assistant change";
+  const doc = candidate as Record<string, unknown>;
+  const modelText0 = reply || raw.trim();
+
+  /*
+    A document can carry configuration sections, client-scoped sections, or both, and the
+    two are applied by different machinery for a reason that is not stylistic: configuration
+    is global and reversible through the blueprint snapshot, while a sticky note belongs to
+    one client and lives behind the MCP data boundary (see `client-levers.ts`).
+
+    Order matters. Configuration goes first and only if it succeeds do the client writes
+    happen, so the common failures — an invalid formula, an undeclared lever — leave nothing
+    half-applied. A document with no configuration sections skips that path entirely, because
+    otherwise `applyBlueprintDirectly` would correctly report an empty diff as `noChange` and
+    swallow a sticky note that was genuinely asked for.
+  */
+  const CONFIG_KEYS = [
+    "formulas", "mappings", "prompts", "layout", "views", "viewsPatch",
+    "dashboard", "clientsTable", "landingTiles", "accountLabels",
+  ];
+  const hasConfig = CONFIG_KEYS.some((k) => doc[k] !== undefined);
+  const hasClient = mentionsClientLever(doc);
+
+  const runClientLevers = (): { changes: string[] } | { errors: { path: string; message: string }[] } => {
+    if (!hasClient) return { changes: [] };
+    if (!clientId) {
+      return {
+        errors: [{
+          path: "$",
+          message: "That change belongs to one client, and no client is open. Open a client first.",
+        }],
+      };
+    }
+    const result = applyClientLevers(clientId, doc, declared ?? []);
+    return result.errors.length > 0 ? { errors: result.errors } : { changes: result.changes };
+  };
+
+  // Nothing to configure — the whole document is client-scoped.
+  if (!hasConfig) {
+    const result = runClientLevers();
+    if ("errors" in result) return { text: modelText0, proposalErrors: result.errors };
+    if (result.changes.length === 0) {
+      const nextStep = nextStepFor(declared ?? []);
+      return {
+        text: CLAIMS_AN_ACTION.test(modelText0)
+          ? "That is already how it is set up — nothing needed to change."
+          : modelText0,
+        noChange: true,
+        alreadyConfigured: { ...(nextStep ? { nextStep } : {}) },
+        ...(CLAIMS_AN_ACTION.test(modelText0)
+          ? { suppressed: { reason: "false-claim" as const, original: modelText0 } }
+          : {}),
+      };
+    }
+    const denied0 = deniesActing(modelText0);
+    return {
+      text: denied0 ? serverNarration(result.changes) : modelText0,
+      ...(denied0
+        ? { suppressed: { reason: "denied" as const, original: modelText0 } }
+        : {}),
+      appliedSummary: summary,
+      appliedChanges: result.changes,
+      clientChanges: result.changes,
+    };
+  }
 
   /*
     An omitted `declares` is treated as declaring nothing, so any diff at all is out of
@@ -551,7 +770,12 @@ export async function converse(history: ChatTurn[], clientId?: string): Promise<
     the model being careless about which levers its document touches. The refusal names the
     missing field, so the model can correct it on the next turn.
   */
-  const outcome = applyBlueprintDirectly("assistant", summary, candidate, declared ?? []);
+  // Only configuration sections are meaningful to the blueprint guard; a declared client
+  // lever is checked by `applyClientLevers` against its own list.
+  const declaredConfig = (declared ?? []).filter((d): d is BlueprintSection =>
+    SECTIONS.includes(d as BlueprintSection),
+  );
+  const outcome = applyBlueprintDirectly("assistant", summary, candidate, declaredConfig);
 
   if ("errors" in outcome) {
     return {
@@ -567,11 +791,28 @@ export async function converse(history: ChatTurn[], clientId?: string): Promise<
   */
   if ("noChange" in outcome) {
     const text = reply || raw.trim();
-    if (!CLAIMS_AN_ACTION.test(text)) return { text, noChange: true };
-    // It said it did something. It did not. The user reads the server's sentence, not that one.
+    const nextStep = nextStepFor(declared ?? []);
+
+    /*
+      The document matched what is already live. That is NOT a false claim — the request was
+      in scope, and the configuration already delivers it. Answering "nothing was changed"
+      and listing the levers is the copy for a request that cannot be done, and showing it
+      here is what makes a working capability read as a missing one.
+
+      A model that said it acted is still wrong about this turn, so its wording is withheld
+      as before; what replaces it now says the request is already satisfied and names the
+      step that is actually outstanding.
+    */
+    const settled = nextStep
+      ? `That is already how it is configured. ${nextStep}`
+      : "That is already how it is configured — the document I produced matches what is live, so nothing needed to change.";
+
+    if (!CLAIMS_AN_ACTION.test(text)) {
+      return { text, noChange: true, alreadyConfigured: { ...(nextStep ? { nextStep } : {}) } };
+    }
     return {
-      text: "I did not change anything — the document I produced matches the configuration already in place.",
-      falseClaim: true,
+      text: settled,
+      alreadyConfigured: { ...(nextStep ? { nextStep } : {}) },
       suppressed: { reason: "false-claim", original: text },
     };
   }
@@ -589,6 +830,21 @@ export async function converse(history: ChatTurn[], clientId?: string): Promise<
     };
   }
 
+  /*
+    Configuration landed. Client-scoped writes happen now, after the reversible part has
+    succeeded, so a failure here cannot leave a formula half-changed.
+  */
+  const clientResult = runClientLevers();
+  if ("errors" in clientResult) {
+    return {
+      text: modelText0,
+      appliedSummary: outcome.proposal.summary,
+      appliedChanges: outcome.proposal.diff.map(describeBlueprintChange),
+      revertId: outcome.revertId,
+      proposalErrors: clientResult.errors,
+    };
+  }
+
   const applied = outcome.proposal.diff;
   const actualSections = new Set(applied.map((c) => c.section));
   const claimedSections = levelsClaimedInProse(reply || raw.trim());
@@ -599,7 +855,9 @@ export async function converse(history: ChatTurn[], clientId?: string): Promise<
     diff is imprecise, not false, and the change list beneath it is the record either way.
   */
   const misdescribed = [...claimedSections].filter((c) => !actualSections.has(c));
-  const changes = applied.map(describeBlueprintChange);
+  // Client-scoped changes join the same list the user reads, but are tracked separately so
+  // the panel can say which of them Undo actually covers.
+  const changes = [...applied.map(describeBlueprintChange), ...clientResult.changes];
   const modelText = reply || raw.trim();
 
   /*
@@ -633,6 +891,7 @@ export async function converse(history: ChatTurn[], clientId?: string): Promise<
     appliedSummary: outcome.proposal.summary,
     appliedChanges: changes,
     revertId: outcome.revertId,
+    ...(clientResult.changes.length > 0 ? { clientChanges: clientResult.changes } : {}),
     ...(misdescribed.length > 0 ? { misdescribed } : {}),
   };
 }

@@ -97,7 +97,7 @@ enforced by the operating system.
 
 ## What you can change
 
-Eight levers. Everything else is source code, and source code is not reachable from here.
+Nine levers. Everything else is source code, and source code is not reachable from here.
 
 | Lever | What it is |
 |---|---|
@@ -106,9 +106,39 @@ Eight levers. Everything else is source code, and source code is not reachable f
 | `prompts` | `accounting_guidance` and `narrative_guidance`, overridable at runtime. |
 | `layout` | The default report section order, and which sections are hidden. |
 | `views` | Whole screens, composed from a closed component registry. |
+| `viewsPatch` | Add, replace or delete individual views without resending the set. |
 | `dashboard` | Which panels the client dashboard shows, and in what order. |
 | `clientsTable` | Which columns the clients list shows, and in what order. |
 | `landingTiles` | Which portfolio aggregates appear as tiles above the clients list. |
+| `accountLabels` | The display name of a canonical account. The id stays closed. |
+
+### A formula carries more than an expression
+
+Besides `expression`, an entry may set `label`, `description`, `unit` (`currency`,
+`percent`, `days`, `ratio`, `count`), `sortOrder`, `active`, and `benchmark`
+(`{min, max, note}` or `null` to clear). Send only the fields you are changing.
+
+`active: false` hides a metric everywhere **without deleting it** — its definition and
+version history survive. That is the answer to "stop showing this metric"; deleting the
+formula is not.
+
+`benchmark` is the one place a number enters a blueprint, and it is a threshold the advisor
+sets rather than a reading from the books. No displayed figure is sourced from it; it only
+decides what colour an independently computed figure is drawn in.
+
+### Prefer `viewsPatch` over `views`
+
+`views` replaces the whole set — forgetting to resend one deletes it. `viewsPatch` names the
+views you mean: `{"upsert": [<whole view>], "remove": ["<view id>"]}`. Sending both in one
+document is refused.
+
+### What the in-app assistant can do that you cannot
+
+The assistant panel inside the running app has four further levers — a client's sticky
+notes, action assignments, client metadata, and that one client's report layout. **They are
+not on this server and will not be.** They write rows belonging to a client, and the whole
+point of the boundary below is that an external agent cannot reach those. They live in a
+module this server's import graph does not contain, checked by the same test.
 
 ### Arranging a surface
 

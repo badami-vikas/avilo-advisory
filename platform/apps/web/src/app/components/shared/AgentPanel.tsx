@@ -28,7 +28,9 @@ interface ChatTurn {
   appliedSummary?: string;
   appliedChanges?: string[];
   revertId?: string;
+  clientChanges?: string[];
   noChange?: true;
+  alreadyConfigured?: { nextStep?: string };
   falseClaim?: true;
   outOfScope?: { declared: string[]; undeclared: string[]; changes: string[] };
   misdescribed?: string[];
@@ -47,13 +49,21 @@ interface ChatTurn {
 function AppliedCard({
   summary,
   changes,
+  clientChanges,
   revertId,
   reverted,
   onReverted,
 }: {
   summary: string;
   changes: string[];
-  revertId: string;
+  /**
+   * The subset of `changes` written to this client's own rows. Undo does not cover them —
+   * it activates a configuration snapshot — and a button that silently does less than it
+   * appears to is the kind of claim this panel exists to prevent, so the card says so.
+   */
+  clientChanges: string[];
+  /** Absent when the turn only touched client-scoped things, which have no snapshot. */
+  revertId?: string;
   reverted: boolean;
   onReverted: (id: string) => void;
 }) {
@@ -61,6 +71,7 @@ function AppliedCard({
   const [error, setError] = useState<string | null>(null);
 
   const undo = async () => {
+    if (!revertId) return;
     setBusy(true);
     setError(null);
     try {
@@ -88,7 +99,14 @@ function AppliedCard({
         </ul>
       ) : null}
       {error ? <p className="mt-1.5 text-[11px] text-flag">{error}</p> : null}
-      {reverted ? null : (
+      {clientChanges.length > 0 ? (
+        <p className="mt-1.5 text-[11px] leading-relaxed text-ink-faint">
+          {revertId
+            ? "Undo reverses the configuration changes. This client’s own notes, actions and layout stay — edit or delete those where they appear."
+            : "This client’s own notes, actions and layout aren’t covered by Undo — edit or delete them where they appear."}
+        </p>
+      ) : null}
+      {reverted || !revertId ? null : (
         <div className="mt-2">
           <Button size="sm" onClick={() => void undo()} disabled={busy}>
             {busy ? "Undoing…" : "Undo"}
@@ -228,7 +246,9 @@ export function AgentPanelBody({ collapsed, clientId }: { collapsed: boolean; cl
           appliedSummary: reply.appliedSummary,
           appliedChanges: reply.appliedChanges,
           revertId: reply.revertId,
+          clientChanges: reply.clientChanges,
           noChange: reply.noChange,
+          alreadyConfigured: reply.alreadyConfigured,
           falseClaim: reply.falseClaim,
           outOfScope: reply.outOfScope,
           misdescribed: reply.misdescribed,
@@ -253,14 +273,15 @@ export function AgentPanelBody({ collapsed, clientId }: { collapsed: boolean; cl
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 py-3">
         {turns.length === 0 ? (
           <div className="rounded-lg border border-dashed border-line p-3 text-[11.5px] leading-relaxed text-ink-muted">
-            Ask how a figure is computed, or ask for a change to a formula, a QuickBooks
-            mapping, or an AI prompt. A proposed change is recorded here for you to apply
-            or dismiss — nothing changes until you say so.
+            Ask how a figure is computed, or ask it to change something: a formula, how the
+            summary reads, which sections and columns appear, or a whole new view. Changes
+            apply straight away, with an Undo here.
             {clientId ? (
               <>
                 {" "}
-                With a client open, it can also see that client's imported periods and
-                which accounts have no data.
+                With this client open it can also add a sticky note, assign an action, set
+                their stage, arrange their report, and tell you which of their accounts have
+                no data.
               </>
             ) : null}
           </div>
@@ -294,12 +315,30 @@ export function AgentPanelBody({ collapsed, clientId }: { collapsed: boolean; cl
                 </p>
               </details>
             ) : null}
+            {/*
+              Already-configured is NOT a refusal, and must never be dressed as one. The red
+              card below lists what the assistant can do, which is the right answer to "you
+              can't do that" and precisely the wrong answer to "you already did that" — a
+              user shown it on an in-scope request concludes the capability is missing. This
+              one is neutral, and carries the step actually left to take.
+            */}
+            {turn.alreadyConfigured ? (
+              <div className="mt-2 rounded-lg border border-line bg-canvas p-2.5 text-[11.5px] leading-relaxed text-ink-muted">
+                <span className="font-medium text-ink">Already set up that way.</span> No
+                change was needed.
+                {turn.alreadyConfigured.nextStep ? (
+                  <p className="mt-1">{turn.alreadyConfigured.nextStep}</p>
+                ) : null}
+              </div>
+            ) : null}
             {turn.falseClaim ? (
               <div className="mt-2 rounded-lg border border-flag/40 bg-flag/5 p-2.5 text-[11.5px] leading-relaxed text-flag">
                 <span className="font-medium">Nothing was changed.</span> The assistant can
                 change formulas, QuickBooks mappings, AI prompts, the report layout, the
-                dashboard panels, the clients-list columns and tiles, and it can build views
-                — never the app&rsquo;s header, navigation or figures.
+                dashboard panels, the clients-list columns and tiles, account names, and it
+                can build views. With a client open it can also write their sticky notes,
+                assign actions, set their stage and arrange their report — never the
+                app&rsquo;s header, navigation or figures.
               </div>
             ) : null}
             {turn.outOfScope ? (
@@ -334,17 +373,23 @@ export function AgentPanelBody({ collapsed, clientId }: { collapsed: boolean; cl
                 change list.
               </p>
             ) : null}
-            {turn.noChange ? (
+            {turn.noChange && !turn.alreadyConfigured ? (
               <p className="mt-1.5 text-[11px] text-ink-faint">
                 No configuration change was made.
               </p>
             ) : null}
-            {turn.revertId ? (
+            {/*
+              A client-scoped change has no `revertId` — the blueprint snapshot only covers
+              configuration — so the card renders on the change list rather than on the
+              presence of an Undo, and says which changes Undo actually reaches.
+            */}
+            {turn.appliedChanges?.length ? (
               <AppliedCard
                 summary={turn.appliedSummary ?? ""}
-                changes={turn.appliedChanges ?? []}
+                changes={turn.appliedChanges}
+                clientChanges={turn.clientChanges ?? []}
                 revertId={turn.revertId}
-                reverted={decided[turn.revertId] === "reverted"}
+                reverted={turn.revertId ? decided[turn.revertId] === "reverted" : false}
                 onReverted={(id) =>
                   setDecided((current) => ({ ...current, [id]: "reverted" }))
                 }

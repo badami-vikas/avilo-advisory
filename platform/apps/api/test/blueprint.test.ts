@@ -57,21 +57,25 @@ describe("blueprint propose/activate/reject", () => {
     expect("proposal" in outcome).toBe(true);
     if (!("proposal" in outcome)) throw new Error("expected a proposal");
     expect(outcome.proposal.status).toBe("proposed");
-    expect(outcome.proposal.diff).toEqual([
-      {
-        section: "formulas",
-        key: "dso",
-        kind: "modify",
-        before: {
-          id: "dso",
-          expression: "ar.total / avg3.pl.revenue * 30",
-          label: "Days sales outstanding (DSO)",
-          description:
-            "Average days to collect. Outstanding receivables divided by trailing three-month average revenue.",
-        },
-        after: { id: "dso", expression: "ar.total / avg3.pl.revenue * 45" },
+    /*
+      `toMatchObject` on the fields this test is about, not `toEqual` on the whole record.
+      `currentConfiguration` reports a formula's presentation fields too — unit, sortOrder,
+      active, benchmark — because the diff has to detect a change to any of them. Pinning the
+      exact key set here would make every future presentation field a failure in a test about
+      whether proposing writes to the live table, which is not what it is checking.
+    */
+    expect(outcome.proposal.diff).toHaveLength(1);
+    expect(outcome.proposal.diff[0]).toMatchObject({
+      section: "formulas",
+      key: "dso",
+      kind: "modify",
+      before: {
+        id: "dso",
+        expression: "ar.total / avg3.pl.revenue * 30",
+        label: "Days sales outstanding (DSO)",
       },
-    ]);
+      after: { id: "dso", expression: "ar.total / avg3.pl.revenue * 45" },
+    });
 
     const live = db
       .getDb()

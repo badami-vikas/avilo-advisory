@@ -164,6 +164,7 @@ export function currentConfiguration(): {
   dashboard?: ArrangementOverride;
   clientsTable?: ArrangementOverride;
   landingTiles?: ArrangementOverride;
+  accountLabels?: AviloBlueprint["accountLabels"];
 } {
   const db = getDb();
   const formulas = db.select().from(schema.formulas).all().map((f) => ({
@@ -171,7 +172,46 @@ export function currentConfiguration(): {
     expression: f.expression,
     label: f.label,
     ...(f.description ? { description: f.description } : {}),
+    unit: f.unit,
+    sortOrder: f.sortOrder,
+    active: f.active,
+    // Stored as a JSON string; a corrupt band reads as absent rather than blocking a diff.
+    ...(f.benchmark
+      ? (() => {
+          try {
+            return { benchmark: JSON.parse(f.benchmark) as { min?: number; max?: number; note?: string } };
+          } catch {
+            return {};
+          }
+        })()
+      : {}),
   }));
+
+  /*
+    Only accounts whose label or description DIFFERS from the shipped definition.
+
+    Carrying all sixty would make every blueprint noisy and every diff meaningless; the
+    interesting state is "what has this installation renamed". An account back at its
+    shipped label drops out of the set, which is also what makes renaming one back a
+    real, diffable change.
+  */
+  const shipped = new Map(CANONICAL_ACCOUNTS.map((a) => [a.id, a]));
+  const accountLabels = db
+    .select()
+    .from(schema.accounts)
+    .all()
+    .flatMap((a) => {
+      const base = shipped.get(a.id);
+      if (!base) return [];
+      const labelChanged = a.label !== base.label;
+      const descChanged = (a.description ?? "") !== (base.description ?? "");
+      if (!labelChanged && !descChanged) return [];
+      return [{
+        id: a.id,
+        ...(labelChanged ? { label: a.label } : {}),
+        ...(descChanged ? { description: a.description ?? "" } : {}),
+      }];
+    });
   const mappings = db.select().from(schema.labelMappings).all().map((m) => ({
     reportType: m.reportType,
     rawLabel: m.rawLabel,
@@ -212,6 +252,7 @@ export function currentConfiguration(): {
     ...(dashboard ? { dashboard } : {}),
     ...(clientsTable ? { clientsTable } : {}),
     ...(landingTiles ? { landingTiles } : {}),
+    ...(accountLabels.length > 0 ? { accountLabels } : {}),
   };
 }
 
